@@ -1,7 +1,7 @@
 {
   "name": "@cclrte/info",
   "version": "0.4.0",
-  "description": "A simple Markdown knowledge base for coding agents with local search, auditable capture, and derived backlinks.",
+  "description": "A local-first Markdown knowledge base for coding agents with auditable web and PDF capture, explicit wikilink graphs, derived backlinks, and local keyword or embedding search.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,

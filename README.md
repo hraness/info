@@ -2,8 +2,12 @@
 
 agent librarian.
 
-info keeps a coding agent's durable memory in ordinary Markdown and Git. its CLI
-captures sources, maintains links and indexes, and searches locally.
+info keeps a coding agent's sources, notes, and plans in ordinary Markdown files
+you can open in Obsidian and version with Git. it captures public or signed-in
+web pages and converts local or remote PDFs into auditable bundles with
+provenance and local assets. it filters typed frontmatter, traverses explicit
+wikilinks and derived backlinks, checks the graph, and searches locally by
+keyword or meaning with a rebuildable embedding index.
 
 ```sh
 bun add --global github:hraness/info#v0.4.0
@@ -18,11 +22,11 @@ search uses a replaceable local QMD index; Markdown remains the source of truth.
 <!-- article:a-durable-knowledge-base-is-a-write-path:start -->
 ## [A knowledge base for your coding agents](<https://hraness.pub/articles/a-durable-knowledge-base-is-a-write-path>)
 
-> Coding agents need memory that survives the chat. hraness/info keeps it in Markdown and Git, with local search and deterministic structure.
+> Coding agents need memory that survives the chat. hraness/info keeps it in ordinary Markdown files with web and PDF capture, explicit link graphs, and local search.
 
 A coding agent can inspect a repository and finish a task, then begin the next session without the decisions, evidence, or rejected approaches that shaped the first one. A longer context window delays that loss. It does not create maintained memory that another agent can inspect and improve.
 
-[hraness/info is an open-source knowledge base for coding agents](<https://github.com/hraness/info>) handles exact metadata and links; local semantic search helps when the right note uses different words. The package stays deliberately close to files so a team can change agents, editors, or search tools without migrating its memory.
+[hraness/info](<https://github.com/hraness/info>) is an open-source knowledge base for coding agents. It captures web pages and PDFs, filters exact metadata, derives link graphs from explicit wikilinks, and runs local keyword or embedding search. The package stays deliberately close to files so a team can change agents, editors, or search tools without migrating its memory.
 
 ![Four icon cards show sources flowing into durable memory, linked ideas, and search for reuse by future coding-agent sessions.](<https://hraness.pub/article-diagrams/a-durable-knowledge-base-is-a-write-path.light.webp>)
 
@@ -72,7 +76,7 @@ A capture produces readable Markdown beside `capture.json` and any localized ass
 
 Media follows the same evidence rule. Images from ordinary pages, X, LinkedIn, and other rendered surfaces are localized into the bundle, while exposed video posters remain inspectable without downloading the full video. A normal YouTube capture adds available title, description, duration, channel, thumbnail, and transcript context; full audio or video remains an explicit opt-in.
 
-PDFs use the same durable bundle whether the input is a local path or a public HTTP(S) URL. `info pdf` sends remote input through the same DNS-pinned, private-network-denying acquisition boundary as web capture, then removes sensitive URL parameters before saving provenance. Local and remote captures keep the original PDF byte-for-byte, infer headings from native layout, extract every embedded image, and use local OCR for scans and screenshots.
+PDFs use the same durable bundle whether the input is a local path or a public HTTP(S) URL. `info pdf` sends remote input through the same DNS-pinned, private-network-denying acquisition boundary as web capture, then removes sensitive URL parameters before saving provenance. Local and remote captures keep the original PDF byte-for-byte, infer headings from native layout, extract embedded images within recorded bounds, and use local OCR for scans and screenshots.
 
 **Capture a local or public remote PDF**
 
@@ -89,7 +93,7 @@ The bundle is evidence, not the final interpretation. A maintained note can cite
 
 Some retrieval questions have exact answers. Frontmatter values such as `type`, `status`, `area`, dates, aliases, and tags are parsed into bounded scalar, list, and nested-object values. `info list` can filter repeated fields with AND semantics, match tags case-insensitively, follow dotted metadata paths, and sort with a stable path tie-breaker. The parser makes these queries deterministic; it does not impose one domain schema on every vault.
 
-Links answer a different exact question: which relationships did an author state? Vault-root wikilinks are contextual edges. The scanner resolves them by path, title, or alias and reports broken or ambiguous targets rather than guessing. Backlinks reverse resolved links at read time. Generated catalog links in `index.md` do not count as context, and a title mentioned in prose is only a review candidate until an author links it.
+Links answer a different exact question: which relationships did an author state? Vault-root wikilinks are contextual edges. The scanner resolves each target as an exact or relative path, or as a unique basename, and reports broken or ambiguous targets rather than guessing. The `info links` and `info backlinks` commands can resolve a note argument by path, title, or alias. Backlinks reverse resolved links at read time. Generated catalog links in `index.md` do not count as context, and a title mentioned in prose is only a review candidate until an author links it.
 
 **Exact metadata filtering and bounded link traversal**
 
