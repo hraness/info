@@ -1,8 +1,19 @@
-# hraness/info
+# info
 
-hraness/info is a simple, local-first command-line tool for an Obsidian-compatible Markdown knowledge base for coding agents. It keeps notes readable without the tool, queries typed frontmatter, derives a deterministic link graph from explicit wikilinks, offers optional local semantic recall, and captures web and PDF sources as auditable bundles instead of opaque blobs.
+agent librarian.
 
-The CLI is Bun-first. Refresh, graph navigation, exact metadata queries, and capture do not require a model, an API key, a database, or a hosted service. Semantic search uses a replaceable local QMD index; Markdown remains the source of truth.
+info keeps a coding agent's durable memory in ordinary Markdown and Git. its CLI
+captures sources, maintains links and indexes, and searches locally.
+
+```sh
+bun add --global github:hraness/info#v0.4.0
+```
+
+[article](https://hraness.pub/articles/a-durable-knowledge-base-is-a-write-path)
+
+the CLI is Bun-first. refresh, graph navigation, exact metadata queries, and
+capture do not require a model, API key, database, or hosted service. semantic
+search uses a replaceable local QMD index; Markdown remains the source of truth.
 
 <!-- article:a-durable-knowledge-base-is-a-write-path:start -->
 ## [A knowledge base for your coding agents](<https://hraness.pub/articles/a-durable-knowledge-base-is-a-write-path>)
