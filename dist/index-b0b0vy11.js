@@ -1,7 +1,7 @@
 // @bun
 import {
   BoundedByteBuffer
-} from "./index-efcktfvv.js";
+} from "./index-gh719d91.js";
 
 // src/clip/network.ts
 import { lookup } from "dns/promises";
@@ -273,12 +273,27 @@ function requestHeaders(headers) {
   });
   return result;
 }
-function nodeTransport(request) {
+function requestPinnedNetworkAddress(request) {
   const hostname = normalizeHostname(request.url.hostname);
+  if (request.url.protocol !== "http:" && request.url.protocol !== "https:") {
+    return Promise.reject(new Error(`unsupported pinned request protocol: ${request.url.protocol}`));
+  }
+  if (isIP(request.address.address) !== request.address.family) {
+    return Promise.reject(new Error("pinned request address does not match its declared family"));
+  }
+  const hostnameFamily = isIP(hostname);
+  if (hostnameFamily !== 0) {
+    const hostnameKey = comparableAddressKeys(hostname)[0];
+    const pinnedKey = comparableAddressKeys(request.address.address)[0];
+    const pinnedAddressHasScope = normalizeHostname(request.address.address) !== addressWithoutScope(request.address.address);
+    if (hostnameFamily !== request.address.family || pinnedAddressHasScope || hostnameKey === undefined || hostnameKey !== pinnedKey) {
+      return Promise.reject(new Error("IP-literal request hostname does not match the pinned address"));
+    }
+  }
   const requestOptions = {
     protocol: request.url.protocol,
     hostname,
-    method: "GET",
+    method: request.method,
     path: `${request.url.pathname}${request.url.search}`,
     headers: requestHeaders(request.headers),
     lookup: createPinnedLookup(request.address),
@@ -306,7 +321,7 @@ function nodeTransport(request) {
       ...isIP(hostname) === 0 ? { servername: hostname } : {}
     }, onResponse) : requestHttp(requestOptions, onResponse);
     clientRequest.once("error", reject);
-    clientRequest.end();
+    clientRequest.end(request.body ?? undefined);
   });
 }
 function retryDelay(response, attempt) {
@@ -365,7 +380,7 @@ function buildHeaders(current, originalUrl, options) {
 }
 function createSafeFetch(dependencies = {}) {
   const resolveHostname = dependencies.resolveHostname ?? systemResolveHostname;
-  const transport = dependencies.transport ?? nodeTransport;
+  const transport = dependencies.transport ?? requestPinnedNetworkAddress;
   const getLocalNetworkAddresses = dependencies.getLocalNetworkAddresses ?? systemLocalNetworkAddresses;
   return async (url, options) => {
     const maxRedirects = options.maxRedirects ?? 8;
@@ -393,7 +408,9 @@ function createSafeFetch(dependencies = {}) {
           response = await beforeDeadline(transport({
             url: new URL(current),
             address,
+            method: "GET",
             headers: buildHeaders(current, originalUrl, options),
+            body: null,
             signal: controller.signal
           }), deadline, `request timed out after ${options.timeoutMs}ms: ${current.href}`);
           if (!retryableStatuses.has(response.status) || attempt === retries) {
@@ -492,4 +509,4 @@ function decodeBytes(bytes, contentType) {
   return new TextDecoder(supported, { fatal: false }).decode(bytes);
 }
 
-export { FetchFailure, isPrivateAddress, isPrivateHostname, resolveSafeNetworkTarget, assertSafeNetworkUrl, createPinnedLookup, createSafeFetch, safeFetch, decodeBytes };
+export { FetchFailure, isPrivateAddress, isPrivateHostname, resolveSafeNetworkTarget, assertSafeNetworkUrl, createPinnedLookup, requestPinnedNetworkAddress, createSafeFetch, safeFetch, decodeBytes };

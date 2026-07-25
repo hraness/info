@@ -64,7 +64,9 @@ export type LocalNetworkAddressProvider = () => readonly string[];
 export type PinnedNetworkRequest = {
   readonly url: URL;
   readonly address: ResolvedNetworkAddress;
+  readonly method: string;
   readonly headers: Headers;
+  readonly body: Uint8Array | null;
   readonly signal: AbortSignal;
 };
 
@@ -420,12 +422,42 @@ function requestHeaders(headers: Headers): Readonly<Record<string, string>> {
   return result;
 }
 
-function nodeTransport(request: PinnedNetworkRequest): Promise<PinnedNetworkResponse> {
+/**
+ * Send exactly one HTTP(S) request through one previously validated address.
+ *
+ * This is a raw transport boundary: it does not resolve DNS, follow redirects, retry failures,
+ * interpret statuses, or accumulate the response body. Callers retain those higher-level policies.
+ */
+export function requestPinnedNetworkAddress(request: PinnedNetworkRequest): Promise<PinnedNetworkResponse> {
   const hostname = normalizeHostname(request.url.hostname);
+  if (request.url.protocol !== "http:" && request.url.protocol !== "https:") {
+    return Promise.reject(new Error(`unsupported pinned request protocol: ${request.url.protocol}`));
+  }
+  if (isIP(request.address.address) !== request.address.family) {
+    return Promise.reject(new Error("pinned request address does not match its declared family"));
+  }
+  const hostnameFamily = isIP(hostname);
+  if (hostnameFamily !== 0) {
+    const hostnameKey = comparableAddressKeys(hostname)[0];
+    const pinnedKey = comparableAddressKeys(request.address.address)[0];
+    const pinnedAddressHasScope =
+      normalizeHostname(request.address.address)
+      !== addressWithoutScope(request.address.address);
+    if (
+      hostnameFamily !== request.address.family
+      || pinnedAddressHasScope
+      || hostnameKey === undefined
+      || hostnameKey !== pinnedKey
+    ) {
+      return Promise.reject(
+        new Error("IP-literal request hostname does not match the pinned address"),
+      );
+    }
+  }
   const requestOptions: RequestOptions = {
     protocol: request.url.protocol,
     hostname,
-    method: "GET",
+    method: request.method,
     path: `${request.url.pathname}${request.url.search}`,
     headers: requestHeaders(request.headers),
     lookup: createPinnedLookup(request.address),
@@ -459,7 +491,7 @@ function nodeTransport(request: PinnedNetworkRequest): Promise<PinnedNetworkResp
         )
       : requestHttp(requestOptions, onResponse);
     clientRequest.once("error", reject);
-    clientRequest.end();
+    clientRequest.end(request.body ?? undefined);
   });
 }
 
@@ -525,7 +557,7 @@ export function createSafeFetch(
   dependencies: Partial<SafeFetchDependencies> = {},
 ): (url: URL, options: SafeFetchOptions) => Promise<SafeFetchResult> {
   const resolveHostname = dependencies.resolveHostname ?? systemResolveHostname;
-  const transport = dependencies.transport ?? nodeTransport;
+  const transport = dependencies.transport ?? requestPinnedNetworkAddress;
   const getLocalNetworkAddresses = dependencies.getLocalNetworkAddresses ?? systemLocalNetworkAddresses;
 
   return async (url, options) => {
@@ -562,7 +594,9 @@ export function createSafeFetch(
             transport({
               url: new URL(current),
               address,
+              method: "GET",
               headers: buildHeaders(current, originalUrl, options),
+              body: null,
               signal: controller.signal,
             }),
             deadline,

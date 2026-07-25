@@ -53,6 +53,10 @@
       "types": "./src/clip/cli.ts",
       "import": "./dist/clip/cli.js"
     },
+    "./clip/cookies": {
+      "types": "./src/clip/cookies.ts",
+      "import": "./dist/clip/cookies.js"
+    },
     "./clip/doctor": {
       "types": "./src/clip/doctor.ts",
       "import": "./dist/clip/doctor.js"
@@ -146,7 +150,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun -e 'await (await import(\"node:fs/promises\")).rm(\"./dist\", { recursive: true, force: true })' && bun build ./src/index.ts ./src/clip/browser-profiles.ts ./src/capture.ts ./src/clip/acquire.ts ./src/clip/args.ts ./src/clip/bounded-byte-buffer.ts ./src/clip/cli.ts ./src/clip/doctor.ts ./src/clip/network.ts ./src/clip/network-proxy.ts ./src/clip/persist.ts ./src/clip/terminal.ts ./src/graph.ts ./src/navigation.ts ./src/pdf.ts ./src/query.ts ./src/semantic.ts ./src/cli.ts ./src/clip/defuddle-worker.ts --outdir ./dist --root ./src --target bun --format esm --splitting --packages external",
+    "build": "bun -e 'await (await import(\"node:fs/promises\")).rm(\"./dist\", { recursive: true, force: true })' && bun build ./src/index.ts ./src/clip/browser-profiles.ts ./src/capture.ts ./src/clip/acquire.ts ./src/clip/args.ts ./src/clip/bounded-byte-buffer.ts ./src/clip/cli.ts ./src/clip/cookies.ts ./src/clip/doctor.ts ./src/clip/network.ts ./src/clip/network-proxy.ts ./src/clip/persist.ts ./src/clip/terminal.ts ./src/graph.ts ./src/navigation.ts ./src/pdf.ts ./src/query.ts ./src/semantic.ts ./src/cli.ts ./src/clip/defuddle-worker.ts --outdir ./dist --root ./src --target bun --format esm --splitting --packages external",
     "typecheck": "tsc --noEmit",
     "test": "bun test ./src",
     "test:package": "bun run ./scripts/package-smoke.ts",

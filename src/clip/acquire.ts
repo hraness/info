@@ -15,7 +15,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { getCookies, type BrowserName, type GetCookiesOptions } from "@steipete/sweet-cookie";
 
 import { captureUrl, type CaptureArguments } from "./args.js";
-import { BoundedByteBuffer } from "./bounded-byte-buffer.js";
+import { readBoundedByteStream } from "./bounded-byte-buffer.js";
 import {
   filterCookieProviderResult,
   readCookieFile,
@@ -133,18 +133,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 async function readBoundedStream(stream: ReadableStream<Uint8Array>, maxBytes: number): Promise<string> {
-  const reader = stream.getReader();
-  const bytes = new BoundedByteBuffer(maxBytes);
-  try {
-    for (;;) {
-      const result = await reader.read();
-      if (result.done) break;
-      if (!bytes.append(result.value)) throw new Error(`process output exceeded ${maxBytes} bytes`);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  return new TextDecoder().decode(bytes.toUint8Array());
+  const bytes = await readBoundedByteStream(stream, maxBytes, "process output");
+  return new TextDecoder().decode(bytes);
 }
 
 async function runCommand(

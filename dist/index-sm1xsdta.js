@@ -10,7 +10,7 @@ import {
 import {
   FetchFailure,
   safeFetch
-} from "./index-kvxzb85x.js";
+} from "./index-b0b0vy11.js";
 
 // src/clip/assets.ts
 import { createHash } from "crypto";

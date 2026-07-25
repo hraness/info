@@ -1,7 +1,7 @@
 // @bun
 import {
   startNetworkProxy
-} from "./index-11gveg0r.js";
+} from "./index-49bhdzht.js";
 import {
   classifyPlatformUrl
 } from "./index-hgve9rh2.js";
@@ -9,7 +9,7 @@ import {
   assertSafeNetworkUrl,
   decodeBytes,
   safeFetch
-} from "./index-kvxzb85x.js";
+} from "./index-b0b0vy11.js";
 import {
   sanitizeArtifactUrl
 } from "./index-ey9rycsn.js";
@@ -17,8 +17,13 @@ import {
   captureUrl
 } from "./index-0d3p9w68.js";
 import {
-  BoundedByteBuffer
-} from "./index-efcktfvv.js";
+  readBoundedByteStream
+} from "./index-gh719d91.js";
+import {
+  filterCookieProviderResult,
+  readCookieFile,
+  renderCookieHeader
+} from "./index-6mqdx02h.js";
 
 // src/clip/acquire.ts
 import {
@@ -33,450 +38,20 @@ import {
   writeFileSync
 } from "fs";
 import { homedir, tmpdir } from "os";
-import { basename, dirname as dirname2, isAbsolute, join as join2, relative, resolve as resolve3, sep } from "path";
+import { basename, dirname as dirname2, isAbsolute, join as join2, relative, resolve as resolve2, sep } from "path";
 import { getCookies } from "@steipete/sweet-cookie";
-
-// src/clip/cookies.ts
-import { closeSync, constants, fstatSync, openSync, readSync } from "fs";
-import { resolve } from "path";
-var MAX_COOKIE_RECORDS = 4096;
-var MAX_COOKIE_BYTES = 2 * 1024 * 1024;
-var cookieNamePattern = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
-var cookieValuePattern = /^[\x21\x23-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]*$/;
-var quotedCookieValuePattern = /^"[\x21\x23-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]*"$/;
-var cookieDomainPattern = /^[a-z0-9.-]+$/i;
-var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-var isUnknownArray = (value) => Array.isArray(value);
-function hasControlCharacter(value) {
-  for (let index = 0;index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code <= 31 || code === 127)
-      return true;
-  }
-  return false;
-}
-function canonicalHostname(value) {
-  const trimmed = value.trim().toLowerCase().replace(/^\.+/, "").replace(/\.$/, "");
-  if (trimmed === "" || trimmed.length > 253 || trimmed.includes("..") || !cookieDomainPattern.test(trimmed)) {
-    return null;
-  }
-  try {
-    const hostname = new URL(`http://${trimmed}/`).hostname.toLowerCase().replace(/\.$/, "");
-    return hostname === "" || hostname.length > 253 ? null : hostname;
-  } catch {
-    return null;
-  }
-}
-function domainMatches(hostname, domain, hostOnly) {
-  return hostname === domain || !hostOnly && hostname.endsWith(`.${domain}`);
-}
-function pathMatches(requestPath, cookiePath) {
-  if (requestPath === cookiePath)
-    return true;
-  if (!requestPath.startsWith(cookiePath))
-    return false;
-  return cookiePath.endsWith("/") || requestPath[cookiePath.length] === "/";
-}
-function safeCookiePath(value) {
-  const path = value === undefined ? "/" : value;
-  if (typeof path !== "string" || !path.startsWith("/") || path.length > 4096 || hasControlCharacter(path))
-    return null;
-  return path;
-}
-function cookieExpiry(value, nowSeconds) {
-  const raw = value.expires ?? value.expirationDate;
-  if (raw === undefined || raw === null)
-    return 0;
-  if (typeof raw !== "number" || !Number.isFinite(raw))
-    return null;
-  if (raw === 0)
-    return 0;
-  if (raw <= nowSeconds || raw > 253402300799)
-    return null;
-  return Math.trunc(raw);
-}
-function cookieSameSite(value) {
-  if (value.sameSite === undefined || value.sameSite === null)
-    return null;
-  if (typeof value.sameSite !== "string")
-    return;
-  switch (value.sameSite.toLowerCase()) {
-    case "strict":
-      return "Strict";
-    case "lax":
-      return "Lax";
-    case "none":
-    case "no_restriction":
-      return "None";
-    case "unspecified":
-      return null;
-    default:
-      return;
-  }
-}
-function candidateDomain(value, target) {
-  const targetHostname = target.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
-  let rawDomain;
-  if (typeof value.domain === "string")
-    rawDomain = value.domain;
-  else if (value.domain !== undefined)
-    return null;
-  let urlHostname;
-  if (value.url !== undefined) {
-    if (typeof value.url !== "string" || value.url.length > 8192)
-      return null;
-    try {
-      const url = new URL(value.url);
-      if (url.protocol !== "http:" && url.protocol !== "https:" || url.username !== "" || url.password !== "")
-        return null;
-      urlHostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
-    } catch {
-      return null;
-    }
-  }
-  if (rawDomain === undefined && urlHostname === undefined) {
-    return { domain: targetHostname, hostOnly: true };
-  }
-  const hadLeadingDot = rawDomain?.trim().startsWith(".") === true;
-  const domain = canonicalHostname(rawDomain ?? urlHostname ?? "");
-  if (domain === null)
-    return null;
-  const explicitHostOnly = value.hostOnly;
-  if (explicitHostOnly !== undefined && typeof explicitHostOnly !== "boolean")
-    return null;
-  const hostOnly = typeof explicitHostOnly === "boolean" ? explicitHostOnly : !hadLeadingDot;
-  if (!domainMatches(targetHostname, domain, hostOnly))
-    return null;
-  if (urlHostname !== undefined && !domainMatches(urlHostname, domain, hostOnly))
-    return null;
-  return { domain, hostOnly };
-}
-function hasSafeUnpartitionedProvenance(value) {
-  for (const field of ["partitionKey", "topFrameSiteKey", "top_frame_site_key", "originAttributes"]) {
-    const provenance = value[field];
-    if (provenance === undefined || provenance === null)
-      continue;
-    if (typeof provenance !== "string" || provenance.trim() !== "")
-      return false;
-  }
-  for (const field of ["partitioned"]) {
-    const flag = value[field];
-    if (flag === undefined || flag === null)
-      continue;
-    if (typeof flag !== "boolean" || flag)
-      return false;
-  }
-  for (const field of ["isPartitionedAttributeSet", "hasCrossSiteAncestor", "has_cross_site_ancestor"]) {
-    const flag = value[field];
-    if (flag === undefined || flag === null)
-      continue;
-    if (flag !== false && flag !== 0 && flag !== "0")
-      return false;
-  }
-  return true;
-}
-function validatedCookie(value, target, nowSeconds) {
-  if (!isRecord(value))
-    return null;
-  if (typeof value.name !== "string" || value.name.length > 1024 || !cookieNamePattern.test(value.name))
-    return null;
-  if (typeof value.value !== "string" || value.value.length > 64 * 1024 || !cookieValuePattern.test(value.value) && !quotedCookieValuePattern.test(value.value))
-    return null;
-  if (!hasSafeUnpartitionedProvenance(value))
-    return null;
-  const domain = candidateDomain(value, target);
-  const path = safeCookiePath(value.path);
-  const expires = cookieExpiry(value, nowSeconds);
-  const sameSite = cookieSameSite(value);
-  if (domain === null || path === null || expires === null || sameSite === undefined)
-    return null;
-  if (!pathMatches(target.pathname || "/", path))
-    return null;
-  if (value.secure !== undefined && typeof value.secure !== "boolean")
-    return null;
-  if (value.httpOnly !== undefined && typeof value.httpOnly !== "boolean")
-    return null;
-  const secure = value.secure === true;
-  if (secure && target.protocol !== "https:")
-    return null;
-  if (sameSite === "None" && !secure)
-    return null;
-  return {
-    name: value.name,
-    value: value.value,
-    domain: domain.domain,
-    hostOnly: domain.hostOnly,
-    path,
-    secure,
-    httpOnly: value.httpOnly === true,
-    sameSite,
-    expires
-  };
-}
-function cookieBytes(cookie) {
-  return Buffer.byteLength(`${cookie.domain}	${cookie.path}	${cookie.name}	${cookie.value}
-`, "utf8");
-}
-function filterCookies(values, target, nowSeconds = Math.floor(Date.now() / 1000)) {
-  const bounded = values.slice(0, MAX_COOKIE_RECORDS);
-  let rejected = Math.max(0, values.length - bounded.length);
-  let totalBytes = 0;
-  const cookies = new Map;
-  for (const value of bounded) {
-    const cookie = validatedCookie(value, target, nowSeconds);
-    if (cookie === null) {
-      rejected += 1;
-      continue;
-    }
-    const key = `${cookie.domain}\x00${cookie.hostOnly ? "host" : "domain"}\x00${cookie.path}\x00${cookie.name}`;
-    const previous = cookies.get(key);
-    const nextBytes = totalBytes - (previous === undefined ? 0 : cookieBytes(previous)) + cookieBytes(cookie);
-    if (nextBytes > MAX_COOKIE_BYTES) {
-      rejected += 1;
-      continue;
-    }
-    cookies.set(key, cookie);
-    totalBytes = nextBytes;
-  }
-  return {
-    cookies: [...cookies.values()].sort((left, right) => right.path.length - left.path.length || left.name.localeCompare(right.name) || left.domain.localeCompare(right.domain)),
-    rejected
-  };
-}
-function jsonCookieArray(value) {
-  if (isUnknownArray(value))
-    return value;
-  return isRecord(value) && isUnknownArray(value.cookies) ? value.cookies : null;
-}
-function parseJson(input) {
-  try {
-    return jsonCookieArray(JSON.parse(input));
-  } catch {
-    return null;
-  }
-}
-function parseBase64Json(input) {
-  const compact = input.replace(/\s+/g, "");
-  if (compact === "" || compact.length > MAX_COOKIE_BYTES * 2 || !/^[a-z0-9+/]+=*$/i.test(compact))
-    return null;
-  try {
-    const decoded = Buffer.from(compact, "base64");
-    return decoded.byteLength > MAX_COOKIE_BYTES ? null : parseJson(decoded.toString("utf8"));
-  } catch {
-    return null;
-  }
-}
-function hasExplicitCookieScope(value) {
-  if (!isRecord(value))
-    return false;
-  return typeof value.domain === "string" && value.domain.trim() !== "" || typeof value.url === "string" && value.url.trim() !== "";
-}
-function parseNetscape(input) {
-  const cookies = [];
-  let looksLikeNetscape = /^# Netscape HTTP Cookie File/im.test(input);
-  let cursor = 0;
-  while (cursor <= input.length && cookies.length <= MAX_COOKIE_RECORDS) {
-    const newline = input.indexOf(`
-`, cursor);
-    const lineEnd = newline === -1 ? input.length : newline;
-    const rawLine = input.slice(cursor, lineEnd).replace(/\r$/, "");
-    cursor = newline === -1 ? input.length + 1 : newline + 1;
-    const line = rawLine.trim();
-    if (line === "" || line.startsWith("#") && !line.startsWith("#HttpOnly_"))
-      continue;
-    if (line.length > 80 * 1024)
-      continue;
-    const columns = line.split("\t", 8);
-    if (columns.length < 7)
-      continue;
-    looksLikeNetscape = true;
-    const rawDomain = columns[0];
-    const includeSubdomains = columns[1];
-    const path = columns[2];
-    const secure = columns[3];
-    const rawExpires = columns[4];
-    const name = columns[5];
-    const value = columns.slice(6).join("\t");
-    if (rawDomain === undefined || includeSubdomains === undefined || path === undefined || secure === undefined || rawExpires === undefined || name === undefined)
-      continue;
-    const httpOnly = rawDomain.startsWith("#HttpOnly_");
-    const domain = httpOnly ? rawDomain.slice("#HttpOnly_".length) : rawDomain;
-    const expires = Number(rawExpires);
-    cookies.push({
-      name,
-      value,
-      domain,
-      hostOnly: includeSubdomains.toUpperCase() !== "TRUE",
-      path,
-      secure: secure.toUpperCase() === "TRUE",
-      httpOnly,
-      ...Number.isFinite(expires) && expires > 0 ? { expires } : {}
-    });
-  }
-  return looksLikeNetscape ? cookies : null;
-}
-function unquote(value) {
-  const trimmed = value.trim();
-  const first = trimmed[0];
-  return (first === "'" || first === '"') && trimmed.at(-1) === first ? trimmed.slice(1, -1) : trimmed;
-}
-function parseCookieHeaderValue(value, target) {
-  const cookies = [];
-  const restrictivePath = target.pathname === "" ? "/" : target.pathname;
-  let cursor = 0;
-  while (cursor <= value.length && cookies.length <= MAX_COOKIE_RECORDS) {
-    const delimiter = value.indexOf(";", cursor);
-    const pairEnd = delimiter === -1 ? value.length : delimiter;
-    const pair = value.slice(cursor, pairEnd);
-    cursor = delimiter === -1 ? value.length + 1 : delimiter + 1;
-    const separator = pair.indexOf("=");
-    if (separator < 1)
-      continue;
-    cookies.push({
-      name: pair.slice(0, separator).trim(),
-      value: pair.slice(separator + 1).trim(),
-      domain: target.hostname,
-      hostOnly: true,
-      path: restrictivePath,
-      secure: target.protocol === "https:",
-      httpOnly: true,
-      sameSite: "Strict"
-    });
-  }
-  return cookies;
-}
-function curlCookieValue(input) {
-  const patterns = [
-    /(?:^|\s)(?:-b|--cookie)(?:=|\s+)(('[^']*')|("[^"]*")|[^\s]+)/i,
-    /(?:^|\s)(?:-H|--header)(?:=|\s+)(('Cookie:\s*[^']*')|("Cookie:\s*[^"]*"))/i
-  ];
-  for (const pattern of patterns) {
-    const raw = pattern.exec(input)?.[1];
-    if (raw === undefined)
-      continue;
-    return { value: unquote(raw).replace(/^Cookie:\s*/i, ""), curl: true };
-  }
-  const header = /^Cookie:\s*([^\r\n]*)$/im.exec(input)?.[1];
-  if (header !== undefined)
-    return { value: header, curl: false };
-  const trimmed = input.trim();
-  return !trimmed.includes(`
-`) && trimmed.includes("=") ? { value: trimmed, curl: false } : null;
-}
-function parseCookiePayload(input, target, nowSeconds = Math.floor(Date.now() / 1000)) {
-  if (Buffer.byteLength(input, "utf8") > MAX_COOKIE_BYTES)
-    return { ok: false, reason: "too-large" };
-  if (input.trim() === "")
-    return { ok: false, reason: "empty" };
-  let values = parseJson(input);
-  let format = "json";
-  if (values === null) {
-    values = parseBase64Json(input);
-    format = "base64-json";
-  }
-  if (values === null) {
-    values = parseNetscape(input);
-    format = "netscape";
-  }
-  if (values === null) {
-    const header = curlCookieValue(input);
-    if (header !== null) {
-      values = parseCookieHeaderValue(header.value, target);
-      format = header.curl ? "curl" : "cookie-header";
-    }
-  }
-  if (values === null)
-    return { ok: false, reason: "invalid" };
-  const scopeProvenance = format === "netscape" || (format === "json" || format === "base64-json") && values.every(hasExplicitCookieScope) ? "explicit" : "target-inferred";
-  const filtered = filterCookies(values, target, nowSeconds);
-  return filtered.cookies.length === 0 ? { ok: false, reason: "empty" } : { ok: true, format, scopeProvenance, ...filtered };
-}
-function readCookieFile(path, target, options = {}) {
-  let descriptor;
-  try {
-    const absolute = resolve(path);
-    const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
-    const nonBlocking = "O_NONBLOCK" in constants ? constants.O_NONBLOCK : 0;
-    descriptor = openSync(absolute, constants.O_RDONLY | noFollow | nonBlocking);
-  } catch {
-    return { ok: false, reason: "unavailable" };
-  }
-  try {
-    options.afterOpen?.();
-    const stats = fstatSync(descriptor);
-    if (!stats.isFile())
-      return { ok: false, reason: "unavailable" };
-    if (options.requirePrivate === true && ((stats.mode & 63) !== 0 || typeof process.getuid === "function" && stats.uid !== process.getuid()))
-      return { ok: false, reason: "unsafe-permissions" };
-    if (stats.size > MAX_COOKIE_BYTES)
-      return { ok: false, reason: "too-large" };
-    const chunks = [];
-    const buffer = Buffer.allocUnsafe(64 * 1024);
-    let total = 0;
-    for (;; ) {
-      const count = readSync(descriptor, buffer, 0, buffer.byteLength, null);
-      if (count === 0)
-        break;
-      total += count;
-      if (total > MAX_COOKIE_BYTES)
-        return { ok: false, reason: "too-large" };
-      chunks.push(Buffer.from(buffer.subarray(0, count)));
-    }
-    let text;
-    try {
-      text = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, total));
-    } catch {
-      return { ok: false, reason: "invalid" };
-    }
-    return parseCookiePayload(text, target);
-  } catch {
-    return { ok: false, reason: "unavailable" };
-  } finally {
-    closeSync(descriptor);
-  }
-}
-function filterCookieProviderResult(value, target) {
-  if (!isRecord(value) || !Array.isArray(value.cookies)) {
-    return { validShape: false, cookies: [], rejected: 0, providerWarningCount: 0 };
-  }
-  const provenancePreserving = value.cookies.filter((cookie) => isRecord(cookie) && typeof cookie.hostOnly === "boolean");
-  const missingProvenance = value.cookies.length - provenancePreserving.length;
-  const filtered = filterCookies(provenancePreserving, target, Math.floor(Date.now() / 1000));
-  return {
-    validShape: true,
-    ...filtered,
-    rejected: filtered.rejected + missingProvenance,
-    providerWarningCount: Array.isArray(value.warnings) ? value.warnings.length : 0
-  };
-}
-function renderCookieHeader(cookies) {
-  return cookies.map(({ name, value }) => `${name}=${value}`).join("; ");
-}
-function renderNetscapeCookieJar(cookies, target) {
-  const hostname = target.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  return [
-    "# Netscape HTTP Cookie File",
-    "# Created temporarily by info clip; deleted after media capture.",
-    ...cookies.map((cookie) => {
-      const domain = `${cookie.httpOnly ? "#HttpOnly_" : ""}${hostname}`;
-      return `${domain}	FALSE	${cookie.path}	${cookie.secure ? "TRUE" : "FALSE"}	${cookie.expires}	${cookie.name}	${cookie.value}`;
-    }),
-    ""
-  ].join(`
-`);
-}
 
 // src/clip/package-root.ts
 import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
-import { dirname, join, resolve as resolve2 } from "path";
+import { dirname, join, resolve } from "path";
 function isPackageManifest(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function findInfoPackageRoot(startDirectory = import.meta.dir, dependencies = {}) {
   const exists = dependencies.exists ?? existsSync;
   const readText = dependencies.readText ?? ((path) => readFileSync(path, "utf8"));
-  let directory = resolve2(startDirectory);
+  let directory = resolve(startDirectory);
   for (let depth = 0;depth < 8; depth += 1) {
     const manifestPath = join(directory, "package.json");
     if (exists(manifestPath)) {
@@ -543,22 +118,10 @@ function createAgentBrowserIsolation(directory) {
     throw error;
   }
 }
-var isRecord2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 async function readBoundedStream(stream, maxBytes) {
-  const reader = stream.getReader();
-  const bytes = new BoundedByteBuffer(maxBytes);
-  try {
-    for (;; ) {
-      const result = await reader.read();
-      if (result.done)
-        break;
-      if (!bytes.append(result.value))
-        throw new Error(`process output exceeded ${maxBytes} bytes`);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  return new TextDecoder().decode(bytes.toUint8Array());
+  const bytes = await readBoundedByteStream(stream, maxBytes, "process output");
+  return new TextDecoder().decode(bytes);
 }
 async function runCommand(command, timeoutMs, maxOutputBytes, isolation, stdin) {
   const child = Bun.spawn([...command], {
@@ -610,7 +173,7 @@ function parseJsonValueOutput(output, label) {
 }
 function parseJsonOutput(output, label) {
   const parsed = parseJsonValueOutput(output, label);
-  if (isRecord2(parsed))
+  if (isRecord(parsed))
     return parsed;
   throw new Error(`${label} did not return a JSON object`);
 }
@@ -619,7 +182,7 @@ function parseAgentBrowserData(output, label) {
   if (parsed.success !== true) {
     throw new Error(`${label} failed`);
   }
-  if (!isRecord2(parsed.data))
+  if (!isRecord(parsed.data))
     throw new Error(`${label} returned no data`);
   return parsed.data;
 }
@@ -641,7 +204,7 @@ async function runAgentBrowserBatch(globalArgs, commands, options) {
   if (result.exitCode !== 0)
     throw new Error(`agent-browser batch failed with exit code ${result.exitCode}`);
   const parsed = parseJsonValueOutput(result.stdout, "agent-browser batch");
-  if (!Array.isArray(parsed) || parsed.length !== commands.length || parsed.some((entry) => !isRecord2(entry) || entry.success !== true))
+  if (!Array.isArray(parsed) || parsed.length !== commands.length || parsed.some((entry) => !isRecord(entry) || entry.success !== true))
     throw new Error("agent-browser batch failed");
 }
 async function discoverChromeProfiles(timeoutMs = 15000) {
@@ -659,7 +222,7 @@ async function discoverChromeProfiles(timeoutMs = 15000) {
       return [];
     const profiles = [];
     for (const entry of parsed.data) {
-      if (!isRecord2(entry))
+      if (!isRecord(entry))
         continue;
       if (typeof entry.directory !== "string" || typeof entry.name !== "string")
         continue;
@@ -857,7 +420,7 @@ function browserExpansionScript(limits) {
 }
 var nonNegativeInteger = (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 function readBrowserExpansionTelemetry(value, limits) {
-  if (!isRecord2(value))
+  if (!isRecord(value))
     return null;
   const scrolls = nonNegativeInteger(value.scrolls);
   if (!Array.isArray(value.renderedTextSnapshots))
@@ -965,7 +528,7 @@ function pathInside(root, target) {
 }
 function canonicalPotentialPath(value, label) {
   const suffix = [];
-  let ancestor = resolve3(value);
+  let ancestor = resolve2(value);
   while (true) {
     try {
       lstatSync(ancestor);
@@ -975,7 +538,7 @@ function canonicalPotentialPath(value, label) {
       } catch {
         throw new Error(`${label} contains an unresolved symbolic link.`);
       }
-      return resolve3(canonicalAncestor, ...suffix);
+      return resolve2(canonicalAncestor, ...suffix);
     } catch (error) {
       if (error.code !== "ENOENT")
         throw error;
@@ -991,7 +554,7 @@ function profilePath(value) {
   const pathLike = isAbsolute(value) || value.startsWith(`.${sep}`) || value.startsWith(`..${sep}`) || value.startsWith(`~${sep}`) || value.includes("/") || value.includes("\\");
   if (!pathLike)
     return null;
-  const expanded = value.startsWith(`~${sep}`) ? join2(homedir(), value.slice(2)) : resolve3(value);
+  const expanded = value.startsWith(`~${sep}`) ? join2(homedir(), value.slice(2)) : resolve2(value);
   return canonicalPotentialPath(expanded, "Persistent browser profile");
 }
 function assertSafePersistentProfile(options) {
@@ -1225,7 +788,7 @@ async function acquireBrowser(options, temporaryDirectory, useDiscoveredProfile 
       if (browserPageProvenanceIntact) {
         try {
           const capture = await runBrowser(globalArgs, ["eval", browserCaptureScript()], commandOptions);
-          if (isRecord2(capture.result)) {
+          if (isRecord(capture.result)) {
             const html = capture.result.html;
             const title = capture.result.title;
             const captureUrl2 = typeof capture.result.url === "string" ? new URL(capture.result.url) : null;
@@ -1475,4 +1038,4 @@ async function acquireFile(options) {
   };
 }
 
-export { MAX_COOKIE_BYTES, filterCookies, readCookieFile, filterCookieProviderResult, renderCookieHeader, renderNetscapeCookieJar, findInfoPackageRoot, agentBrowserCommand, isolatedAgentBrowserEnvironment, discoverChromeProfiles, mergeRenderedTextSnapshots, browserExpansionLimits, browserExpansionScript, readBrowserExpansionTelemetry, browserExpansionWarnings, browserExpansionStayedOnPage, browserNavigationReachedTarget, assertSafePersistentProfile, browserCookieCommands, seedOwnedBrowserCookies, browserProxyArguments, acquireBrowser, acquireHttp, acquireCookieHttp, createCookieRecordReader, createCookieHeaderReader, acquireCookieRecords, acquireCookieHeader, acquireFile };
+export { findInfoPackageRoot, agentBrowserCommand, isolatedAgentBrowserEnvironment, discoverChromeProfiles, mergeRenderedTextSnapshots, browserExpansionLimits, browserExpansionScript, readBrowserExpansionTelemetry, browserExpansionWarnings, browserExpansionStayedOnPage, browserNavigationReachedTarget, assertSafePersistentProfile, browserCookieCommands, seedOwnedBrowserCookies, browserProxyArguments, acquireBrowser, acquireHttp, acquireCookieHttp, createCookieRecordReader, createCookieHeaderReader, acquireCookieRecords, acquireCookieHeader, acquireFile };

@@ -10,6 +10,7 @@ import {
   FetchFailure,
   isPrivateAddress,
   isPrivateHostname,
+  requestPinnedNetworkAddress,
   type PinnedNetworkResponse,
   type SafeFetchOptions,
 } from "./network.js";
@@ -53,6 +54,16 @@ async function rejectedFetch(promise: Promise<unknown>): Promise<FetchFailure> {
     throw error;
   }
   throw new Error("expected fetch to reject");
+}
+
+async function rejectedError(promise: Promise<unknown>): Promise<Error> {
+  try {
+    await promise;
+  } catch (error) {
+    if (error instanceof Error) return error;
+    throw error;
+  }
+  throw new Error("expected request to reject");
 }
 
 async function within<T>(promise: Promise<T>, label: string, timeoutMs = 1_000): Promise<T> {
@@ -134,6 +145,155 @@ test("decodes common response charsets", () => {
 });
 
 describe("pinned network transport", () => {
+  test("sends one explicit request to the pinned address without DNS lookup or redirect following", async () => {
+    let requestCount = 0;
+    let observed:
+      | {
+          readonly method: string | undefined;
+          readonly path: string | undefined;
+          readonly marker: string | readonly string[] | undefined;
+          readonly body: string;
+        }
+      | undefined;
+    const server = createHttpServer((request, response) => {
+      requestCount += 1;
+      const chunks: Uint8Array[] = [];
+      request.on("data", (chunk: Uint8Array) => chunks.push(chunk));
+      request.on("end", () => {
+        observed = {
+          method: request.method,
+          path: request.url,
+          marker: request.headers["x-network-test"],
+          body: Buffer.concat(chunks).toString("utf8"),
+        };
+        response.writeHead(307, {
+          Location: "/must-not-be-followed",
+          "X-Network-Response": "preserved",
+        });
+        response.end("redirect response");
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    try {
+      const serverAddress = server.address();
+      if (serverAddress === null || typeof serverAddress === "string") {
+        throw new Error("fixture did not bind TCP");
+      }
+      const response = await requestPinnedNetworkAddress({
+        url: new URL(`http://does-not-resolve.invalid:${serverAddress.port}/mutate?view=one`),
+        address: { address: "127.0.0.1", family: 4 },
+        method: "POST",
+        headers: new Headers({ "X-Network-Test": "fixed" }),
+        body: new TextEncoder().encode('{"value":1}'),
+        signal: new AbortController().signal,
+      });
+      const responseChunks: Uint8Array[] = [];
+      for await (const chunk of response.body ?? []) {
+        if (!(chunk instanceof Uint8Array)) throw new Error("fixture returned a non-byte chunk");
+        responseChunks.push(chunk);
+      }
+
+      expect(response.status).toBe(307);
+      expect(response.headers.get("location")).toBe("/must-not-be-followed");
+      expect(response.headers.get("x-network-response")).toBe("preserved");
+      expect(new TextDecoder().decode(Buffer.concat(responseChunks))).toBe("redirect response");
+      expect(requestCount).toBe(1);
+      expect(observed).toEqual({
+        method: "POST",
+        path: "/mutate?view=one",
+        marker: "fixed",
+        body: '{"value":1}',
+      });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  test("rejects unsupported protocols and mismatched address families before opening a request", async () => {
+    const request = {
+      url: new URL("http://example.com/"),
+      address: publicAddress,
+      method: "GET",
+      headers: new Headers(),
+      body: null,
+      signal: new AbortController().signal,
+    } as const;
+
+    const protocolFailure = await rejectedError(requestPinnedNetworkAddress({
+      ...request,
+      url: new URL("ftp://example.com/file"),
+    }));
+    const familyFailure = await rejectedError(requestPinnedNetworkAddress({
+      ...request,
+      address: { address: "1.1.1.1", family: 6 },
+    }));
+    expect(protocolFailure.message).toContain("protocol");
+    expect(familyFailure.message).toContain("family");
+  });
+
+  test("rejects a different IP-literal hostname before opening a socket", async () => {
+    let requestCount = 0;
+    let connectionCount = 0;
+    const server = createHttpServer((_request, response) => {
+      requestCount += 1;
+      response.end("must not be reached");
+    });
+    server.on("connection", () => {
+      connectionCount += 1;
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    try {
+      const serverAddress = server.address();
+      if (serverAddress === null || typeof serverAddress === "string") {
+        throw new Error("fixture did not bind TCP");
+      }
+      const failure = await rejectedError(requestPinnedNetworkAddress({
+        url: new URL(`http://127.0.0.1:${serverAddress.port}/must-not-connect`),
+        address: { address: "203.0.113.50", family: 4 },
+        method: "GET",
+        headers: new Headers(),
+        body: null,
+        signal: new AbortController().signal,
+      }));
+
+      expect(failure.message).toContain("does not match");
+      expect(requestCount).toBe(0);
+      expect(connectionCount).toBe(0);
+
+      const crossFamilyFailure = await rejectedError(requestPinnedNetworkAddress({
+        url: new URL("http://[::1]:1/must-not-connect"),
+        address: { address: "0.0.0.1", family: 4 },
+        method: "GET",
+        headers: new Headers(),
+        body: null,
+        signal: new AbortController().signal,
+      }));
+      expect(crossFamilyFailure.message).toBe(
+        "IP-literal request hostname does not match the pinned address",
+      );
+
+      const scopedFailure = await rejectedError(requestPinnedNetworkAddress({
+        url: new URL("http://[::1]:1/must-not-connect"),
+        address: { address: "::1%definitely-not-an-interface", family: 6 },
+        method: "GET",
+        headers: new Headers(),
+        body: null,
+        signal: new AbortController().signal,
+      }));
+      expect(scopedFailure.message).toBe(
+        "IP-literal request hostname does not match the pinned address",
+      );
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   test("rejects a globally routable literal assigned to a local interface", async () => {
     let transported = false;
     const fetch = createSafeFetch({

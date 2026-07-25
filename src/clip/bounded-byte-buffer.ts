@@ -45,3 +45,31 @@ export class BoundedByteBuffer {
     this.#storage = grown;
   }
 }
+
+/**
+ * Consume a byte stream into one bounded owned array.
+ *
+ * Releasing the reader lock is the caller-visible cleanup boundary. The
+ * underlying stream is not cancelled so its owner can decide how to terminate
+ * the producer after an overflow or read failure.
+ */
+export async function readBoundedByteStream(
+  stream: ReadableStream<Uint8Array>,
+  maxBytes: number,
+  overflowLabel = "stream",
+): Promise<Uint8Array> {
+  const bytes = new BoundedByteBuffer(maxBytes);
+  const reader = stream.getReader();
+  try {
+    for (;;) {
+      const result = await reader.read();
+      if (result.done) break;
+      if (!bytes.append(result.value)) {
+        throw new Error(`${overflowLabel} exceeded ${maxBytes} bytes`);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return bytes.toUint8Array();
+}

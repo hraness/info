@@ -1,4 +1,15 @@
 import {
+  parseArguments as parseCaptureArgumentsImplementation,
+  type CaptureArguments,
+  type CaptureMode,
+  type CaptureScope,
+  type CliArguments,
+  type CookieSource,
+  type EvidenceMode,
+  type MediaMode,
+  type ParseArgumentsResult,
+} from "./clip/args.js";
+import {
   captureExitCode as captureExitCodeImplementation,
   captureSucceeded as captureSucceededImplementation,
   captureSummary as captureSummaryImplementation,
@@ -14,6 +25,8 @@ import {
 import {
   adapterCapabilities as installedAdapterCapabilities,
   inspectClipEnvironment as inspectClipEnvironmentImplementation,
+  renderDoctorReport as renderDoctorReportImplementation,
+  type DoctorOptions,
   type DoctorReport,
 } from "./clip/doctor.js";
 
@@ -30,13 +43,26 @@ export const clipMain: typeof clipMainImplementation = (...arguments_) =>
   clipMainImplementation(...arguments_);
 export const inspectClipEnvironment: typeof inspectClipEnvironmentImplementation = (...arguments_) =>
   inspectClipEnvironmentImplementation(...arguments_);
+export const parseCaptureArguments: typeof parseCaptureArgumentsImplementation = (...arguments_) =>
+  parseCaptureArgumentsImplementation(...arguments_);
+export const renderDoctorReport: typeof renderDoctorReportImplementation = (...arguments_) =>
+  renderDoctorReportImplementation(...arguments_);
 export const runCapture: typeof runCaptureImplementation = (...arguments_) =>
   runCaptureImplementation(...arguments_);
 
 export type {
+  CaptureArguments,
   CaptureAttempt,
   CaptureDependencies,
+  CaptureMode,
   CaptureOutcome,
+  CaptureScope,
+  CliArguments,
   ClipRuntimeOptions,
+  CookieSource,
+  DoctorOptions,
   DoctorReport,
+  EvidenceMode,
+  MediaMode,
+  ParseArgumentsResult,
 };

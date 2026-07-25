@@ -30,6 +30,9 @@
       "@cclrte/info/clip/cli": [
         "./src/clip/cli.ts"
       ],
+      "@cclrte/info/clip/cookies": [
+        "./src/clip/cookies.ts"
+      ],
       "@cclrte/info/clip/doctor": [
         "./src/clip/doctor.ts"
       ],

@@ -1,7 +1,9 @@
 // @bun
 import {
-  BoundedByteBuffer
-} from "../index-efcktfvv.js";
+  BoundedByteBuffer,
+  readBoundedByteStream
+} from "../index-gh719d91.js";
 export {
+  readBoundedByteStream,
   BoundedByteBuffer
 };

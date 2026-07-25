@@ -42,5 +42,22 @@ class BoundedByteBuffer {
     this.#storage = grown;
   }
 }
+async function readBoundedByteStream(stream, maxBytes, overflowLabel = "stream") {
+  const bytes = new BoundedByteBuffer(maxBytes);
+  const reader = stream.getReader();
+  try {
+    for (;; ) {
+      const result = await reader.read();
+      if (result.done)
+        break;
+      if (!bytes.append(result.value)) {
+        throw new Error(`${overflowLabel} exceeded ${maxBytes} bytes`);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return bytes.toUint8Array();
+}
 
-export { BoundedByteBuffer };
+export { BoundedByteBuffer, readBoundedByteStream };

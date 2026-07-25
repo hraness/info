@@ -3,10 +3,10 @@ import {
   FetchFailure,
   createPinnedLookup,
   resolveSafeNetworkTarget
-} from "./index-kvxzb85x.js";
+} from "./index-b0b0vy11.js";
 import {
   BoundedByteBuffer
-} from "./index-efcktfvv.js";
+} from "./index-gh719d91.js";
 
 // src/clip/network-proxy.ts
 import {

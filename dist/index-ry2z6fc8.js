@@ -1,38 +1,32 @@
 // @bun
 import {
+  adapterCapabilities,
+  inspectClipEnvironment,
+  renderAdapterCapabilities,
+  renderDoctorReport
+} from "./index-qnvga131.js";
+import {
   canonicalizeUrl,
   chooseBestExtraction,
   countWords,
   extractPage,
   localizeAssets,
   sniffImage
-} from "./index-809x6ffw.js";
+} from "./index-sm1xsdta.js";
 import {
   cloneBrowserProfile
 } from "./index-5n05se68.js";
 import {
-  adapterCapabilities,
-  inspectClipEnvironment,
-  renderAdapterCapabilities,
-  renderDoctorReport
-} from "./index-bjmvvmnj.js";
-import {
-  MAX_COOKIE_BYTES,
   acquireBrowser,
   acquireCookieHttp,
   acquireCookieRecords,
   acquireFile,
   acquireHttp,
-  assertSafePersistentProfile,
-  filterCookieProviderResult,
-  filterCookies,
-  readCookieFile,
-  renderCookieHeader,
-  renderNetscapeCookieJar
-} from "./index-2mpx0h4p.js";
+  assertSafePersistentProfile
+} from "./index-1jtexth1.js";
 import {
   startNetworkProxy
-} from "./index-11gveg0r.js";
+} from "./index-49bhdzht.js";
 import {
   CONTENT_REWRITE_TRUNCATION_WARNING,
   buildClipMarkdown,
@@ -47,7 +41,7 @@ import {
 import {
   decodeBytes,
   safeFetch
-} from "./index-kvxzb85x.js";
+} from "./index-b0b0vy11.js";
 import {
   abortCaptureBundle,
   beginCaptureBundle,
@@ -68,7 +62,15 @@ import {
 } from "./index-0d3p9w68.js";
 import {
   BoundedByteBuffer
-} from "./index-efcktfvv.js";
+} from "./index-gh719d91.js";
+import {
+  MAX_COOKIE_BYTES,
+  filterCookieProviderResult,
+  filterCookies,
+  readCookieFile,
+  renderCookieHeader,
+  renderNetscapeCookieJar
+} from "./index-6mqdx02h.js";
 
 // src/clip/capture.ts
 import {
