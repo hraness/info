@@ -9,64 +9,64 @@
     "moduleResolution": "Bundler",
     "moduleDetection": "force",
     "paths": {
-      "@cclrte/oh": [
+      "@hraness/oh": [
         "./src/index.ts"
       ],
-      "@cclrte/oh/agent-context": [
+      "@hraness/oh/agent-context": [
         "./src/agent-context.ts"
       ],
-      "@cclrte/oh/agent-guide-audit": [
+      "@hraness/oh/agent-guide-audit": [
         "./src/agent-guide-audit.ts"
       ],
-      "@cclrte/oh/browser-profiles": [
+      "@hraness/oh/browser-profiles": [
         "./src/clip/browser-profiles.ts"
       ],
-      "@cclrte/oh/capture": [
+      "@hraness/oh/capture": [
         "./src/capture.ts"
       ],
-      "@cclrte/oh/clip/acquire": [
+      "@hraness/oh/clip/acquire": [
         "./src/clip/acquire.ts"
       ],
-      "@cclrte/oh/clip/args": [
+      "@hraness/oh/clip/args": [
         "./src/clip/args.ts"
       ],
-      "@cclrte/oh/clip/bounded-byte-buffer": [
+      "@hraness/oh/clip/bounded-byte-buffer": [
         "./src/clip/bounded-byte-buffer.ts"
       ],
-      "@cclrte/oh/clip/cli": [
+      "@hraness/oh/clip/cli": [
         "./src/clip/cli.ts"
       ],
-      "@cclrte/oh/clip/cookies": [
+      "@hraness/oh/clip/cookies": [
         "./src/clip/cookies.ts"
       ],
-      "@cclrte/oh/clip/doctor": [
+      "@hraness/oh/clip/doctor": [
         "./src/clip/doctor.ts"
       ],
-      "@cclrte/oh/clip/network": [
+      "@hraness/oh/clip/network": [
         "./src/clip/network.ts"
       ],
-      "@cclrte/oh/clip/network-proxy": [
+      "@hraness/oh/clip/network-proxy": [
         "./src/clip/network-proxy.ts"
       ],
-      "@cclrte/oh/clip/persist": [
+      "@hraness/oh/clip/persist": [
         "./src/clip/persist.ts"
       ],
-      "@cclrte/oh/clip/terminal": [
+      "@hraness/oh/clip/terminal": [
         "./src/clip/terminal.ts"
       ],
-      "@cclrte/oh/graph": [
+      "@hraness/oh/graph": [
         "./src/graph.ts"
       ],
-      "@cclrte/oh/navigation": [
+      "@hraness/oh/navigation": [
         "./src/navigation.ts"
       ],
-      "@cclrte/oh/pdf": [
+      "@hraness/oh/pdf": [
         "./src/pdf.ts"
       ],
-      "@cclrte/oh/query": [
+      "@hraness/oh/query": [
         "./src/query.ts"
       ],
-      "@cclrte/oh/semantic": [
+      "@hraness/oh/semantic": [
         "./src/semantic.ts"
       ]
     },

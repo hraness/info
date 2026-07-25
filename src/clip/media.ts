@@ -1153,7 +1153,7 @@ export async function captureMedia(options: CaptureMediaOptions): Promise<MediaC
     }
     if (cookieRequest !== undefined) {
       // Credential material must never enter the repository/output staging tree, even transiently.
-      authDirectory = mkdtempSync(join(tmpdir(), "cclrte-oh-auth-"));
+      authDirectory = mkdtempSync(join(tmpdir(), "hraness-oh-auth-"));
       chmodSync(authDirectory, 0o700);
       const prepared = await prepareCookieJar(cookieRequest, authDirectory, options.cookieProvider ?? readMediaCookies);
       if (!prepared.ok) {
@@ -1373,7 +1373,7 @@ export async function captureVideoContext(
       };
     }
     if (cookieRequest !== undefined) {
-      authDirectory = mkdtempSync(join(tmpdir(), "cclrte-oh-auth-"));
+      authDirectory = mkdtempSync(join(tmpdir(), "hraness-oh-auth-"));
       chmodSync(authDirectory, 0o700);
       const prepared = await prepareCookieJar(cookieRequest, authDirectory, options.cookieProvider ?? readMediaCookies);
       if (!prepared.ok) {

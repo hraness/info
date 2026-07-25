@@ -337,7 +337,7 @@ async function inspectAgentBrowser(
   if (agentBrowserDirectory === null) return { deriveClient: false, profiles: [] };
   const executable = join(agentBrowserDirectory, "bin", "agent-browser.js");
   if (!exists(executable)) return { deriveClient: false, profiles: [] };
-  const directory = mkdtempSync(join(tmpdir(), "cclrte-oh-doctor-"));
+  const directory = mkdtempSync(join(tmpdir(), "hraness-oh-doctor-"));
   const socketRoot = process.platform === "win32" ? tmpdir() : "/tmp";
   const socketDirectory = mkdtempSync(join(socketRoot, "jc-ab-doctor-"));
   chmodSync(directory, 0o700);
@@ -489,7 +489,7 @@ export async function inspectClipEnvironment(options: DoctorOptions = {}): Promi
   }
   for (const dependency of dependencies) {
     if (dependency.status === "unavailable") {
-      warnings.push(`${dependency.name} ${dependency.expectedVersion} is not installed; reinstall @cclrte/oh with Bun.`);
+      warnings.push(`${dependency.name} ${dependency.expectedVersion} is not installed; reinstall @hraness/oh with Bun.`);
     } else if (dependency.status === "partial") {
       warnings.push(`${dependency.name} must resolve to ${dependency.expectedVersion} for this oh release.`);
     }

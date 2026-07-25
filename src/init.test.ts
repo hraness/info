@@ -14,7 +14,7 @@ afterEach(() => {
 
 describe("vault initialization", () => {
   test("creates an agent-ready empty vault that passes graph checks", async () => {
-    const parent = mkdtempSync(join(tmpdir(), "cclrte-oh-init-test-"));
+    const parent = mkdtempSync(join(tmpdir(), "hraness-oh-init-test-"));
     roots.push(parent);
     const root = join(parent, "knowledge");
     const result = await initVault(root);
@@ -40,7 +40,7 @@ describe("vault initialization", () => {
   });
 
   test("refuses to merge into an existing directory", async () => {
-    const parent = mkdtempSync(join(tmpdir(), "cclrte-oh-init-existing-test-"));
+    const parent = mkdtempSync(join(tmpdir(), "hraness-oh-init-existing-test-"));
     roots.push(parent);
     const root = join(parent, "knowledge");
     await initVault(root);

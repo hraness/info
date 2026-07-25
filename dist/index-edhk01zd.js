@@ -9,7 +9,7 @@ import {
 } from "./index-1nmbpv8m.js";
 import {
   startNetworkProxy
-} from "./index-m8nb76f2.js";
+} from "./index-09ave90x.js";
 import {
   assertSafeNetworkUrl,
   decodeBytes,
@@ -208,7 +208,7 @@ async function runAgentBrowserBatch(globalArgs, commands, options) {
     throw new Error("agent-browser batch failed");
 }
 async function discoverChromeProfiles(timeoutMs = 15000) {
-  const directory = mkdtempSync(join2(tmpdir(), "cclrte-oh-profiles-"));
+  const directory = mkdtempSync(join2(tmpdir(), "hraness-oh-profiles-"));
   chmodSync(directory, 448);
   let socketDirectory = null;
   try {

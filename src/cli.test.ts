@@ -271,7 +271,7 @@ describe("oh argument parsing", () => {
 
 describe("oh vault commands", () => {
   test("initializes, refreshes, checks, graphs, and derives backlinks without editing notes", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "cclrte-oh-cli-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-oh-cli-"));
     const vault = join(temporary, "vault");
     try {
       const initOutput = captureOutput();
@@ -444,7 +444,7 @@ describe("oh vault commands", () => {
   });
 
   test("reports broken links as check failures and sanitizes thrown terminal text", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "cclrte-oh-cli-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-oh-cli-"));
     try {
       await writeFile(join(temporary, "index.md"), "# Index\n", "utf8");
       await writeFile(join(temporary, "note.md"), "# Note\n\n[[missing]]\n", "utf8");
@@ -510,7 +510,7 @@ describe("oh agent context commands", () => {
   });
 
   test("resolves inherited guides and reciprocal hubs without loading hub prose", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "cclrte-oh-context-cli-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-oh-context-cli-"));
     const repository = join(temporary, "repository");
     const vault = join(repository, "oh");
     try {

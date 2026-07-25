@@ -208,7 +208,7 @@ function cacheHome(dependencies) {
 }
 function semanticDatabasePath(root, dependencies = {}) {
   const identity = createHash("sha256").update(resolve2(root)).digest("hex").slice(0, 20);
-  return join2(cacheHome(dependencies), "cclrte-oh", "indexes", `${identity}.sqlite`);
+  return join2(cacheHome(dependencies), "hraness-oh", "indexes", `${identity}.sqlite`);
 }
 async function resolvedDirectory(path) {
   const root = await realpath2(resolve2(path));

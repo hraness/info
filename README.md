@@ -10,7 +10,7 @@ explicit wikilinks and derived backlinks, and searches locally by keyword or
 meaning with a rebuildable embedding index.
 
 ```sh
-bun add --global github:hraness/oh#v0.6.0
+bun add --global github:hraness/oh#v0.7.0
 ```
 
 [article](https://hraness.pub/articles/a-durable-knowledge-base-is-a-write-path)
@@ -172,7 +172,7 @@ Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
 Install hraness/oh and its bundled Agent Skills from
-https://github.com/hraness/oh at the immutable v0.6.0 tag. Follow the repository
+https://github.com/hraness/oh at the immutable v0.7.0 tag. Follow the repository
 README, install the `oh` CLI, copy or link the skills I need into this agent
 runner's configured skills directory, and verify the installation with
 `oh doctor` and `oh --help`. Do not initialize or modify a vault until I ask.
@@ -182,10 +182,10 @@ The repository and packed package carry the same skill directories, so an agent
 can inspect the tagged instructions before placing them in its runner-specific
 discovery path.
 
-Install the CLI from the immutable `v0.6.0` tag:
+Install the CLI from the immutable `v0.7.0` tag:
 
 ```sh
-bun add --global github:hraness/oh#v0.6.0
+bun add --global github:hraness/oh#v0.7.0
 oh --help
 ```
 
@@ -194,7 +194,7 @@ For programmatic use, declare the same pinned source in a project:
 ```json
 {
   "dependencies": {
-    "@cclrte/oh": "github:hraness/oh#v0.6.0"
+    "@hraness/oh": "github:hraness/oh#v0.7.0"
   }
 }
 ```
@@ -317,17 +317,17 @@ Scope hubs are ordinary Markdown in the graph and optional QMD index;
 files at development time. Applications do not need to import Oh or couple
 their runtime to the vault.
 
-The package exports its full programmatic surface from `@cclrte/oh`; focused
-entry points from `@cclrte/oh/agent-context`,
-`@cclrte/oh/agent-guide-audit`, `@cclrte/oh/graph`, `@cclrte/oh/navigation`,
-`@cclrte/oh/query`, and `@cclrte/oh/semantic`; web-capture orchestration and
+The package exports its full programmatic surface from `@hraness/oh`; focused
+entry points from `@hraness/oh/agent-context`,
+`@hraness/oh/agent-guide-audit`, `@hraness/oh/graph`, `@hraness/oh/navigation`,
+`@hraness/oh/query`, and `@hraness/oh/semantic`; web-capture orchestration and
 diagnostics from
-`@cclrte/oh/capture`; PDF ingestion from `@cclrte/oh/pdf`; and reusable
-disposable-profile helpers from `@cclrte/oh/browser-profiles`. Embedders that
+`@hraness/oh/capture`; PDF ingestion from `@hraness/oh/pdf`; and reusable
+disposable-profile helpers from `@hraness/oh/browser-profiles`. Embedders that
 need the CLI's lower-level ingestion machinery can use the explicit
 capture-primitive subpaths listed in `package.json`, including
-`@cclrte/oh/clip/acquire`, `@cclrte/oh/clip/args`, and
-`@cclrte/oh/clip/network-proxy`.
+`@hraness/oh/clip/acquire`, `@hraness/oh/clip/args`, and
+`@hraness/oh/clip/network-proxy`.
 
 ## Agent skills
 

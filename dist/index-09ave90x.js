@@ -498,7 +498,7 @@ async function startNetworkProxy(options) {
           return;
         }
         client.write(`HTTP/1.1 200 Connection Established\r
-Proxy-Agent: cclrte-oh\r
+Proxy-Agent: hraness-oh\r
 \r
 `);
         if (head.byteLength > 0) {

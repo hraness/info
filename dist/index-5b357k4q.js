@@ -1609,7 +1609,7 @@ function manifestImage(image) {
 }
 async function runPdfCapture(options, dependencies = {}) {
   const callerOwnedWorkspace = options.workspaceDirectory !== undefined;
-  const workspaceDirectory = options.workspaceDirectory ?? mkdtempSync2(join4(tmpdir(), "cclrte-oh-pdf-"));
+  const workspaceDirectory = options.workspaceDirectory ?? mkdtempSync2(join4(tmpdir(), "hraness-oh-pdf-"));
   try {
     const inspection = await inspectPdf({
       inputPath: options.inputPath,
@@ -1773,7 +1773,7 @@ import {
 } from "fs";
 import { tmpdir as tmpdir2 } from "os";
 import { basename as basename2, join as join5 } from "path";
-var remoteUserAgent = "CCLRTE-oh/0.6 PDF capture";
+var remoteUserAgent = "hraness-oh/0.7 PDF capture";
 function parseRemoteUrl(input) {
   if (!/^https?:\/\//iu.test(input))
     return null;
@@ -1825,7 +1825,7 @@ async function preparePdfSource(input, options = {}, dependencies = {}) {
     maxRedirects: 5
   });
   assertPdfSignature(result.bytes);
-  const makeTemporaryDirectory = dependencies.makeTemporaryDirectory ?? (() => mkdtempSync3(join5(tmpdir2(), "cclrte-oh-pdf-source-")));
+  const makeTemporaryDirectory = dependencies.makeTemporaryDirectory ?? (() => mkdtempSync3(join5(tmpdir2(), "hraness-oh-pdf-source-")));
   const removeDirectory = dependencies.removeDirectory ?? ((path) => rmSync3(path, { recursive: true, force: true }));
   const directory = makeTemporaryDirectory();
   let disposed = false;

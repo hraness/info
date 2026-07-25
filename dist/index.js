@@ -19,7 +19,7 @@ import {
   scanVault,
   searchSemanticVault,
   semanticDatabasePath
-} from "./index-zk5tvkvw.js";
+} from "./index-vht7kftn.js";
 import {
   analyzeVault,
   catalogEnd,

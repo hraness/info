@@ -20,7 +20,7 @@ function packageManifest(name: string, version: string): string {
 describe("clip doctor", () => {
   test("reports pinned dependencies, derive-client, tools, browsers, and profile display names without probing secrets", async () => {
     const consumerRoot = "/repo";
-    const packageRoot = join(consumerRoot, "node_modules", "@cclrte", "oh");
+    const packageRoot = join(consumerRoot, "node_modules", "@hraness", "oh");
     const homeDirectory = "/Users/tester";
     const files = new Map<string, string>([
       [join(packageRoot, "package.json"), JSON.stringify({

@@ -1,6 +1,6 @@
 {
-  "name": "@cclrte/oh",
-  "version": "0.6.0",
+  "name": "@hraness/oh",
+  "version": "0.7.0",
   "description": "A local-first Markdown knowledge base for coding agents with scoped repository context, auditable capture, explicit graphs, and local semantic search.",
   "license": "MIT",
   "type": "module",

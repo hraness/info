@@ -17,7 +17,7 @@ import { refreshVault, scanVault } from "./vault.js";
 const roots: string[] = [];
 
 function fixture(): string {
-  const root = mkdtempSync(join(tmpdir(), "cclrte-oh-vault-test-"));
+  const root = mkdtempSync(join(tmpdir(), "hraness-oh-vault-test-"));
   roots.push(root);
   mkdirSync(join(root, "notes"));
   writeFileSync(

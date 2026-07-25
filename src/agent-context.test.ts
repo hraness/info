@@ -79,7 +79,7 @@ function issueKinds(issues: readonly AgentContextIssue[]): string[] {
 }
 
 function temporaryRepository(): string {
-  const root = mkdtempSync(join(tmpdir(), "cclrte-oh-agent-context-"));
+  const root = mkdtempSync(join(tmpdir(), "hraness-oh-agent-context-"));
   temporaryRoots.push(root);
   return root;
 }

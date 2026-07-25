@@ -12,7 +12,7 @@ import {
   inspectClipEnvironment,
   renderAdapterCapabilities,
   renderDoctorReport
-} from "./index-8kjm73a2.js";
+} from "./index-tncrkr9r.js";
 import {
   cloneBrowserProfile
 } from "./index-5n05se68.js";
@@ -23,7 +23,7 @@ import {
   acquireFile,
   acquireHttp,
   assertSafePersistentProfile
-} from "./index-vfbwp1t8.js";
+} from "./index-edhk01zd.js";
 import {
   CONTENT_REWRITE_TRUNCATION_WARNING,
   buildClipMarkdown,
@@ -45,7 +45,7 @@ import {
 } from "./index-1nmbpv8m.js";
 import {
   startNetworkProxy
-} from "./index-m8nb76f2.js";
+} from "./index-09ave90x.js";
 import {
   decodeBytes,
   safeFetch
@@ -979,7 +979,7 @@ async function captureMedia(options) {
       };
     }
     if (cookieRequest !== undefined) {
-      authDirectory = mkdtempSync(join(tmpdir(), "cclrte-oh-auth-"));
+      authDirectory = mkdtempSync(join(tmpdir(), "hraness-oh-auth-"));
       chmodSync(authDirectory, 448);
       const prepared = await prepareCookieJar(cookieRequest, authDirectory, options.cookieProvider ?? readMediaCookies);
       if (!prepared.ok) {
@@ -1168,7 +1168,7 @@ async function captureVideoContext(options) {
       };
     }
     if (cookieRequest !== undefined) {
-      authDirectory = mkdtempSync(join(tmpdir(), "cclrte-oh-auth-"));
+      authDirectory = mkdtempSync(join(tmpdir(), "hraness-oh-auth-"));
       chmodSync(authDirectory, 448);
       const prepared = await prepareCookieJar(cookieRequest, authDirectory, options.cookieProvider ?? readMediaCookies);
       if (!prepared.ok) {
@@ -1914,7 +1914,7 @@ async function runCapture(rawOptions, dependencies = {}) {
     captureVideoContext: dependencies.captureVideoContext ?? captureVideoContext,
     now: dependencies.now ?? (() => new Date)
   };
-  const browserTemporaryDirectory = mkdtempSync2(join2(tmpdir2(), "cclrte-oh-browser-"));
+  const browserTemporaryDirectory = mkdtempSync2(join2(tmpdir2(), "hraness-oh-browser-"));
   chmodSync2(browserTemporaryDirectory, 448);
   try {
     const preparedOptions = withBrowserProfileSnapshot(rawOptions, browserTemporaryDirectory);
