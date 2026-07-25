@@ -23,4 +23,24 @@ Metadata parsing and queries must preserve YAML value types and nested structure
 
 QMD is a derived search capability, not the storage layer. Keep it dynamically loaded so graph, metadata, and capture commands do not initialize its native runtime. Unit tests must inject a fake store and cover update, embed, search, result confinement, and close-on-failure behavior without downloading a model or using the network. When changing the pinned QMD version or model, also run a real local index-and-query smoke test and document any new system requirement.
 
+Repository-context changes must preserve the authority boundary between
+`AGENTS.md` and Info hubs. Guides own always-loaded ownership, prohibitions,
+required commands, invariants, and gates. Optional `type: agent-context` hubs
+under `scopes/` may add pull-based rationale, history, examples, evidence, and
+links, but cannot override a guide or become the only home of a load-bearing
+edit rule.
+
+Pair named context regressions with property tests for repository-scope
+normalization, bounded canonical IDs, full-scope identity, marker parsing,
+inheritance order, path confinement, collision handling, and file-versus-
+directory targets. Moving a scope changes identity. Cover missing and symlinked
+directories and guides without following symbolic-link directories during
+agent-guide discovery. Keep scope hubs available to ordinary graph and QMD
+indexing while `AGENTS.md` remains excluded.
+
+Run `info agents check --root <vault> --repo <repository>` after changing a
+scope hub or reciprocal marker. Use `info agents audit` to inspect deterministic
+per-guide, section, inherited-chain, long-bullet, and exact-duplicate
+advisories; do not treat a length advisory as a correctness failure.
+
 Update public documentation when commands, defaults, status meanings, manifest fields, supported platforms, or security boundaries change.

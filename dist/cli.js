@@ -5,7 +5,10 @@ import {
 } from "./index-ssxnd8jx.js";
 import {
   initVault
-} from "./index-6vg36apr.js";
+} from "./index-chx3zc4r.js";
+import {
+  navigateLinks
+} from "./index-9w6m3y9a.js";
 import {
   queryVault
 } from "./index-m4bexhht.js";
@@ -19,17 +22,27 @@ import {
   lookupNote
 } from "./index-dq5gjkcp.js";
 import {
-  navigateLinks
-} from "./index-9w6m3y9a.js";
+  auditAgentGuideRepository
+} from "./index-q0j2a28n.js";
+import {
+  agentContextGuidePath,
+  agentContextMarkerForScope,
+  agentContextNoteId,
+  agentContextNotePath,
+  analyzeAgentContexts,
+  inspectAgentContextRepository,
+  normalizeRepositoryScope
+} from "./index-ahv2qpv1.js";
 import {
   main
-} from "./index-ry2z6fc8.js";
-import"./index-qnvga131.js";
+} from "./index-dcn7d1sb.js";
 import"./index-sm1xsdta.js";
+import"./index-6g7ymyss.js";
 import"./index-5n05se68.js";
-import"./index-1jtexth1.js";
-import"./index-49bhdzht.js";
+import"./index-a5hj12kd.js";
 import"./index-hgve9rh2.js";
+import"./index-6mqdx02h.js";
+import"./index-49bhdzht.js";
 import"./index-b0b0vy11.js";
 import {
   redactSensitiveText
@@ -40,7 +53,6 @@ import {
 } from "./index-1xxnjn0d.js";
 import"./index-0d3p9w68.js";
 import"./index-gh719d91.js";
-import"./index-6mqdx02h.js";
 
 // src/cli.ts
 import { relative } from "path";
@@ -63,6 +75,10 @@ Usage:
   info list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
   info index [--root <directory>] [--database <path>] [--force] [--json]
   info search <query> [--root <directory>] [--database <path>] [--mode <semantic|keyword>] [--limit <count>] [--min-score <score>] [--json]
+  info context <repository-path> [--root <vault>] [--repo <repository>] [--kind <auto|file|directory>] [--json]
+  info agents identity <repository-scope> [--json]
+  info agents check [--root <vault>] [--repo <repository>] [--json]
+  info agents audit [--root <vault>] [--repo <repository>] [--json]
   info doctor [--json]
   info adapters [--json]
 
@@ -371,6 +387,118 @@ function parseSemanticCommand(command, arguments_) {
     }
   };
 }
+function parseContextCommand(arguments_) {
+  let root = ".";
+  let repository = ".";
+  let targetKind = "auto";
+  let json = false;
+  const positional = [];
+  for (let cursor = 0;cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined)
+      continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (argument === "--root" || argument === "--repo" || argument === "--kind") {
+      const value = readValue(arguments_, cursor);
+      if (value === null)
+        return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root")
+        root = value;
+      else if (argument === "--repo")
+        repository = value;
+      else {
+        if (value !== "auto" && value !== "file" && value !== "directory") {
+          return { ok: false, message: "--kind must be auto, file, or directory" };
+        }
+        targetKind = value;
+      }
+      cursor += 1;
+      continue;
+    }
+    if (argument.startsWith("--"))
+      return { ok: false, message: "unknown context option" };
+    positional.push(argument);
+  }
+  const target = positional[0];
+  if (target === undefined || positional.length !== 1) {
+    return { ok: false, message: "context requires exactly one repository path" };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "context",
+      root,
+      repository,
+      target,
+      targetKind,
+      json
+    }
+  };
+}
+function parseAgentsCommand(arguments_) {
+  const action = arguments_[0];
+  if (action === "identity") {
+    let json2 = false;
+    const positional = [];
+    for (const argument of arguments_.slice(1)) {
+      if (argument === "--json")
+        json2 = true;
+      else if (argument.startsWith("--")) {
+        return { ok: false, message: "unknown agents identity option" };
+      } else {
+        positional.push(argument);
+      }
+    }
+    const scope = positional[0];
+    if (scope === undefined || positional.length !== 1) {
+      return {
+        ok: false,
+        message: "agents identity requires exactly one repository scope"
+      };
+    }
+    return {
+      ok: true,
+      value: { kind: "agent-identity", scope, json: json2 }
+    };
+  }
+  if (action !== "check" && action !== "audit") {
+    return { ok: false, message: "agents requires identity, check, or audit" };
+  }
+  let root = ".";
+  let repository = ".";
+  let json = false;
+  for (let cursor = 1;cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined)
+      continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (argument === "--root" || argument === "--repo") {
+      const value = readValue(arguments_, cursor);
+      if (value === null)
+        return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root")
+        root = value;
+      else
+        repository = value;
+      cursor += 1;
+      continue;
+    }
+    return {
+      ok: false,
+      message: argument.startsWith("--") ? `unknown agents ${action} option` : `agents ${action} does not accept positional arguments`
+    };
+  }
+  return {
+    ok: true,
+    value: { kind: "agents", action, root, repository, json }
+  };
+}
 function parseArguments(arguments_) {
   const command = arguments_[0];
   if (command === undefined || command === "help" || command === "--help" || command === "-h") {
@@ -415,6 +543,10 @@ function parseArguments(arguments_) {
   if (command === "index" || command === "search") {
     return parseSemanticCommand(command, arguments_.slice(1));
   }
+  if (command === "context")
+    return parseContextCommand(arguments_.slice(1));
+  if (command === "agents")
+    return parseAgentsCommand(arguments_.slice(1));
   return { ok: false, message: "unknown command" };
 }
 function embeddingCount(result) {
@@ -619,6 +751,221 @@ async function runInit(command, output, initialize) {
   }
   return 0;
 }
+function contextIssuePayload(issue) {
+  return { ...issue };
+}
+function uniqueAgentContextIssues(issues) {
+  const unique = new Map;
+  for (const issue of issues)
+    unique.set(JSON.stringify(issue), issue);
+  return [...unique.values()].toSorted((left, right) => `${left.kind}\x00${left.message}`.localeCompare(`${right.kind}\x00${right.message}`));
+}
+function contextPayload(inspection, snapshot) {
+  const connections = new Map(snapshot.analysis.noteConnections.map((connection) => [connection.id, connection]));
+  return {
+    repositoryRoot: inspection.repositoryRoot,
+    vaultRoot: snapshot.root,
+    target: inspection.target,
+    targetScope: inspection.targetScope,
+    guides: inspection.inheritedGuides.map((guide) => ({
+      path: guide.path,
+      scope: guide.scope,
+      context: guide.marker.markers[0]?.noteId
+    })),
+    contexts: inspection.matchingContexts.map((context) => {
+      const connection = connections.get(context.note.id);
+      return {
+        id: context.note.id,
+        path: context.note.path,
+        title: context.note.title,
+        scope: context.scope,
+        summary: context.note.summary,
+        inboundContextualCount: connection?.inboundContextualCount ?? 0,
+        outboundContextualCount: connection?.outboundContextualCount ?? 0
+      };
+    }),
+    issues: inspection.issues.map(contextIssuePayload)
+  };
+}
+function renderContext(inspection, snapshot) {
+  const lines = [
+    `Agent context for ${safe(inspection.target)} (scope ${safe(inspection.targetScope)})`,
+    "Guides (root \u2192 nearest):"
+  ];
+  if (inspection.inheritedGuides.length === 0)
+    lines.push("  None.");
+  for (const guide of inspection.inheritedGuides) {
+    const context = guide.marker.markers[0]?.noteId;
+    lines.push(`  ${safe(guide.path)}${context === undefined ? "" : `  \u2192  ${safe(context)}`}`);
+  }
+  lines.push("Info hubs (nearest \u2192 root):");
+  if (inspection.matchingContexts.length === 0)
+    lines.push("  None.");
+  for (const context of inspection.matchingContexts) {
+    const connection = snapshot.analysis.noteConnections.find(({ id }) => id === context.note.id);
+    lines.push(`  ${safe(context.note.id)} \u2014 ${safe(context.note.title)}  \u2190 ${connection?.inboundContextualCount ?? 0}  \u2192 ${connection?.outboundContextualCount ?? 0}`);
+    if (context.note.summary !== "")
+      lines.push(`    ${safe(context.note.summary)}`);
+  }
+  for (const issue of inspection.issues)
+    lines.push(`error: ${safe(issue.message)}`);
+  if (inspection.matchingContexts.length > 0) {
+    lines.push("Open a hub, then use `info links <hub> --root <vault> --depth 1` for bounded neighboring context.");
+  }
+  return `${lines.join(`
+`)}
+`;
+}
+async function runContext(command, output, dependencies) {
+  const snapshot = await (dependencies.scanVault ?? scanVault)(command.root);
+  const inspection = await (dependencies.inspectAgentContextRepository ?? inspectAgentContextRepository)(snapshot.notes, {
+    repositoryRoot: command.repository,
+    target: command.target,
+    targetKind: command.targetKind
+  });
+  output.stdout(command.json ? terminalSafeJson(contextPayload(inspection, snapshot)) : sanitizeTerminalText(renderContext(inspection, snapshot)));
+  return inspection.issues.length === 0 ? 0 : 3;
+}
+function agentIdentityPayload(scopeInput) {
+  const scope = normalizeRepositoryScope(scopeInput);
+  return {
+    scope,
+    noteId: agentContextNoteId(scope),
+    notePath: agentContextNotePath(scope),
+    guidePath: agentContextGuidePath(scope),
+    marker: agentContextMarkerForScope(scope)
+  };
+}
+function renderAgentIdentity(identity) {
+  return [
+    `Scope: ${safe(identity.scope ?? "")}`,
+    `Note ID: ${safe(identity.noteId ?? "")}`,
+    `Note path: ${safe(identity.notePath ?? "")}`,
+    `Guide path: ${safe(identity.guidePath ?? "")}`,
+    `Marker: ${safe(identity.marker ?? "")}`,
+    ""
+  ].join(`
+`);
+}
+function runAgentIdentity(command, output) {
+  const identity = agentIdentityPayload(command.scope);
+  output.stdout(command.json ? terminalSafeJson(identity) : sanitizeTerminalText(renderAgentIdentity(identity)));
+  return 0;
+}
+function agentCheckErrors(contextIssues, discoveryIssues, audit) {
+  return [
+    ...uniqueAgentContextIssues(contextIssues).map((issue) => ({ kind: "context", issue })),
+    ...discoveryIssues.filter(({ kind }) => kind !== "symlink-directory").map((issue) => ({ kind: "discovery", issue })),
+    ...audit.guides.flatMap((guide) => guide.shapeIssues.map((issue) => ({ kind: "shape", path: guide.path, issue })))
+  ];
+}
+function renderAgentCheckError(error) {
+  if (error.kind === "context")
+    return error.issue.message;
+  if (error.kind === "discovery")
+    return error.issue.message;
+  return `${error.path}: ${error.issue.message}`;
+}
+function advisoryLabel(advisory) {
+  if (advisory.kind === "contents-budget") {
+    return `${advisory.path}: Contents has ${advisory.actualWords} words / ${advisory.actualBullets} bullets`;
+  }
+  if (advisory.kind === "guidelines-budget") {
+    return `${advisory.path}: Guidelines has ${advisory.actualWords} words / ${advisory.actualBullets} bullets`;
+  }
+  if (advisory.kind === "long-guideline") {
+    return `${advisory.path}:${advisory.line}: guideline has ${advisory.words} words`;
+  }
+  if (advisory.kind === "inherited-budget") {
+    return `${advisory.path}: inherited chain has ${advisory.words} words across ${advisory.guides.length} guides`;
+  }
+  return `${advisory.guides.length} guides repeat a ${advisory.words}-word rule: ${advisory.text}`;
+}
+function agentReportPayload(repositoryRoot, vaultRoot, audit, validContexts, errors, discoveryIssues, includeAudit) {
+  return {
+    repositoryRoot,
+    vaultRoot,
+    guideCount: audit.guideCount,
+    mappedGuideCount: audit.mappedGuideCount,
+    validContextCount: validContexts,
+    words: audit.words,
+    contentsWords: audit.contentsWords,
+    guidelineWords: audit.guidelineWords,
+    nonblankLines: audit.nonblankLines,
+    errors,
+    discoveryIssues,
+    ...includeAudit ? {
+      advisories: audit.advisories,
+      duplicates: audit.duplicates,
+      guides: audit.guides.map((guide) => ({
+        path: guide.path,
+        scope: guide.scope,
+        words: guide.words,
+        nonblankLines: guide.nonblankLines,
+        contentsWords: guide.contents.words,
+        guidelineWords: guide.guidelines.words,
+        inheritedWords: guide.inheritedWords,
+        inheritedGuidePaths: guide.inheritedGuidePaths,
+        context: guide.marker.markers[0]?.noteId
+      }))
+    } : {}
+  };
+}
+function renderAgentReport(action, audit, validContexts, errors, discoveryIssues) {
+  const lines = [
+    `${action === "check" ? "Checked" : "Audited"} ${audit.guideCount} agent guides; ${audit.mappedGuideCount} markers, ${validContexts} valid Info hubs.`,
+    `Context: ${audit.words} words (${audit.contentsWords} Contents, ${audit.guidelineWords} Guidelines), ${audit.nonblankLines} nonblank lines.`
+  ];
+  if (errors.length === 0)
+    lines.push("Mappings and guide shape: clean.");
+  else
+    for (const error of errors)
+      lines.push(`error: ${safe(renderAgentCheckError(error))}`);
+  const skippedDirectories = discoveryIssues.filter(({ kind }) => kind === "symlink-directory");
+  if (skippedDirectories.length > 0) {
+    lines.push(`Skipped symbolic-link directories (${skippedDirectories.length}):`);
+    for (const issue of skippedDirectories)
+      lines.push(`  ${safe(issue.path)}`);
+  }
+  if (action === "audit") {
+    lines.push(`Advisories: ${audit.advisories.length}; exact duplicate rules: ${audit.duplicates.length}.`);
+    const worstChains = audit.guides.toSorted((left, right) => right.inheritedWords - left.inheritedWords || left.path.localeCompare(right.path)).slice(0, 10);
+    lines.push("Largest inherited chains:");
+    for (const guide of worstChains) {
+      lines.push(`  ${guide.inheritedWords} words / ${guide.inheritedGuidePaths.length} guides  ${safe(guide.path)}`);
+    }
+    const shown = audit.advisories.slice(0, 25);
+    if (shown.length > 0)
+      lines.push("Advisory sample:");
+    for (const advisory of shown)
+      lines.push(`  ${safe(advisoryLabel(advisory))}`);
+    if (audit.advisories.length > shown.length) {
+      lines.push(`  \u2026 ${audit.advisories.length - shown.length} more; rerun with --json for the complete audit.`);
+    }
+  }
+  return `${lines.join(`
+`)}
+`;
+}
+async function runAgents(command, output, dependencies) {
+  const snapshot = await (dependencies.scanVault ?? scanVault)(command.root);
+  const repository = await (dependencies.auditAgentGuideRepository ?? auditAgentGuideRepository)(command.repository);
+  const mapping = analyzeAgentContexts(snapshot.notes, repository.guides);
+  const filesystem = await (dependencies.inspectAgentContextRepository ?? inspectAgentContextRepository)(snapshot.notes, {
+    repositoryRoot: command.repository,
+    target: ".",
+    targetKind: "directory",
+    validationMode: "all"
+  });
+  const errors = agentCheckErrors([...mapping.issues, ...filesystem.issues], repository.issues, repository.audit);
+  const validContexts = mapping.contexts.filter(({ valid }) => valid).length;
+  if (command.json) {
+    output.stdout(terminalSafeJson(agentReportPayload(repository.repositoryRoot, snapshot.root, repository.audit, validContexts, errors, repository.issues, command.action === "audit")));
+  } else {
+    output.stdout(sanitizeTerminalText(renderAgentReport(command.action, repository.audit, validContexts, errors, repository.issues)));
+  }
+  return errors.length === 0 ? 0 : 3;
+}
 async function runVault(command, output, dependencies) {
   const snapshot = command.kind === "refresh" ? await (dependencies.refreshVault ?? refreshVault)(command.root, command.options) : await (dependencies.scanVault ?? scanVault)(command.root, command.options);
   if (command.kind === "refresh" || command.kind === "check") {
@@ -684,6 +1031,12 @@ ${sanitizeTerminalText(usage)}`);
     if (command.kind === "index" || command.kind === "search") {
       return await runSemantic(command, output, dependencies);
     }
+    if (command.kind === "context")
+      return await runContext(command, output, dependencies);
+    if (command.kind === "agent-identity")
+      return runAgentIdentity(command, output);
+    if (command.kind === "agents")
+      return await runAgents(command, output, dependencies);
     if (command.kind === "list")
       return await runList(command, output, dependencies);
     return await runVault(command, output, dependencies);

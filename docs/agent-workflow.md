@@ -4,8 +4,10 @@ This guide gives coding agents a conservative workflow for reading and maintaini
 
 ## Orient before editing
 
-1. Read `index.md` and the nearest `AGENTS.md` files.
-2. Search filenames, frontmatter titles, aliases, and note text before creating a new identity.
+1. For a repository-path question, run `info context` and read the returned
+   `AGENTS.md` files from root to nearest before opening any optional hubs.
+2. Read `index.md`, then search filenames, frontmatter titles, aliases, and note
+   text before creating a new identity.
 3. Read the notes that already own the concept or source in question.
 4. Use the narrowest view that answers the question:
    - `info list` for exact frontmatter or tag filters.
@@ -14,6 +16,37 @@ This guide gives coding agents a conservative workflow for reading and maintaini
    - `info graph` for whole-vault diagnostics.
 
 Update an existing note when the identity is unambiguous. Create a new note when the subject has a distinct durable identity, not merely because a search phrase differs.
+
+## Load repository context by path
+
+When the question concerns a repository file or directory, start from the
+repository root:
+
+```sh
+info context src/index.ts --root info --repo .
+```
+
+The command lists inherited guides from the repository root toward the nearest
+scope, then verified Info hubs from the nearest scope back toward the root. It
+prints the hub title and summary, not the full body. Read every returned guide;
+they are the normative, always-loaded source for ownership, required commands,
+prohibitions, invariants, and edit gates. Open only the hubs whose summaries
+apply, then expand through a bounded command:
+
+```sh
+info links scopes/src--25a6634263c1 --root info --depth 1 --limit 25
+info backlinks scopes/src--25a6634263c1 --root info
+info list --root info --where area=source --json
+info search "why source errors retain source ranges" --root info --json
+```
+
+Use the exact hub ID returned by `info context`. Use `--kind file` or
+`--kind directory` when a missing path cannot be classified reliably by
+`--kind auto`.
+
+A mapped scope hub carries pull-based rationale, history, examples, evidence,
+and links. It cannot override its guide or become the only home of a
+load-bearing edit rule. A guide does not need a hub.
 
 ## Query before reading broadly
 
@@ -123,3 +156,32 @@ info check --root .
 ```
 
 Review broken and ambiguous links first. Then inspect orphans and high-confidence title or alias mentions in context. Add a suggested link only when it improves the prose. Finish with a clean `info check` and inspect the resulting diff so the managed catalog is the only derived Markdown change.
+
+If the change adds, removes, renames, or moves a scope hub, changes its
+`type` or `scope`, or edits an `info:context` marker, also run:
+
+```sh
+info agents identity packages/parser --json
+info agents check --root info --repo .
+```
+
+Use `info agents identity` when creating or moving a mapping; it derives the
+canonical path and marker without writing either file. The gate checks
+canonical content-derived IDs, exact repository-relative
+scopes, collisions, real confined scope directories and guide files, guide
+shape, and reciprocal markers. A scope move changes identity, so rename the hub
+and marker together. Unmapped `AGENTS.md` files are valid.
+
+Use the audit when reviewing instruction size or inheritance:
+
+```sh
+info agents audit --root info --repo .
+info agents audit --root info --repo . --json
+```
+
+The audit adds deterministic per-guide and per-section measurements,
+inherited-chain totals, long-bullet advisories, and exact duplicate-rule
+advisories. Inspect them as refactoring leads. Length is not correctness, and a
+rule that must be known before editing stays in `AGENTS.md` even when it is
+long. Guide discovery skips common generated and vendor directories and never
+follows symbolic-link directories.

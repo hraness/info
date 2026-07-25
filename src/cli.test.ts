@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import {
+  agentContextMarkerForScope,
+  agentContextNotePath,
+} from "./agent-context.js";
 import { main, parseArguments } from "./cli.js";
 
 function captureOutput(): {
@@ -166,6 +170,72 @@ describe("info argument parsing", () => {
         depth: 3,
         limit: 25,
       },
+    });
+  });
+
+  test("parses repository context lookup and agent mapping commands", () => {
+    expect(parseArguments([
+      "context",
+      "packages/info/src/cli.ts",
+      "--root",
+      "info",
+      "--repo",
+      ".",
+      "--kind",
+      "file",
+      "--json",
+    ])).toEqual({
+      ok: true,
+      value: {
+        kind: "context",
+        root: "info",
+        repository: ".",
+        target: "packages/info/src/cli.ts",
+        targetKind: "file",
+        json: true,
+      },
+    });
+    expect(parseArguments([
+      "agents",
+      "audit",
+      "--root",
+      "info",
+      "--repo",
+      ".",
+    ])).toEqual({
+      ok: true,
+      value: {
+        kind: "agents",
+        action: "audit",
+        root: "info",
+        repository: ".",
+        json: false,
+      },
+    });
+    expect(parseArguments([
+      "agents",
+      "identity",
+      "packages/info",
+      "--json",
+    ])).toEqual({
+      ok: true,
+      value: {
+        kind: "agent-identity",
+        scope: "packages/info",
+        json: true,
+      },
+    });
+    expect(parseArguments(["context", "src", "--kind", "guess"])).toEqual({
+      ok: false,
+      message: "--kind must be auto, file, or directory",
+    });
+    expect(parseArguments(["agents", "fix"])).toEqual({
+      ok: false,
+      message: "agents requires identity, check, or audit",
+    });
+    expect(parseArguments(["agents", "identity"])).toEqual({
+      ok: false,
+      message: "agents identity requires exactly one repository scope",
     });
   });
 
@@ -398,6 +468,188 @@ describe("info vault commands", () => {
         scanVault: () => Promise.reject(new Error("bad\u001b]8;;https://evil.example\u0007path\u001b]8;;\u0007")),
       })).toBe(1);
       expect(failed.stderr()).toBe("error: badpath\n");
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("info agent context commands", () => {
+  test("emits the canonical non-mutating identity for a repository scope", async () => {
+    const jsonOutput = captureOutput();
+    expect(await main([
+      "agents",
+      "identity",
+      "packages/parser",
+      "--json",
+    ], jsonOutput.output)).toBe(0);
+    expect(JSON.parse(jsonOutput.stdout())).toEqual({
+      scope: "packages/parser",
+      noteId: "scopes/packages-parser--94a91e4eddfa",
+      notePath: "scopes/packages-parser--94a91e4eddfa.md",
+      guidePath: "packages/parser/AGENTS.md",
+      marker: "<!-- info:context scopes/packages-parser--94a91e4eddfa -->",
+    });
+
+    const rootOutput = captureOutput();
+    expect(await main([
+      "agents",
+      "identity",
+      ".",
+    ], rootOutput.output)).toBe(0);
+    expect(rootOutput.stdout()).toContain("Note path: scopes/repository--cdb4ee2aea69.md");
+    expect(rootOutput.stdout()).toContain("Guide path: AGENTS.md");
+
+    const rejected = captureOutput();
+    expect(await main([
+      "agents",
+      "identity",
+      "../outside",
+    ], rejected.output)).toBe(1);
+    expect(rejected.stderr()).toContain("must not contain parent traversal");
+  });
+
+  test("resolves inherited guides and reciprocal hubs without loading hub prose", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "cclrte-info-context-cli-"));
+    const repository = join(temporary, "repository");
+    const vault = join(repository, "info");
+    try {
+      await mkdir(join(repository, "src"), { recursive: true });
+      await mkdir(join(repository, "other"), { recursive: true });
+      await symlink(join(repository, "other"), join(repository, "linked"));
+      await mkdir(join(vault, "scopes"), { recursive: true });
+      await writeFile(join(repository, "AGENTS.md"), [
+        agentContextMarkerForScope("."),
+        "# Contents",
+        "",
+        "- `src/` – source",
+        "",
+        "# Guidelines",
+        "",
+        "- Keep root rules.",
+        "",
+      ].join("\n"));
+      await writeFile(join(repository, "src", "AGENTS.md"), [
+        agentContextMarkerForScope("src"),
+        "# Contents",
+        "",
+        "- `button.ts` – source",
+        "",
+        "# Guidelines",
+        "",
+        "- Keep source rules.",
+        "",
+      ].join("\n"));
+      await writeFile(join(vault, "index.md"), [
+        "# Info",
+        "",
+        "<!-- info:catalog:start -->",
+        "<!-- info:catalog:end -->",
+        "",
+      ].join("\n"));
+      for (const [scope, title] of [[".", "Repository context"], ["src", "Source context"]] as const) {
+        await writeFile(join(vault, agentContextNotePath(scope)), [
+          "---",
+          `title: ${title}`,
+          "type: agent-context",
+          `scope: ${scope}`,
+          "---",
+          "",
+          `# ${title}`,
+          "",
+          "A deliberately recognizable summary that should be returned without the complete body.",
+          "",
+          "The remainder of this hub is intentionally not part of the bounded command assertion.",
+          "",
+        ].join("\n"));
+      }
+
+      const contextOutput = captureOutput();
+      expect(await main([
+        "context",
+        "src/button.ts",
+        "--kind",
+        "file",
+        "--root",
+        vault,
+        "--repo",
+        repository,
+        "--json",
+      ], contextOutput.output)).toBe(0);
+      expect(JSON.parse(contextOutput.stdout())).toMatchObject({
+        target: "src/button.ts",
+        targetScope: "src",
+        guides: [
+          { path: "AGENTS.md", scope: "." },
+          { path: "src/AGENTS.md", scope: "src" },
+        ],
+        contexts: [
+          { title: "Source context", scope: "src" },
+          { title: "Repository context", scope: "." },
+        ],
+        issues: [],
+      });
+      expect(contextOutput.stdout()).not.toContain("The remainder of this hub");
+
+      const checkOutput = captureOutput();
+      expect(await main([
+        "agents",
+        "check",
+        "--root",
+        vault,
+        "--repo",
+        repository,
+        "--json",
+      ], checkOutput.output)).toBe(0);
+      expect(JSON.parse(checkOutput.stdout())).toMatchObject({
+        guideCount: 2,
+        mappedGuideCount: 2,
+        validContextCount: 2,
+        errors: [],
+        discoveryIssues: [{
+          kind: "symlink-directory",
+          path: "linked",
+        }],
+      });
+
+      const auditOutput = captureOutput();
+      expect(await main([
+        "agents",
+        "audit",
+        "--root",
+        vault,
+        "--repo",
+        repository,
+        "--json",
+      ], auditOutput.output)).toBe(0);
+      expect(JSON.parse(auditOutput.stdout())).toMatchObject({
+        guideCount: 2,
+        guides: [
+          { path: "AGENTS.md" },
+          { path: "src/AGENTS.md" },
+        ],
+      });
+
+      await writeFile(join(repository, "src", "AGENTS.md"), [
+        "# Contents",
+        "",
+        "- `button.ts` – source",
+        "",
+        "# Guidelines",
+        "",
+        "- Keep source rules.",
+        "",
+      ].join("\n"));
+      const brokenOutput = captureOutput();
+      expect(await main([
+        "agents",
+        "check",
+        "--root",
+        vault,
+        "--repo",
+        repository,
+      ], brokenOutput.output)).toBe(3);
+      expect(brokenOutput.stdout()).toContain("missing its info:context marker");
     } finally {
       await rm(temporary, { recursive: true, force: true });
     }

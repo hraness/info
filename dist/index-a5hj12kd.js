@@ -1,10 +1,15 @@
 // @bun
 import {
-  startNetworkProxy
-} from "./index-49bhdzht.js";
-import {
   classifyPlatformUrl
 } from "./index-hgve9rh2.js";
+import {
+  filterCookieProviderResult,
+  readCookieFile,
+  renderCookieHeader
+} from "./index-6mqdx02h.js";
+import {
+  startNetworkProxy
+} from "./index-49bhdzht.js";
 import {
   assertSafeNetworkUrl,
   decodeBytes,
@@ -19,11 +24,6 @@ import {
 import {
   readBoundedByteStream
 } from "./index-gh719d91.js";
-import {
-  filterCookieProviderResult,
-  readCookieFile,
-  renderCookieHeader
-} from "./index-6mqdx02h.js";
 
 // src/clip/acquire.ts
 import {

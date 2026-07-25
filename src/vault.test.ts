@@ -52,6 +52,28 @@ describe("vault scan and refresh", () => {
     expect(readFileSync(join(root, "index.md"), "utf8")).toBe(before);
   });
 
+  test("includes scope hubs as ordinary Markdown while excluding their AGENTS guide", async () => {
+    const root = fixture();
+    mkdirSync(join(root, "scopes"));
+    writeFileSync(join(root, "scopes", "AGENTS.md"), "# Contents\n\n- hubs\n\n# Guidelines\n\n- rules\n");
+    writeFileSync(join(root, "scopes", "src--25a6634263c1.md"), [
+      "---",
+      "title: Source context",
+      "type: agent-context",
+      "scope: src",
+      "---",
+      "",
+      "# Source context",
+      "",
+      "Pull-based rationale.",
+      "",
+    ].join("\n"));
+
+    const result = await scanVault(root);
+    expect(result.notes.map(({ path }) => path)).toContain("scopes/src--25a6634263c1.md");
+    expect(result.notes.map(({ path }) => path)).not.toContain("scopes/AGENTS.md");
+  });
+
   test("atomically refreshes only the managed catalog", async () => {
     const root = fixture();
     const refreshed = await refreshVault(root);

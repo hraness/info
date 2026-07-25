@@ -1,6 +1,6 @@
 ---
 name: refresh-info
-description: Refresh and validate a hraness/info Markdown vault after notes are added, renamed, moved, or materially revised. Use when an agent needs to update the managed catalog, inspect broken or ambiguous wikilinks, review contextual orphans and unlinked title or alias mentions, repair high-confidence semantic connections, or complete a vault health check.
+description: Refresh and validate a hraness/info Markdown vault after notes or repository-context mappings change. Use when an agent needs to update the managed catalog, inspect graph findings, validate scope hubs and reciprocal guide markers, review deterministic agent-guide advisories, or complete a vault health check.
 ---
 
 # Refresh a knowledge base
@@ -12,6 +12,9 @@ Use a refresh-review-check loop. Keep authored prose under deliberate editorial 
 - Resolve `<vault>` to the directory containing the managed `index.md`, then
   set the shell-local `INFO_ROOT` to that path (`INFO_ROOT=info` from a typical
   repository root, or `INFO_ROOT=.` from inside the vault).
+- When the change concerns `scopes/` or an `info:context` marker, resolve the
+  repository root and set `INFO_REPO` to that path (`INFO_REPO=.` from the
+  repository root).
 - Read the vault's applicable agent instructions and note conventions before editing.
 - Preserve note voice, frontmatter, filenames, and link intent unless a reported finding justifies a specific change.
 
@@ -39,7 +42,39 @@ Backlinks are derived from explicit contextual wikilinks, and mention candidates
 
 Intentional orphans and unlinked mentions may remain. Record the reason instead of manufacturing a connection.
 
-## 4. Re-refresh and check
+## 4. Validate changed repository-context mappings
+
+If the change adds, removes, renames, or moves a scope hub, changes its
+`type` or `scope`, or edits an `info:context` marker, run:
+
+```sh
+info agents identity "<repository-scope>" --json
+info agents check --root "$INFO_ROOT" --repo "$INFO_REPO"
+```
+
+Use the non-mutating identity command to derive the hub path and exact marker
+when creating or moving a mapping. The check command verifies canonical IDs,
+exact repository-relative
+directory scopes, collisions, repository confinement, real scope directories
+and guide files, guide shape, and reciprocal markers. A moved scope has a new
+identity, so update the hub filename and guide marker together. An unmapped
+`AGENTS.md` is valid.
+
+Use the audit when the change affects guide structure, inheritance, or repeated
+rules:
+
+```sh
+info agents audit --root "$INFO_ROOT" --repo "$INFO_REPO"
+```
+
+The audit runs the correctness checks and adds deterministic per-guide,
+per-section, inherited-chain, long-bullet, and exact-duplicate advisories.
+Review each advisory in context. Length is not correctness: do not move a
+load-bearing ownership rule, prohibition, command, invariant, or gate out of
+`AGENTS.md` merely to satisfy a suggested budget. Guide discovery skips common
+generated and vendor directories and never follows symbolic-link directories.
+
+## 5. Re-refresh and check
 
 After any note or link edit, run the refresh command again so the catalog and advisories reflect the final content. Then run the read-only gate:
 
@@ -47,4 +82,7 @@ After any note or link edit, run the refresh command again so the catalog and ad
 info check --root "$INFO_ROOT"
 ```
 
-Finish only when the check succeeds, the managed catalog is current, and broken or ambiguous links are resolved. Summarize deliberate link edits and any advisories intentionally left in place.
+Finish only when the graph check and any required agent-context check succeed,
+the managed catalog is current, and broken or ambiguous links are resolved.
+Summarize deliberate link edits, mapping changes, and advisories intentionally
+left in place.

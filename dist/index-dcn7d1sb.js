@@ -1,11 +1,5 @@
 // @bun
 import {
-  adapterCapabilities,
-  inspectClipEnvironment,
-  renderAdapterCapabilities,
-  renderDoctorReport
-} from "./index-qnvga131.js";
-import {
   canonicalizeUrl,
   chooseBestExtraction,
   countWords,
@@ -13,6 +7,12 @@ import {
   localizeAssets,
   sniffImage
 } from "./index-sm1xsdta.js";
+import {
+  adapterCapabilities,
+  inspectClipEnvironment,
+  renderAdapterCapabilities,
+  renderDoctorReport
+} from "./index-6g7ymyss.js";
 import {
   cloneBrowserProfile
 } from "./index-5n05se68.js";
@@ -23,10 +23,7 @@ import {
   acquireFile,
   acquireHttp,
   assertSafePersistentProfile
-} from "./index-1jtexth1.js";
-import {
-  startNetworkProxy
-} from "./index-49bhdzht.js";
+} from "./index-a5hj12kd.js";
 import {
   CONTENT_REWRITE_TRUNCATION_WARNING,
   buildClipMarkdown,
@@ -38,6 +35,17 @@ import {
   rewriteContentWithStatus,
   slugify
 } from "./index-hgve9rh2.js";
+import {
+  MAX_COOKIE_BYTES,
+  filterCookieProviderResult,
+  filterCookies,
+  readCookieFile,
+  renderCookieHeader,
+  renderNetscapeCookieJar
+} from "./index-6mqdx02h.js";
+import {
+  startNetworkProxy
+} from "./index-49bhdzht.js";
 import {
   decodeBytes,
   safeFetch
@@ -63,14 +71,6 @@ import {
 import {
   BoundedByteBuffer
 } from "./index-gh719d91.js";
-import {
-  MAX_COOKIE_BYTES,
-  filterCookieProviderResult,
-  filterCookies,
-  readCookieFile,
-  renderCookieHeader,
-  renderNetscapeCookieJar
-} from "./index-6mqdx02h.js";
 
 // src/clip/capture.ts
 import {

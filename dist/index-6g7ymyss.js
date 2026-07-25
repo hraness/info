@@ -2,7 +2,7 @@
 import {
   findInfoPackageRoot,
   isolatedAgentBrowserEnvironment
-} from "./index-1jtexth1.js";
+} from "./index-a5hj12kd.js";
 import {
   BoundedByteBuffer
 } from "./index-gh719d91.js";

@@ -1,7 +1,10 @@
 // @bun
 import {
   initVault
-} from "./index-6vg36apr.js";
+} from "./index-chx3zc4r.js";
+import {
+  navigateLinks
+} from "./index-9w6m3y9a.js";
 import {
   metadataAtPath,
   queryVault
@@ -31,8 +34,29 @@ import {
   wikiLinks
 } from "./index-dq5gjkcp.js";
 import {
-  navigateLinks
-} from "./index-9w6m3y9a.js";
+  auditAgentGuideRepository,
+  auditAgentGuideSource,
+  auditAgentGuides,
+  defaultAgentGuideIgnoredDirectories,
+  discoverAgentGuides
+} from "./index-q0j2a28n.js";
+import {
+  AgentContextRepositoryPathError,
+  RepositoryScopeError,
+  agentContextDirectory,
+  agentContextGuidePath,
+  agentContextHashLength,
+  agentContextMarkerForScope,
+  agentContextNoteId,
+  agentContextNotePath,
+  agentContextSlugMaximumLength,
+  agentContextType,
+  analyzeAgentContexts,
+  formatAgentContextMarker,
+  inspectAgentContextRepository,
+  normalizeRepositoryScope,
+  parseAgentContextMarker
+} from "./index-ahv2qpv1.js";
 export {
   wikiLinks,
   semanticDatabasePath,
@@ -46,16 +70,36 @@ export {
   readVaultNotes,
   queryVault,
   parseNote,
+  parseAgentContextMarker,
   normalizeVaultPath,
+  normalizeRepositoryScope,
   navigateLinks,
   metadataValueFromUnknown,
   metadataAtPath,
   markdownFiles,
   lookupNote,
+  inspectAgentContextRepository,
   initVault,
   indexSemanticVault,
+  formatAgentContextMarker,
+  discoverAgentGuides,
   defaultIgnoredDirectories,
+  defaultAgentGuideIgnoredDirectories,
   catalogStart,
   catalogEnd,
-  analyzeVault
+  auditAgentGuides,
+  auditAgentGuideSource,
+  auditAgentGuideRepository,
+  analyzeVault,
+  analyzeAgentContexts,
+  agentContextType,
+  agentContextSlugMaximumLength,
+  agentContextNotePath,
+  agentContextNoteId,
+  agentContextMarkerForScope,
+  agentContextHashLength,
+  agentContextGuidePath,
+  agentContextDirectory,
+  RepositoryScopeError,
+  AgentContextRepositoryPathError
 };

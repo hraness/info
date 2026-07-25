@@ -1,7 +1,7 @@
 {
   "name": "@cclrte/info",
-  "version": "0.4.0",
-  "description": "A local-first Markdown knowledge base for coding agents with auditable web and PDF capture, explicit wikilink graphs, derived backlinks, and local keyword or embedding search.",
+  "version": "0.5.0",
+  "description": "A local-first Markdown knowledge base for coding agents with scoped repository context, auditable capture, explicit graphs, and local semantic search.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -22,12 +22,22 @@
     "backlinks",
     "semantic-search",
     "agent-memory",
+    "agents-md",
+    "context-engineering",
     "local-first"
   ],
   "exports": {
     ".": {
       "types": "./src/index.ts",
       "import": "./dist/index.js"
+    },
+    "./agent-context": {
+      "types": "./src/agent-context.ts",
+      "import": "./dist/agent-context.js"
+    },
+    "./agent-guide-audit": {
+      "types": "./src/agent-guide-audit.ts",
+      "import": "./dist/agent-guide-audit.js"
     },
     "./browser-profiles": {
       "types": "./src/clip/browser-profiles.ts",
@@ -105,6 +115,8 @@
   "types": "./src/index.ts",
   "files": [
     "dist",
+    "src/agent-context.ts",
+    "src/agent-guide-audit.ts",
     "src/capture.ts",
     "src/cli.ts",
     "src/clip/acquire.ts",
@@ -150,7 +162,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun -e 'await (await import(\"node:fs/promises\")).rm(\"./dist\", { recursive: true, force: true })' && bun build ./src/index.ts ./src/clip/browser-profiles.ts ./src/capture.ts ./src/clip/acquire.ts ./src/clip/args.ts ./src/clip/bounded-byte-buffer.ts ./src/clip/cli.ts ./src/clip/cookies.ts ./src/clip/doctor.ts ./src/clip/network.ts ./src/clip/network-proxy.ts ./src/clip/persist.ts ./src/clip/terminal.ts ./src/graph.ts ./src/navigation.ts ./src/pdf.ts ./src/query.ts ./src/semantic.ts ./src/cli.ts ./src/clip/defuddle-worker.ts --outdir ./dist --root ./src --target bun --format esm --splitting --packages external",
+    "build": "bun -e 'await (await import(\"node:fs/promises\")).rm(\"./dist\", { recursive: true, force: true })' && bun build ./src/index.ts ./src/agent-context.ts ./src/agent-guide-audit.ts ./src/clip/browser-profiles.ts ./src/capture.ts ./src/clip/acquire.ts ./src/clip/args.ts ./src/clip/bounded-byte-buffer.ts ./src/clip/cli.ts ./src/clip/cookies.ts ./src/clip/doctor.ts ./src/clip/network.ts ./src/clip/network-proxy.ts ./src/clip/persist.ts ./src/clip/terminal.ts ./src/graph.ts ./src/navigation.ts ./src/pdf.ts ./src/query.ts ./src/semantic.ts ./src/cli.ts ./src/clip/defuddle-worker.ts --outdir ./dist --root ./src --target bun --format esm --splitting --packages external",
     "typecheck": "tsc --noEmit",
     "test": "bun test ./src",
     "test:package": "bun run ./scripts/package-smoke.ts",

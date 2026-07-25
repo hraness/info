@@ -21,17 +21,22 @@ describe("vault initialization", () => {
     const scanned = await scanVault(root);
 
     expect(result.files).toContain("articles/AGENTS.md");
+    expect(result.files).toContain("scopes/AGENTS.md");
     expect(result.files).toContain("index.md");
     expect(scanned.index).toBe("current");
     expect(scanned.analysis.noteCount).toBe(0);
     expect(scanned.analysis.issues).toEqual([]);
     const rootGuide = readFileSync(join(root, "AGENTS.md"), "utf8");
     const planGuide = readFileSync(join(root, "plans/AGENTS.md"), "utf8");
+    const scopeGuide = readFileSync(join(root, "scopes/AGENTS.md"), "utf8");
     expect(rootGuide).toContain("# Guidelines");
     expect(rootGuide).toContain("info search");
     expect(planGuide).toContain("type: plan");
     expect(planGuide).toContain("verification");
     expect(planGuide).toContain("same file");
+    expect(scopeGuide).toContain("type: agent-context");
+    expect(scopeGuide).toContain("info agents identity");
+    expect(scopeGuide).toContain("info agents check");
   });
 
   test("refuses to merge into an existing directory", async () => {

@@ -12,6 +12,12 @@
       "@cclrte/info": [
         "./src/index.ts"
       ],
+      "@cclrte/info/agent-context": [
+        "./src/agent-context.ts"
+      ],
+      "@cclrte/info/agent-guide-audit": [
+        "./src/agent-guide-audit.ts"
+      ],
       "@cclrte/info/browser-profiles": [
         "./src/clip/browser-profiles.ts"
       ],

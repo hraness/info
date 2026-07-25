@@ -1,6 +1,6 @@
 ---
 name: query-info
-description: Search and navigate a hraness/info Markdown vault using local semantic retrieval, exact frontmatter and tag filters, deterministic sorting, backlinks, and graph relationships. Use when an agent needs to find prior knowledge, plans, captures, decisions, related notes, or evidence before answering, planning, or changing code.
+description: Load scoped repository context, then search and navigate a hraness/info Markdown vault with exact metadata, bounded links, backlinks, keyword search, or local semantic retrieval. Use when an agent needs the applicable repository instructions, rationale, prior knowledge, plans, captures, decisions, or evidence before answering, planning, or changing code.
 ---
 
 # Query the knowledge base
@@ -13,12 +13,17 @@ authority; search scores, metadata rows, and graph results are derived views.
 - Resolve `<vault>` to the directory containing the managed `index.md`, then
   set the shell-local `INFO_ROOT` to that path (`INFO_ROOT=info` from a typical
   repository root, or `INFO_ROOT=.` from inside the vault).
+- Resolve `<repository>` to the repository root when the question concerns a
+  repository path (`INFO_REPO=.` from that root).
 - Read the vault's applicable agent instructions and note conventions.
 - Pass the resolved path to every `--root`; do not scan a repository root merely
   because that is where the agent session started.
 
 ## Choose the retrieval lane
 
+- Repository file or directory: run `info context` first. Read its inherited
+  guides root to nearest, then open only useful context hubs from nearest to
+  root.
 - Known frontmatter field or tag such as type, status, or area: use `info list`.
 - Known note title, path, or alias: use `info links` or `info backlinks`, which
   resolve note identities before returning authored relationships.
@@ -26,12 +31,20 @@ authority; search scores, metadata rows, and graph results are derived views.
 - Broad orientation: read `index.md`, then follow the smallest useful link trail.
 
 ```sh
+info context src/parser.ts --root "$INFO_ROOT" --repo "$INFO_REPO"
 info list --root "$INFO_ROOT" --where type=plan --where status=in-progress --sort area --json
 info list --root "$INFO_ROOT" --tag retrieval --sort title --json
 info backlinks "Plan title or path" --root "$INFO_ROOT" --json
 info links "Plan title or path" --root "$INFO_ROOT" --direction both --depth 1 --limit 25 --json
 info search "why browser capture uses the current tab" --root "$INFO_ROOT" --json
 ```
+
+`info context` prints hub titles and summaries, not hub bodies. Guides remain
+the normative, always-loaded home for ownership, required commands,
+prohibitions, invariants, and edit gates. Scope hubs are optional pull-based
+rationale, history, examples, evidence, and links; they cannot override a guide
+or become the only home of a load-bearing rule. Use `--kind file` or
+`--kind directory` when `auto` cannot classify a missing target reliably.
 
 Repeated filters use AND semantics. Metadata paths may be dotted. String and
 tag comparisons are case-insensitive; array metadata matches by membership.
@@ -58,15 +71,17 @@ capture manifests.
 
 ## Combine meaning with structure
 
-1. Use semantic search to discover candidate identities.
-2. Use `info list` to narrow by authored metadata such as `type`, `status`,
+1. For a repository-path question, use `info context` before broader retrieval.
+2. Use semantic search to discover candidate identities when exact structure
+   does not answer the question.
+3. Use `info list` to narrow by authored metadata such as `type`, `status`,
    `area`, or `tags`.
-3. Use `info links` at depth 1 to inspect immediate explicit relationships and
+4. Use `info links` at depth 1 to inspect immediate explicit relationships and
    `info backlinks` for a focused inbound view. Increase depth only when the
    first neighborhood is insufficient. Traversal defaults to 50 notes and
    reports truncation; lower `--limit` for tighter agent context or raise it
    deliberately when a high-degree hub is genuinely relevant.
-4. Read the authoritative notes and cited captures before synthesizing.
+5. Read the authoritative notes and cited captures before synthesizing.
 
 A title match may identify a prerequisite, prior version, or supporting note
 rather than the artifact that owns the current outcome. Confirm status and

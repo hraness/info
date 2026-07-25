@@ -1,4 +1,4 @@
 interface:
   display_name: "Query a Knowledge Base"
-  short_description: "Search meaning, metadata, and note relationships"
-  default_prompt: "Use $query-info to find and structurally navigate the relevant knowledge-base notes."
+  short_description: "Load scoped context, then search the knowledge base"
+  default_prompt: "Use $query-info to load the applicable repository-path context first, then retrieve the smallest useful set of knowledge-base notes."
