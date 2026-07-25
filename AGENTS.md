@@ -8,6 +8,7 @@
 - `skills/query-info/` – reusable agent workflow for choosing exact metadata, graph, keyword, or semantic retrieval.
 - `skills/plan-info/` – reusable agent workflow for creating and growing durable implementation plans.
 - `docs/` – design, capture, and agent-workflow documentation.
+- `.github/workflows/` – read-only branch validation and checks-gated immutable GitHub Release automation.
 - `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `LICENSE` – public usage, project policy, threat model, and terms.
 - `package.json`, `tsconfig.json`, and `bun.lock` – standalone package and frozen verification configuration.
 
@@ -23,3 +24,4 @@
 - Keep security-sensitive runtime forks pinned to immutable commits and exercise their behavior through the standalone install gate.
 - Pair concrete behavior tests with property tests for parsing, resolution, ordering, path confinement, and round-trip laws.
 - Run `bun run check` before handing off a change. The check must leave committed `dist/` and `bun.lock` unchanged.
+- Treat a `v*` tag as a release request, not a completed release. Before tagging, confirm repository-level immutable releases are enabled; use a strictly increasing stable package version, keep the tag equal to `v<package.json version>` on `main`, and let the read-only verification job complete before its write-scoped publisher creates the Release. Do not create the next tag until that workflow and Release are verified because GitHub concurrency is not a durable queue. After tagging, verify the matching non-draft immutable Release is Latest.

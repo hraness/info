@@ -1,0 +1,135 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stable-release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      verified_tag: ${{ steps.identity.outputs.tag }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.14"
+      - name: Verify release identity
+        id: identity
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          package_version="$(bun -e 'const value = await Bun.file("package.json").json(); if (typeof value.version !== "string") process.exit(1); process.stdout.write(value.version)')"
+          if [[ ! "$package_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Package version $package_version is not a stable semantic version"
+            exit 1
+          fi
+          expected_tag="v$package_version"
+          if [[ "$GITHUB_REF_NAME" != "$expected_tag" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package version $expected_tag"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
+            echo "::error::Tag $GITHUB_REF_NAME is not reachable from $DEFAULT_BRANCH"
+            exit 1
+          fi
+          newest_stable_tag="$(git tag --list 'v*' | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | LC_ALL=C sort -V | tail -n 1)"
+          if [[ "$newest_stable_tag" != "$GITHUB_REF_NAME" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME is not newer than $newest_stable_tag"
+            exit 1
+          fi
+          printf 'tag=%s\n' "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun run check
+      - run: |
+          generated_status="$(git status --porcelain --untracked-files=all -- dist bun.lock)"
+          if [[ -n "$generated_status" ]]; then
+            printf '%s\n' "$generated_status"
+            exit 1
+          fi
+      - run: bun pm pack --dry-run --ignore-scripts
+      - run: node --input-type=module -e 'await Promise.all(["./dist/index.js","./dist/clip/browser-profiles.js","./dist/capture.js","./dist/clip/acquire.js","./dist/clip/args.js","./dist/clip/bounded-byte-buffer.js","./dist/clip/cli.js","./dist/clip/doctor.js","./dist/clip/network.js","./dist/clip/network-proxy.js","./dist/clip/persist.js","./dist/clip/terminal.js","./dist/graph.js","./dist/navigation.js","./dist/pdf.js","./dist/query.js","./dist/semantic.js"].map((path) => import(path)))'
+
+  publish:
+    name: Publish
+    needs: verify
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      VERIFIED_TAG: ${{ needs.verify.outputs.verified_tag }}
+    steps:
+      - name: Publish verified GitHub Release
+        run: |
+          set -euo pipefail
+          if [[ -z "$VERIFIED_TAG" || "$VERIFIED_TAG" != "$GITHUB_REF_NAME" ]]; then
+            echo "::error::Publish request does not match the verified tag"
+            exit 1
+          fi
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            published_tags="$(gh api --paginate \
+              "/repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')"
+            printf '%s\n' "$published_tags" | NEXT_TAG="$GITHUB_REF_NAME" node -e '
+              const fs = require("node:fs");
+              const pattern = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
+              const parse = (tag) => {
+                const match = pattern.exec(tag);
+                return match === null ? null : match.slice(1).map(BigInt);
+              };
+              const compare = (left, right) => {
+                for (let index = 0; index < 3; index += 1) {
+                  if (left[index] !== right[index]) {
+                    return left[index] > right[index] ? 1 : -1;
+                  }
+                }
+                return 0;
+              };
+              const next = parse(process.env.NEXT_TAG ?? "");
+              if (next === null) process.exit(1);
+              for (const tag of fs.readFileSync(0, "utf8").split(/\r?\n/u)) {
+                const current = parse(tag);
+                if (current !== null && compare(next, current) <= 0) {
+                  console.error("::error::Release " + process.env.NEXT_TAG + " is not newer than " + tag);
+                  process.exit(1);
+                }
+              }
+            '
+            gh release create "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --generate-notes \
+              --latest \
+              --title "Info $GITHUB_REF_NAME"
+          fi
+          release_state="$(gh release view "$GITHUB_REF_NAME" \
+            --json assets,isDraft,isImmutable,isPrerelease,tagName \
+            --jq '[.tagName, .isDraft, .isPrerelease, .isImmutable, (.assets | length)] | @tsv')"
+          expected_state="$GITHUB_REF_NAME"$'\tfalse\tfalse\ttrue\t0'
+          if [[ "$release_state" != "$expected_state" ]]; then
+            echo "::error::Release $GITHUB_REF_NAME is not published and immutable"
+            exit 1
+          fi
+          latest_tag="$(gh api "/repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')"
+          if [[ "$latest_tag" != "$GITHUB_REF_NAME" ]]; then
+            echo "::error::Latest release is $latest_tag, expected $GITHUB_REF_NAME"
+            exit 1
+          fi
