@@ -134,7 +134,7 @@ export async function runPdfCapture(
 ): Promise<PdfCaptureOutcome> {
   const callerOwnedWorkspace = options.workspaceDirectory !== undefined;
   const workspaceDirectory = options.workspaceDirectory
-    ?? mkdtempSync(join(tmpdir(), "cclrte-info-pdf-"));
+    ?? mkdtempSync(join(tmpdir(), "cclrte-oh-pdf-"));
   try {
     const inspection = await inspectPdf({
       inputPath: options.inputPath,

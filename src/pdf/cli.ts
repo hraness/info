@@ -80,7 +80,7 @@ export function pdfCaptureSummary(outcome: PdfCaptureOutcome): Record<string, un
   };
 }
 
-/** Delegated CLI entry point for the root `info pdf` command. */
+/** Delegated CLI entry point for the root `oh pdf` command. */
 export async function main(
   rawArguments: readonly string[] = process.argv.slice(2),
   environment: Readonly<Record<string, string | undefined>> = process.env,

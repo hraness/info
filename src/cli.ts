@@ -63,29 +63,29 @@ const defaultOutput: Output = {
   stderr: (value) => process.stderr.write(value),
 };
 
-export const usage = `info — auditable capture and derived links for Markdown vaults
+export const usage = `oh — auditable capture and derived links for Markdown vaults
 
 Usage:
-  info init [directory] [--json]
-  info clip <url|current> [capture options]
-  info inspect <url> [capture options]
-  info pdf <file-or-url> [PDF options]
-  info refresh [--root <directory>] [--index <path>] [--json]
-  info check [--root <directory>] [--index <path>] [--json]
-  info graph [--root <directory>] [--index <path>] [--json]
-  info backlinks <note> [--root <directory>] [--index <path>] [--json]
-  info links <note> [--root <directory>] [--direction <in|out|both>] [--depth <count>] [--limit <count>] [--json]
-  info list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
-  info index [--root <directory>] [--database <path>] [--force] [--json]
-  info search <query> [--root <directory>] [--database <path>] [--mode <semantic|keyword>] [--limit <count>] [--min-score <score>] [--json]
-  info context <repository-path> [--root <vault>] [--repo <repository>] [--kind <auto|file|directory>] [--json]
-  info agents identity <repository-scope> [--json]
-  info agents check [--root <vault>] [--repo <repository>] [--json]
-  info agents audit [--root <vault>] [--repo <repository>] [--json]
-  info doctor [--json]
-  info adapters [--json]
+  oh init [directory] [--json]
+  oh clip <url|current> [capture options]
+  oh inspect <url> [capture options]
+  oh pdf <file-or-url> [PDF options]
+  oh refresh [--root <directory>] [--index <path>] [--json]
+  oh check [--root <directory>] [--index <path>] [--json]
+  oh graph [--root <directory>] [--index <path>] [--json]
+  oh backlinks <note> [--root <directory>] [--index <path>] [--json]
+  oh links <note> [--root <directory>] [--direction <in|out|both>] [--depth <count>] [--limit <count>] [--json]
+  oh list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
+  oh index [--root <directory>] [--database <path>] [--force] [--json]
+  oh search <query> [--root <directory>] [--database <path>] [--mode <semantic|keyword>] [--limit <count>] [--min-score <score>] [--json]
+  oh context <repository-path> [--root <vault>] [--repo <repository>] [--kind <auto|file|directory>] [--json]
+  oh agents identity <repository-scope> [--json]
+  oh agents check [--root <vault>] [--repo <repository>] [--json]
+  oh agents audit [--root <vault>] [--repo <repository>] [--json]
+  oh doctor [--json]
+  oh adapters [--json]
 
-Run \`info clip --help\` for web capture options or \`info pdf --help\` for PDF conversion options.
+Run \`oh clip --help\` for web capture options or \`oh pdf --help\` for PDF conversion options.
 `;
 
 type VaultCommand = "refresh" | "check" | "graph" | "backlinks" | "links";
@@ -608,7 +608,7 @@ export function parseArguments(arguments_: readonly string[]): ParseResult {
     return { ok: true, value: { kind: "clip", arguments: arguments_ } };
   }
   if (command === "init") {
-    let directory = "info";
+    let directory = "oh";
     let json = false;
     const positional: string[] = [];
     for (const argument of arguments_.slice(1)) {
@@ -905,7 +905,7 @@ function renderContext(
     const context = guide.marker.markers[0]?.noteId;
     lines.push(`  ${safe(guide.path)}${context === undefined ? "" : `  →  ${safe(context)}`}`);
   }
-  lines.push("Info hubs (nearest → root):");
+  lines.push("Oh hubs (nearest → root):");
   if (inspection.matchingContexts.length === 0) lines.push("  None.");
   for (const context of inspection.matchingContexts) {
     const connection = snapshot.analysis.noteConnections.find(({ id }) => id === context.note.id);
@@ -916,7 +916,7 @@ function renderContext(
   }
   for (const issue of inspection.issues) lines.push(`error: ${safe(issue.message)}`);
   if (inspection.matchingContexts.length > 0) {
-    lines.push("Open a hub, then use `info links <hub> --root <vault> --depth 1` for bounded neighboring context.");
+    lines.push("Open a hub, then use `oh links <hub> --root <vault> --depth 1` for bounded neighboring context.");
   }
   return `${lines.join("\n")}\n`;
 }
@@ -1078,7 +1078,7 @@ function renderAgentReport(
   discoveryIssues: readonly AgentGuideDiscoveryIssue[],
 ): string {
   const lines = [
-    `${action === "check" ? "Checked" : "Audited"} ${audit.guideCount} agent guides; ${audit.mappedGuideCount} markers, ${validContexts} valid Info hubs.`,
+    `${action === "check" ? "Checked" : "Audited"} ${audit.guideCount} agent guides; ${audit.mappedGuideCount} markers, ${validContexts} valid Oh hubs.`,
     `Context: ${audit.words} words (${audit.contentsWords} Contents, ${audit.guidelineWords} Guidelines), ${audit.nonblankLines} nonblank lines.`,
   ];
   if (errors.length === 0) lines.push("Mappings and guide shape: clean.");

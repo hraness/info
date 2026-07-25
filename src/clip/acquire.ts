@@ -25,7 +25,7 @@ import {
 import { assertSafeNetworkUrl, decodeBytes, safeFetch } from "./network.js";
 import { startNetworkProxy, type LocalNetworkProxy } from "./network-proxy.js";
 import { classifyPlatformUrl } from "./platforms.js";
-import { findInfoPackageRoot, resolvePackageDirectory } from "./package-root.js";
+import { findOhPackageRoot, resolvePackageDirectory } from "./package-root.js";
 import { sanitizeArtifactUrl } from "./persist.js";
 
 const agentBrowserBinDirectory = join(resolvePackageDirectory("agent-browser"), "bin");
@@ -252,7 +252,7 @@ async function runAgentBrowserBatch(
 
 /** Discover Chrome profiles without opening a browser or reading cookie values. */
 export async function discoverChromeProfiles(timeoutMs = 15_000): Promise<readonly ChromeProfile[]> {
-  const directory = mkdtempSync(join(tmpdir(), "cclrte-info-profiles-"));
+  const directory = mkdtempSync(join(tmpdir(), "cclrte-oh-profiles-"));
   chmodSync(directory, 0o700);
   let socketDirectory: string | null = null;
   try {
@@ -690,7 +690,7 @@ export function assertSafePersistentProfile(options: CaptureArguments): string |
   if (options.browserProfile === undefined) return null;
   const path = profilePath(options.browserProfile);
   if (path === null) return null;
-  const repositoryRoot = realpathSync(findInfoPackageRoot());
+  const repositoryRoot = realpathSync(findOhPackageRoot());
   const outputRoot = canonicalPotentialPath(options.outputBase, "Capture output root");
   if (pathInside(repositoryRoot, path) || pathInside(outputRoot, path) || pathInside(path, outputRoot)) {
     throw new Error("Persistent browser profiles must live outside the repository and capture output roots.");

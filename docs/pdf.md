@@ -1,6 +1,6 @@
 # Capture PDF documents
 
-`info pdf` converts a local PDF or a public HTTP(S) PDF into an auditable Markdown
+`oh pdf` converts a local PDF or a public HTTP(S) PDF into an auditable Markdown
 bundle. Remote downloads use the same DNS-pinned, private-network-denying
 acquisition boundary as web capture, and sensitive URL parameters are removed
 before provenance is persisted. It preserves
@@ -11,10 +11,10 @@ screenshots.
 ## Capture a PDF
 
 ```sh
-info doctor
-info pdf "/absolute/path/to/document.pdf" --output articles
-info pdf "https://example.com/document.pdf" --output articles
-info pdf "/absolute/path/to/document.pdf" --slug stable-slug --output articles
+oh doctor
+oh pdf "/absolute/path/to/document.pdf" --output articles
+oh pdf "https://example.com/document.pdf" --output articles
+oh pdf "/absolute/path/to/document.pdf" --slug stable-slug --output articles
 ```
 
 The output mirrors a web capture without pretending the local file is a URL:
@@ -79,7 +79,7 @@ accepts `markdown`, optional `method` (`agent` or `manual`), and optional
 `alt`. Re-run against the same bundle with:
 
 ```sh
-info pdf "/absolute/path/to/document.pdf" \
+oh pdf "/absolute/path/to/document.pdf" \
   --output articles \
   --annotations /tmp/pdf-image-annotations.json \
   --force
@@ -94,7 +94,7 @@ bundle, so the path passed to `--annotations` does not need to remain available.
 ## Local tools
 
 PDF ingestion uses the open-source Poppler command-line tools `pdfinfo` and
-`pdftohtml`. Tesseract enables image text extraction. `info doctor` reports
+`pdftohtml`. Tesseract enables image text extraction. `oh doctor` reports
 whether each route is available.
 
 Tool processes run with fixed argument shapes, bounded output, wall-time

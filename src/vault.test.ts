@@ -17,12 +17,12 @@ import { refreshVault, scanVault } from "./vault.js";
 const roots: string[] = [];
 
 function fixture(): string {
-  const root = mkdtempSync(join(tmpdir(), "cclrte-info-vault-test-"));
+  const root = mkdtempSync(join(tmpdir(), "cclrte-oh-vault-test-"));
   roots.push(root);
   mkdirSync(join(root, "notes"));
   writeFileSync(
     join(root, "index.md"),
-    "# Knowledge base\n\n<!-- info:catalog:start -->\n<!-- info:catalog:end -->\n",
+    "# Knowledge base\n\n<!-- oh:catalog:start -->\n<!-- oh:catalog:end -->\n",
   );
   writeFileSync(join(root, "notes", "alpha.md"), "# Alpha\n\nSee [[notes/beta|Beta]].\n");
   writeFileSync(join(root, "notes", "beta.md"), "---\naliases: [Second note]\n---\n# Beta\n\nA maintained note.\n");
@@ -106,7 +106,7 @@ describe("vault scan and refresh", () => {
     mkdirSync(join(root, "navigation"));
     writeFileSync(
       join(root, "navigation", "catalog.md"),
-      "# Catalog\n\n<!-- info:catalog:start -->\n<!-- info:catalog:end -->\n",
+      "# Catalog\n\n<!-- oh:catalog:start -->\n<!-- oh:catalog:end -->\n",
     );
 
     const result = await refreshVault(root, { index: "navigation/catalog.md" });

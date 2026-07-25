@@ -15,12 +15,12 @@ title: Knowledge base
 
 This vault keeps captured sources separate from maintained notes. Catalog links are navigation; contextual links belong in prose when they help a reader follow a real relationship.
 
-<!-- info:catalog:start -->
+<!-- oh:catalog:start -->
 ## Note catalog
 
 _No durable notes have been filed yet._
 
-<!-- info:catalog:end -->
+<!-- oh:catalog:end -->
 `,
   "AGENTS.md": `# Contents
 
@@ -38,8 +38,8 @@ _No durable notes have been filed yet._
 - Put links in explanatory prose when they carry part of the argument. Do not add bare reciprocal links to improve graph counts.
 - Preserve source authority: article bodies are captures, riffs retain the speaker's claims, and maintained notes own later synthesis.
 - Keep \`AGENTS.md\` normative and concise without removing load-bearing rules. A scope hub may hold rationale, history, examples, and linked decisions, but never silently overrides a guide or becomes the only home of an edit-time rule.
-- Run \`info refresh --root .\` after changing notes, inspect advisory link candidates, then run \`info check --root .\`.
-- Use \`info context <path> --root . --repo <repository>\` for scoped repository knowledge, \`info list\` for exact metadata or tags, \`info links\` for explicit relationships, and \`info search\` when the concept may use different words.
+- Run \`oh refresh --root .\` after changing notes, inspect advisory link candidates, then run \`oh check --root .\`.
+- Use \`oh context <path> --root . --repo <repository>\` for scoped repository knowledge, \`oh list\` for exact metadata or tags, \`oh links\` for explicit relationships, and \`oh search\` when the concept may use different words.
 `,
   "articles/AGENTS.md": `# Contents
 
@@ -89,9 +89,9 @@ _No durable notes have been filed yet._
 # Guidelines
 
 - Keep one hub per exact repository-relative directory scope, with \`type: agent-context\` and \`scope\` in frontmatter.
-- Derive the canonical hub path and reciprocal marker with \`info agents identity <scope>\`; do not reproduce the slug or hash logic by hand.
+- Derive the canonical hub path and reciprocal marker with \`oh agents identity <scope>\`; do not reproduce the slug or hash logic by hand.
 - Put rationale, history, examples, evidence, and links here. Keep ownership, prohibitions, required commands, and every rule needed before editing in the guide.
-- Use \`info agents check --root <vault> --repo <repository>\` after changing a mapping; use \`info agents audit\` to review guide and inherited-chain size without treating length as correctness.
+- Use \`oh agents check --root <vault> --repo <repository>\` after changing a mapping; use \`oh agents audit\` to review guide and inherited-chain size without treating length as correctness.
 `,
 } as const;
 

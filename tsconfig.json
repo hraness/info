@@ -9,64 +9,64 @@
     "moduleResolution": "Bundler",
     "moduleDetection": "force",
     "paths": {
-      "@cclrte/info": [
+      "@cclrte/oh": [
         "./src/index.ts"
       ],
-      "@cclrte/info/agent-context": [
+      "@cclrte/oh/agent-context": [
         "./src/agent-context.ts"
       ],
-      "@cclrte/info/agent-guide-audit": [
+      "@cclrte/oh/agent-guide-audit": [
         "./src/agent-guide-audit.ts"
       ],
-      "@cclrte/info/browser-profiles": [
+      "@cclrte/oh/browser-profiles": [
         "./src/clip/browser-profiles.ts"
       ],
-      "@cclrte/info/capture": [
+      "@cclrte/oh/capture": [
         "./src/capture.ts"
       ],
-      "@cclrte/info/clip/acquire": [
+      "@cclrte/oh/clip/acquire": [
         "./src/clip/acquire.ts"
       ],
-      "@cclrte/info/clip/args": [
+      "@cclrte/oh/clip/args": [
         "./src/clip/args.ts"
       ],
-      "@cclrte/info/clip/bounded-byte-buffer": [
+      "@cclrte/oh/clip/bounded-byte-buffer": [
         "./src/clip/bounded-byte-buffer.ts"
       ],
-      "@cclrte/info/clip/cli": [
+      "@cclrte/oh/clip/cli": [
         "./src/clip/cli.ts"
       ],
-      "@cclrte/info/clip/cookies": [
+      "@cclrte/oh/clip/cookies": [
         "./src/clip/cookies.ts"
       ],
-      "@cclrte/info/clip/doctor": [
+      "@cclrte/oh/clip/doctor": [
         "./src/clip/doctor.ts"
       ],
-      "@cclrte/info/clip/network": [
+      "@cclrte/oh/clip/network": [
         "./src/clip/network.ts"
       ],
-      "@cclrte/info/clip/network-proxy": [
+      "@cclrte/oh/clip/network-proxy": [
         "./src/clip/network-proxy.ts"
       ],
-      "@cclrte/info/clip/persist": [
+      "@cclrte/oh/clip/persist": [
         "./src/clip/persist.ts"
       ],
-      "@cclrte/info/clip/terminal": [
+      "@cclrte/oh/clip/terminal": [
         "./src/clip/terminal.ts"
       ],
-      "@cclrte/info/graph": [
+      "@cclrte/oh/graph": [
         "./src/graph.ts"
       ],
-      "@cclrte/info/navigation": [
+      "@cclrte/oh/navigation": [
         "./src/navigation.ts"
       ],
-      "@cclrte/info/pdf": [
+      "@cclrte/oh/pdf": [
         "./src/pdf.ts"
       ],
-      "@cclrte/info/query": [
+      "@cclrte/oh/query": [
         "./src/query.ts"
       ],
-      "@cclrte/info/semantic": [
+      "@cclrte/oh/semantic": [
         "./src/semantic.ts"
       ]
     },

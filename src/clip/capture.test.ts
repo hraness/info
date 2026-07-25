@@ -19,7 +19,7 @@ const baseOptions = (url: string, overrides: Partial<CaptureArguments> = {}): Ca
   media: "none",
   evidence: "none",
   htmlFile: undefined,
-  outputBase: "info/articles",
+  outputBase: "oh/articles",
   force: false,
   stdout: true,
   json: false,
@@ -191,7 +191,7 @@ describe("capture orchestration", () => {
   });
 
   test("captures from a disposable copy of a path-backed signed-in profile", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "info-capture-profile-copy-"));
+    const directory = mkdtempSync(join(tmpdir(), "oh-capture-profile-copy-"));
     try {
       const userData = join(directory, "User Data");
       const source = join(userData, "Default");
@@ -264,7 +264,7 @@ describe("capture orchestration", () => {
   });
 
   test("derives the source URL and platform scope from a current attached tab", async () => {
-    const currentUrl = "https://github.com/hraness/info/issues/42?view=all";
+    const currentUrl = "https://github.com/hraness/oh/issues/42?view=all";
     const browserPage: AcquiredPage = {
       body: "<main><h1>Current issue</h1><p>Rendered issue body and comments.</p></main>",
       contentType: "text/html",

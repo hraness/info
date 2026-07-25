@@ -35,7 +35,7 @@ function fixture(): {
   readonly image: PdfImageCandidate;
   readonly manifest: PdfCaptureManifest;
 } {
-  const root = mkdtempSync(join(tmpdir(), "info-pdf-persist-test-"));
+  const root = mkdtempSync(join(tmpdir(), "oh-pdf-persist-test-"));
   roots.push(root);
   const outputBase = join(root, "articles");
   const sourcePath = join(root, "input.pdf");

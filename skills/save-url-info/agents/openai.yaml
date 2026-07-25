@@ -1,4 +1,0 @@
-interface:
-  display_name: "Save URL to Info"
-  short_description: "Save URLs and signed-in pages to an Info vault"
-  default_prompt: "Use $save-url-info to save this URL or current signed-in page into the knowledge base and report completeness."

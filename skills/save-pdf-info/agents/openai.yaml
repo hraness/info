@@ -1,4 +1,0 @@
-interface:
-  display_name: "Save PDF to Info"
-  short_description: "Convert PDFs into auditable Info Markdown"
-  default_prompt: "Use $save-pdf-info to convert this PDF into a faithful Markdown bundle with structured text, OCR, local images, and provenance."

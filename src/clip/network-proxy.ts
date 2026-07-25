@@ -558,7 +558,7 @@ export async function startNetworkProxy(options: NetworkProxyOptions): Promise<L
           upstream.destroy();
           return;
         }
-        client.write("HTTP/1.1 200 Connection Established\r\nProxy-Agent: cclrte-info\r\n\r\n");
+        client.write("HTTP/1.1 200 Connection Established\r\nProxy-Agent: cclrte-oh\r\n\r\n");
         if (head.byteLength > 0) {
           if (!accountTransfer(head.byteLength)) {
             client.destroy();

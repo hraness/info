@@ -240,7 +240,7 @@ afterEach(() => {
 });
 
 function temporaryRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "cclrte-info-capture-persist-"));
+  const root = mkdtempSync(join(tmpdir(), "cclrte-oh-capture-persist-"));
   temporaryRoots.push(root);
   return root;
 }

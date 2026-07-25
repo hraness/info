@@ -26,7 +26,7 @@ function captureOutput(): {
   };
 }
 
-describe("info argument parsing", () => {
+describe("oh argument parsing", () => {
   test("delegates capture commands and rejects secret-shaped unknown values without echoing them", () => {
     expect(parseArguments(["clip", "https://example.com"])).toEqual({
       ok: true,
@@ -176,9 +176,9 @@ describe("info argument parsing", () => {
   test("parses repository context lookup and agent mapping commands", () => {
     expect(parseArguments([
       "context",
-      "packages/info/src/cli.ts",
+      "packages/oh/src/cli.ts",
       "--root",
-      "info",
+      "oh",
       "--repo",
       ".",
       "--kind",
@@ -188,9 +188,9 @@ describe("info argument parsing", () => {
       ok: true,
       value: {
         kind: "context",
-        root: "info",
+        root: "oh",
         repository: ".",
-        target: "packages/info/src/cli.ts",
+        target: "packages/oh/src/cli.ts",
         targetKind: "file",
         json: true,
       },
@@ -199,7 +199,7 @@ describe("info argument parsing", () => {
       "agents",
       "audit",
       "--root",
-      "info",
+      "oh",
       "--repo",
       ".",
     ])).toEqual({
@@ -207,7 +207,7 @@ describe("info argument parsing", () => {
       value: {
         kind: "agents",
         action: "audit",
-        root: "info",
+        root: "oh",
         repository: ".",
         json: false,
       },
@@ -215,13 +215,13 @@ describe("info argument parsing", () => {
     expect(parseArguments([
       "agents",
       "identity",
-      "packages/info",
+      "packages/oh",
       "--json",
     ])).toEqual({
       ok: true,
       value: {
         kind: "agent-identity",
-        scope: "packages/info",
+        scope: "packages/oh",
         json: true,
       },
     });
@@ -269,9 +269,9 @@ describe("info argument parsing", () => {
   });
 });
 
-describe("info vault commands", () => {
+describe("oh vault commands", () => {
   test("initializes, refreshes, checks, graphs, and derives backlinks without editing notes", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "cclrte-info-cli-"));
+    const temporary = await mkdtemp(join(tmpdir(), "cclrte-oh-cli-"));
     const vault = join(temporary, "vault");
     try {
       const initOutput = captureOutput();
@@ -444,7 +444,7 @@ describe("info vault commands", () => {
   });
 
   test("reports broken links as check failures and sanitizes thrown terminal text", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "cclrte-info-cli-"));
+    const temporary = await mkdtemp(join(tmpdir(), "cclrte-oh-cli-"));
     try {
       await writeFile(join(temporary, "index.md"), "# Index\n", "utf8");
       await writeFile(join(temporary, "note.md"), "# Note\n\n[[missing]]\n", "utf8");
@@ -474,7 +474,7 @@ describe("info vault commands", () => {
   });
 });
 
-describe("info agent context commands", () => {
+describe("oh agent context commands", () => {
   test("emits the canonical non-mutating identity for a repository scope", async () => {
     const jsonOutput = captureOutput();
     expect(await main([
@@ -488,7 +488,7 @@ describe("info agent context commands", () => {
       noteId: "scopes/packages-parser--94a91e4eddfa",
       notePath: "scopes/packages-parser--94a91e4eddfa.md",
       guidePath: "packages/parser/AGENTS.md",
-      marker: "<!-- info:context scopes/packages-parser--94a91e4eddfa -->",
+      marker: "<!-- oh:context scopes/packages-parser--94a91e4eddfa -->",
     });
 
     const rootOutput = captureOutput();
@@ -510,9 +510,9 @@ describe("info agent context commands", () => {
   });
 
   test("resolves inherited guides and reciprocal hubs without loading hub prose", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "cclrte-info-context-cli-"));
+    const temporary = await mkdtemp(join(tmpdir(), "cclrte-oh-context-cli-"));
     const repository = join(temporary, "repository");
-    const vault = join(repository, "info");
+    const vault = join(repository, "oh");
     try {
       await mkdir(join(repository, "src"), { recursive: true });
       await mkdir(join(repository, "other"), { recursive: true });
@@ -541,10 +541,10 @@ describe("info agent context commands", () => {
         "",
       ].join("\n"));
       await writeFile(join(vault, "index.md"), [
-        "# Info",
+        "# Oh",
         "",
-        "<!-- info:catalog:start -->",
-        "<!-- info:catalog:end -->",
+        "<!-- oh:catalog:start -->",
+        "<!-- oh:catalog:end -->",
         "",
       ].join("\n"));
       for (const [scope, title] of [[".", "Repository context"], ["src", "Source context"]] as const) {
@@ -649,7 +649,7 @@ describe("info agent context commands", () => {
         "--repo",
         repository,
       ], brokenOutput.output)).toBe(3);
-      expect(brokenOutput.stdout()).toContain("missing its info:context marker");
+      expect(brokenOutput.stdout()).toContain("missing its oh:context marker");
     } finally {
       await rm(temporary, { recursive: true, force: true });
     }

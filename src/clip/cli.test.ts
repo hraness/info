@@ -196,7 +196,7 @@ describe("clip CLI", () => {
     const stdout: string[] = [];
     const stderr: string[] = [];
     expect(await main(["help"], {}, { stdout: (value) => stdout.push(value), stderr: (value) => stderr.push(value) })).toBe(0);
-    expect(stdout.join("")).toContain("info clip");
+    expect(stdout.join("")).toContain("oh clip");
     expect(await main(["ftp://example.com"], {}, { stdout: (value) => stdout.push(value), stderr: (value) => stderr.push(value) })).toBe(2);
     expect(stderr.join("")).toContain("must use http or https");
   });

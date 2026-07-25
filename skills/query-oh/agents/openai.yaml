@@ -1,0 +1,4 @@
+interface:
+  display_name: "Query a Knowledge Base"
+  short_description: "Load scoped context, then search the knowledge base"
+  default_prompt: "Use $query-oh to load the applicable repository-path context first, then retrieve the smallest useful set of knowledge-base notes."

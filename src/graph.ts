@@ -1,8 +1,8 @@
 import { posix } from "node:path";
 import { parseDocument } from "yaml";
 
-export const catalogStart = "<!-- info:catalog:start -->";
-export const catalogEnd = "<!-- info:catalog:end -->";
+export const catalogStart = "<!-- oh:catalog:start -->";
+export const catalogEnd = "<!-- oh:catalog:end -->";
 
 export type WikiLink = {
   target: string;
@@ -891,11 +891,11 @@ export function replaceCatalog(indexContent: string, catalog: string): string {
   const end = indexContent.indexOf(catalogEnd);
   if (start === -1 && end === -1) return indexContent.trimEnd() + "\n\n" + catalog + "\n";
   if (start === -1 || end === -1 || end < start) {
-    throw new Error("info/index.md has a malformed managed catalog boundary");
+    throw new Error("oh/index.md has a malformed managed catalog boundary");
   }
   if (indexContent.indexOf(catalogStart, start + catalogStart.length) !== -1
     || indexContent.indexOf(catalogEnd, end + catalogEnd.length) !== -1) {
-    throw new Error("info/index.md has duplicate managed catalog boundaries");
+    throw new Error("oh/index.md has duplicate managed catalog boundaries");
   }
   return indexContent.slice(0, start) + catalog + indexContent.slice(end + catalogEnd.length);
 }

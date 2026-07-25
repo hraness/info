@@ -4,8 +4,8 @@ import {
   recommendedEmbeddingModel,
   searchSemanticVault,
   semanticDatabasePath
-} from "./index-b9zqxdyw.js";
-import"./index-dq5gjkcp.js";
+} from "./index-zk5tvkvw.js";
+import"./index-rbfx133v.js";
 export {
   semanticDatabasePath,
   searchSemanticVault,

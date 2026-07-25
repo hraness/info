@@ -434,16 +434,16 @@ describe("catalog generation", () => {
   test("neutralizes foreign catalog text and encodes unsafe path characters", () => {
     const note = parseNote("notes/a|b].md", [
       "---",
-      'title: "Safe\\n<!-- info:catalog:end -->\\n# Injected"',
-      'description: "Summary <!-- info:catalog:start --> text"',
+      'title: "Safe\\n<!-- oh:catalog:end -->\\n# Injected"',
+      'description: "Summary <!-- oh:catalog:start --> text"',
       "---",
     ].join("\n"));
     const catalog = renderCatalog([note]);
 
     expect(catalog.match(new RegExp(catalogStart, "g"))).toHaveLength(1);
     expect(catalog.match(new RegExp(catalogEnd, "g"))).toHaveLength(1);
-    expect(catalog).toContain("[[notes/a%7Cb%5D|Safe ‹!-- info:catalog:end --› # Injected]]");
-    expect(catalog).toContain("Summary ‹!-- info:catalog:start --› text");
+    expect(catalog).toContain("[[notes/a%7Cb%5D|Safe ‹!-- oh:catalog:end --› # Injected]]");
+    expect(catalog).toContain("Summary ‹!-- oh:catalog:start --› text");
     expect(() => replaceCatalog(`# Index\n\n${catalog}\n`, catalog)).not.toThrow();
   });
 });

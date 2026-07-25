@@ -68,12 +68,12 @@ function result(
 ): SearchResultFixture {
   return {
     filepath,
-    displayPath: "info/note.md",
+    displayPath: "oh/note.md",
     title: "Local retrieval",
     context: null,
     hash: "abcdef012345",
     docid: "abcdef",
-    collectionName: "info",
+    collectionName: "oh",
     modifiedAt: "2026-07-22T12:00:00.000Z",
     bodyLength: 42,
     score: 0.88,
@@ -100,7 +100,7 @@ function fakeDependencies(
 describe("semantic index paths", () => {
   test("uses a stable per-vault database below the configured cache home", () => {
     const first = semanticDatabasePath("/vault/one", { cacheHome: "/cache" });
-    expect(first).toStartWith("/cache/cclrte-info/indexes/");
+    expect(first).toStartWith("/cache/cclrte-oh/indexes/");
     expect(first).toEndWith(".sqlite");
     expect(semanticDatabasePath("/vault/one", { cacheHome: "/cache" })).toBe(first);
     expect(semanticDatabasePath("/vault/two", { cacheHome: "/cache" })).not.toBe(first);
@@ -109,7 +109,7 @@ describe("semantic index paths", () => {
 
 describe("QMD indexing", () => {
   test("pins QMD's recommended embedding model, incrementally updates, embeds, and closes", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "cclrte-info-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "cclrte-oh-semantic-"));
     const root = join(temporary, "vault");
     const optionsSeen: SemanticStoreOptions[] = [];
     const calls: string[] = [];
@@ -142,7 +142,7 @@ describe("QMD indexing", () => {
       const canonicalRoot = await realpath(root);
       expect(optionsSeen[0]).toMatchObject({
         config: {
-          collections: { info: { path: canonicalRoot, pattern: "**/*.md" } },
+          collections: { oh: { path: canonicalRoot, pattern: "**/*.md" } },
           models: { embed: recommendedEmbeddingModel },
         },
       });
@@ -152,7 +152,7 @@ describe("QMD indexing", () => {
   });
 
   test("closes the store when indexing fails", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "cclrte-info-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "cclrte-oh-semantic-"));
     let closed = false;
     const store = {
       update: () => Promise.reject(new Error("index failed")),
@@ -177,7 +177,7 @@ describe("QMD indexing", () => {
   });
 
   test("rejects malformed stores and closes the foreign resource when possible", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "cclrte-info-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "cclrte-oh-semantic-"));
     let closed = false;
     const dependencies: SemanticDependencies = {
       cacheHome: join(temporary, "cache"),
@@ -199,7 +199,7 @@ describe("QMD indexing", () => {
   });
 
   test("rejects malformed QMD results before they enter the owned API", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "cclrte-info-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "cclrte-oh-semantic-"));
     let closed = false;
     const store = {
       update: () => Promise.resolve({ ...unchanged, needsEmbedding: "one" }),
@@ -226,10 +226,10 @@ describe("QMD indexing", () => {
 
 describe("QMD search", () => {
   test("incrementally embeds and returns bounded vault-relative semantic evidence", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "cclrte-info-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "cclrte-oh-semantic-"));
     const root = join(temporary, "vault");
     const note = join(root, "plans", "mine-auth-context-v0.5.md");
-    const virtualPath = "qmd://info/plans/mine-auth-context-v0-5.md";
+    const virtualPath = "qmd://oh/plans/mine-auth-context-v0-5.md";
     const calls: string[] = [];
     await mkdir(join(root, "plans"), { recursive: true });
     await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
@@ -274,20 +274,20 @@ describe("QMD search", () => {
         }),
       ]);
       expect(found.results[0]?.snippet).toContain("Semantic search finds concepts");
-      expect(calls).toEqual(["embed", "vector:concept discovery:4:info", "close"]);
+      expect(calls).toEqual(["embed", "vector:concept discovery:4:oh", "close"]);
     } finally {
       await rm(temporary, { recursive: true, force: true });
     }
   });
 
   test("disambiguates handelized collisions by live content and rejects stale virtual hits", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "cclrte-info-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "cclrte-oh-semantic-"));
     const plans = join(temporary, "plans");
     const dottedBody = "# Dotted plan\n\nCurrent collision evidence.\n";
     const dashedBody = "# Dashed plan\n\nDifferent collision evidence.\n";
     const bodyCheckedBody = "# Body checked\n\nCurrent body.\n";
-    const collisionPath = "qmd://info/plans/collision-v1.md";
-    const bodyCheckedPath = "qmd://info/plans/body-checked.md";
+    const collisionPath = "qmd://oh/plans/collision-v1.md";
+    const bodyCheckedPath = "qmd://oh/plans/body-checked.md";
     await mkdir(plans, { recursive: true });
     await writeFile(join(temporary, "index.md"), "# Knowledge base\n", "utf8");
     await writeFile(join(plans, "collision.v1.md"), dottedBody, "utf8");
@@ -325,7 +325,7 @@ describe("QMD search", () => {
   });
 
   test("keyword mode stays model-free and validates bounds", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "cclrte-info-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "cclrte-oh-semantic-"));
     const note = join(temporary, "note.md");
     let embeds = 0;
     await writeFile(join(temporary, "index.md"), "# Knowledge base\n", "utf8");

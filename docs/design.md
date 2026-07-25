@@ -1,12 +1,12 @@
 # Design
 
-hraness/info treats a knowledge base as durable Markdown plus replaceable views. A vault must remain useful when the CLI is absent, and a capture must remain inspectable when the original page changes or disappears. Exact graph and metadata views are deterministic; semantic search is optional derived state that can be deleted and rebuilt.
+hraness/oh treats a knowledge base as durable Markdown plus replaceable views. A vault must remain useful when the CLI is absent, and a capture must remain inspectable when the original page changes or disappears. Exact graph and metadata views are deterministic; semantic search is optional derived state that can be deleted and rebuilt.
 
 ## Storage is the interface
 
 The vault is an ordinary directory of Obsidian-compatible Markdown, suitable for a text editor, Git, and standard filesystem tools. Frontmatter, headings, prose, and wikilinks are owned content. Refresh, check, graph navigation, metadata queries, and capture require no hosted account or model. A local QMD index is an optional cache for semantic recall, never the authoritative copy of a note.
 
-`info init` creates a small set of authority boundaries:
+`oh init` creates a small set of authority boundaries:
 
 - `articles/` contains captured sources and their local artifacts.
 - `notes/` contains maintained concepts, entities, comparisons, and syntheses.
@@ -54,7 +54,7 @@ directory changes its scope and therefore its hub identity.
 Derive the exact tuple without writing files:
 
 ```sh
-info agents identity src --json
+oh agents identity src --json
 ```
 
 The command returns the normalized scope, extensionless note ID, Markdown path,
@@ -65,7 +65,7 @@ The guide points back to the extensionless note ID with one exact marker before
 its headings:
 
 ```md
-<!-- info:context scopes/src--25a6634263c1 -->
+<!-- oh:context scopes/src--25a6634263c1 -->
 # Contents
 
 - ...
@@ -79,17 +79,17 @@ Mappings are reciprocal: a hub requires the marker in the `AGENTS.md` at its
 exact scope, and a marker requires that canonical hub. A guide without a marker
 is valid and remains fully normative.
 
-`info context <repository-path> --root <vault> --repo <repository>` returns the
+`oh context <repository-path> --root <vault> --repo <repository>` returns the
 applicable guides from root to nearest and verified hubs from nearest to root.
 The text view includes hub summaries, not hub bodies. Open the useful hub, then
-use `info links`, `info backlinks`, `info list`, or `info search` for a bounded
+use `oh links`, `oh backlinks`, `oh list`, or `oh search` for a bounded
 expansion. `--kind auto` uses filesystem state and a conservative path hint;
 `--kind file` or `--kind directory` makes the target interpretation explicit.
 
-`info agents check` verifies canonical IDs, `type` and `scope` metadata,
+`oh agents check` verifies canonical IDs, `type` and `scope` metadata,
 duplicate, case-fold, and Unicode-normalization collisions, repository
 confinement, real scope directories and regular guide files, exact reciprocal
-markers, and the required guide shape. `info agents audit` runs the same gate
+markers, and the required guide shape. `oh agents audit` runs the same gate
 and adds deterministic measurements for every guide and section, inherited
 chains, long guideline bullets, and exact duplicate rules. Those measurements
 identify review candidates. Length is not a correctness test, and moving a
@@ -117,27 +117,27 @@ Fenced code, inline code, frontmatter, and HTML comments are excluded from menti
 
 ## Refresh owns one region
 
-`info refresh` scans the vault, renders a sorted catalog, and atomically replaces only the region between the catalog markers in the configured index note (`index.md` by default). Text outside those markers belongs to the author. If markers are malformed or duplicated, refresh fails instead of guessing.
+`oh refresh` scans the vault, renders a sorted catalog, and atomically replaces only the region between the catalog markers in the configured index note (`index.md` by default). Text outside those markers belongs to the author. If markers are malformed or duplicated, refresh fails instead of guessing.
 
-`info check` computes the expected catalog and graph policy without writing. It fails when the managed region is stale or required graph invariants do not hold. The split gives local work a deliberate mutation command and CI a read-only gate.
+`oh check` computes the expected catalog and graph policy without writing. It fails when the managed region is stale or required graph invariants do not hold. The split gives local work a deliberate mutation command and CI a read-only gate.
 
-`info graph` exposes the scan as a human-readable or structured report. `info backlinks` uses the same identity rules to retrieve incoming contextual links for one note. `info links` traverses incoming, outgoing, or bidirectional contextual edges to a bounded depth and node count, reporting when a high-degree neighborhood reaches the cap. There is no second graph state to synchronize.
+`oh graph` exposes the scan as a human-readable or structured report. `oh backlinks` uses the same identity rules to retrieve incoming contextual links for one note. `oh links` traverses incoming, outgoing, or bidirectional contextual edges to a bounded depth and node count, reporting when a high-degree neighborhood reaches the cap. There is no second graph state to synchronize.
 
 ## Exact metadata is authored
 
 Frontmatter is parsed as typed, nested data rather than flattened strings. Scalars retain their string, number, boolean, or null type; arrays and objects retain their structure. Tags from frontmatter are normalized for matching while the original metadata remains available in structured output.
 
-`info list` filters that authored state by nested dotted paths, field existence, or tags, then sorts by title, path, graph counts, or nested metadata. Repeated filters are conjunctive. Missing sort values are placed last and ties are stable, so the same vault and query produce the same order.
+`oh list` filters that authored state by nested dotted paths, field existence, or tags, then sorts by title, path, graph counts, or nested metadata. Repeated filters are conjunctive. Missing sort values are placed last and ties are stable, so the same vault and query produce the same order.
 
 Metadata is useful for exact questions such as “which implementation plans are in progress?” It is not inferred from prose and the tool does not invent tags to improve retrieval. Authors and agents can evolve conventions in the vault's scoped `AGENTS.md` files without migrating to a package-owned schema.
 
 ## Semantic recall is optional derived state
 
-`info search` uses [QMD](https://github.com/tobi/qmd) for local retrieval. Semantic mode is the default and uses QMD 2.5.3's recommended compact EmbeddingGemma model. Keyword mode uses QMD's local full-text index without embeddings. The first semantic index or query downloads the embedding model; later runs incrementally update only changed Markdown.
+`oh search` uses [QMD](https://github.com/tobi/qmd) for local retrieval. Semantic mode is the default and uses QMD 2.5.3's recommended compact EmbeddingGemma model. Keyword mode uses QMD's local full-text index without embeddings. The first semantic index or query downloads the embedding model; later runs incrementally update only changed Markdown.
 
-Each vault gets a path-derived SQLite cache under the user's cache directory unless `--database` selects another file. `index.md` and every `AGENTS.md` are excluded because they are navigation and always-loaded instructions rather than knowledge records. Scope hubs remain ordinary Markdown, so QMD indexes their rationale and evidence like any other note. The cache may be removed at any time and recreated with `info index`.
+Each vault gets a path-derived SQLite cache under the user's cache directory unless `--database` selects another file. `index.md` and every `AGENTS.md` are excluded because they are navigation and always-loaded instructions rather than knowledge records. Scope hubs remain ordinary Markdown, so QMD indexes their rationale and evidence like any other note. The cache may be removed at any time and recreated with `oh index`.
 
-Search results are joined back to a live vault scan, so each hit carries current typed metadata, tags, contextual link counts, and backlinks. Files outside the requested vault and stale indexed identities are discarded. A similarity score is a discovery aid, not a graph edge, a citation, or evidence that the result is true. Use `info list` for exact metadata, `info links` for authored relationships, and `info search` when the same concept may be expressed in different words.
+Search results are joined back to a live vault scan, so each hit carries current typed metadata, tags, contextual link counts, and backlinks. Files outside the requested vault and stale indexed identities are discarded. A similarity score is a discovery aid, not a graph edge, a citation, or evidence that the result is true. Use `oh list` for exact metadata, `oh links` for authored relationships, and `oh search` when the same concept may be expressed in different words.
 
 ## Capture preserves an audit trail
 
@@ -180,7 +180,7 @@ URLs, redirects, DNS answers, response bodies, browser pages, cookies, subproces
 - Active source evidence is converted to inert HTML with credential-shaped values redacted.
 - Bundle paths are owned, staged beside the target, and installed by atomic rename; forced replacement requires a compatible manifest and rollback.
 
-Live or CDP browser attachment keeps the browser's existing network stack and signed-in state. `info clip current` reads the active tab without navigating or interacting with it and leaves the browser open. URL-based attached capture may navigate that tab and scroll within the configured bounds, taking bounded observations as content is rendered. Screenshots are also different from sanitized source evidence because private content can remain visible in pixels.
+Live or CDP browser attachment keeps the browser's existing network stack and signed-in state. `oh clip current` reads the active tab without navigating or interacting with it and leaves the browser open. URL-based attached capture may navigate that tab and scroll within the configured bounds, taking bounded observations as content is rendered. Screenshots are also different from sanitized source evidence because private content can remain visible in pixels.
 
 These boundaries are not entitlement mechanisms. Capture does not bypass authentication, access controls, paywalls, CAPTCHAs, rate limits, DRM, or platform policy.
 
@@ -190,7 +190,7 @@ These boundaries are not entitlement mechanisms. Capture does not bypass authent
 
 [Defuddle](https://github.com/kepano/defuddle) performs article extraction. [agent-browser](https://github.com/vercel-labs/agent-browser) provides optional rendered acquisition. The pinned [Sweet Cookie safety fork](https://github.com/hraness/sweet-cookie) supports explicit browser-cookie import while retaining host-only scope and rejecting partitioned or container-scoped state that the capture lanes cannot replay faithfully.
 
-[yt-dlp](https://github.com/yt-dlp/yt-dlp) and [FFmpeg](https://ffmpeg.org) remain optional because only full audio or video localization needs them. `info doctor` reports what is installed without probing cookie stores, and `info adapters` reports the installed platform claims. A missing optional capability narrows the available route; it does not change the storage or graph model.
+[yt-dlp](https://github.com/yt-dlp/yt-dlp) and [FFmpeg](https://ffmpeg.org) remain optional because only full audio or video localization needs them. `oh doctor` reports what is installed without probing cookie stores, and `oh adapters` reports the installed platform claims. A missing optional capability narrows the available route; it does not change the storage or graph model.
 
 ## Extension boundaries
 
@@ -199,5 +199,5 @@ New platform adapters should improve the strength of a capture claim, not merely
 New graph policy should remain a pure function of vault content and explicit configuration. Derived reports may guide an agent or person, but the tool should not silently mutate authored prose. This keeps automation reviewable and lets users replace any analysis layer without migrating their notes.
 
 Repository context follows the same separation. The CLI reads the repository
-and vault as development inputs, but no application needs to import Info or
+and vault as development inputs, but no application needs to import Oh or
 read a scope hub at runtime.

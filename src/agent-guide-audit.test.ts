@@ -40,15 +40,15 @@ function guide(
 describe("agent guide audit", () => {
   test("measures sections and accepts a reciprocal marker before the headings", () => {
     const audited = auditAgentGuideSource(guide(
-      "packages/info/AGENTS.md",
+      "packages/oh/AGENTS.md",
       ["`src/` – implementation"],
       ["Keep the public boundary self-contained."],
-      "<!-- info:context scopes/packages-info--4d973f45fcd4 -->",
+      "<!-- oh:context scopes/packages-oh--669faffd20af -->",
     ));
 
     expect(audited).toMatchObject({
-      path: "packages/info/AGENTS.md",
-      scope: "packages/info",
+      path: "packages/oh/AGENTS.md",
+      scope: "packages/oh",
       contents: { bullets: [{ text: "`src/` – implementation" }] },
       guidelines: {
         bullets: [{ text: "Keep the public boundary self-contained." }],
@@ -74,22 +74,22 @@ describe("agent guide audit", () => {
     const report = auditAgentGuides([
       guide("AGENTS.md", ["root"], ["root rule"]),
       guide("packages/AGENTS.md", ["packages"], ["package rule"]),
-      guide("packages/info/AGENTS.md", ["info"], ["info rule"]),
+      guide("packages/oh/AGENTS.md", ["oh"], ["oh rule"]),
       guide("projects/AGENTS.md", ["projects"], ["project rule"]),
     ]);
 
-    const info = report.guides.find(({ path }) => path === "packages/info/AGENTS.md");
-    expect(info?.inheritedGuidePaths).toEqual([
+    const oh = report.guides.find(({ path }) => path === "packages/oh/AGENTS.md");
+    expect(oh?.inheritedGuidePaths).toEqual([
       "AGENTS.md",
       "packages/AGENTS.md",
-      "packages/info/AGENTS.md",
+      "packages/oh/AGENTS.md",
     ]);
-    expect(info?.inheritedWords).toBe(
+    expect(oh?.inheritedWords).toBe(
       report.guides
         .filter(({ path }) => [
           "AGENTS.md",
           "packages/AGENTS.md",
-          "packages/info/AGENTS.md",
+          "packages/oh/AGENTS.md",
         ].includes(path))
         .reduce((total, candidate) => total + candidate.words, 0),
     );
@@ -171,7 +171,7 @@ describe("agent guide audit", () => {
 
 describe("agent guide discovery", () => {
   test("discovers regular guides, ignores build directories, and refuses symlink traversal", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "info-agent-audit-"));
+    const temporary = await mkdtemp(join(tmpdir(), "oh-agent-audit-"));
     try {
       await writeFile(join(temporary, "AGENTS.md"), "# Contents\n\n- root\n\n# Guidelines\n\n- rule\n");
       await mkdir(join(temporary, "src"));

@@ -2,11 +2,11 @@
 
 - `src/` – deterministic vault graph, typed metadata queries, scoped repository-context routing and audits, structural navigation, optional local semantic search, initialization, CLI, capture, and diagnostic code with colocated tests.
 - `dist/` – committed Bun-targeted ESM entrypoints and the compiled Defuddle worker.
-- `skills/save-url-info/` – reusable agent workflow for bounded, auditable source capture.
-- `skills/save-pdf-info/` – reusable agent workflow for converting local PDFs into auditable Markdown bundles.
-- `skills/refresh-info/` – reusable agent workflow for refreshing the catalog, reviewing graph findings, and validating changed scope mappings.
-- `skills/query-info/` – reusable agent workflow for loading repository-path context before bounded metadata, graph, keyword, or semantic retrieval.
-- `skills/plan-info/` – reusable agent workflow for creating and growing durable implementation plans.
+- `skills/save-url-oh/` – reusable agent workflow for bounded, auditable source capture.
+- `skills/save-pdf-oh/` – reusable agent workflow for converting local PDFs into auditable Markdown bundles.
+- `skills/refresh-oh/` – reusable agent workflow for refreshing the catalog, reviewing graph findings, and validating changed scope mappings.
+- `skills/query-oh/` – reusable agent workflow for loading repository-path context before bounded metadata, graph, keyword, or semantic retrieval.
+- `skills/plan-oh/` – reusable agent workflow for creating and growing durable implementation plans.
 - `docs/` – design, capture, and agent-workflow documentation.
 - `.github/workflows/` – read-only branch validation and checks-gated immutable GitHub Release automation.
 - `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `LICENSE` – public usage, project policy, threat model, and terms.
@@ -19,7 +19,7 @@
 - Keep graph maintenance and exact metadata queries deterministic and local-first. Do not require a database, hosted service, model, API key, or hidden index for refresh, check, list, graph, link, or backlink commands.
 - Keep QMD semantic state optional, local, dynamically loaded, and rebuildable from Markdown. Treat matches as discovery aids and join them to current authored metadata and graph state.
 - Keep `AGENTS.md` normative and always loaded for ownership, prohibitions, required commands, invariants, and gates. Optional `type: agent-context` hubs under `scopes/` are pull-based rationale, history, examples, evidence, and links; they cannot override a guide or become the sole home of a load-bearing edit rule.
-- Derive every scope-hub identity from the full exact repository-relative directory scope, with `.` for the root, and require one reciprocal `info:context` marker before the mapped guide's headings. Unmapped guides remain valid; moving a scope changes identity.
+- Derive every scope-hub identity from the full exact repository-relative directory scope, with `.` for the root, and require one reciprocal `oh:context` marker before the mapped guide's headings. Unmapped guides remain valid; moving a scope changes identity.
 - Confine repository-context lookup and agent-guide audits to the selected repository. Require real scope directories and regular guide files, reject collisions and symlinked mappings, skip generated or vendor directories, and never follow symbolic-link directories.
 - Treat agent-guide length, long-bullet, inherited-chain, and exact-duplicate audit findings as deterministic advisories rather than correctness. Keep required edit-time rules in the guide even when they exceed a suggested budget.
 - Derive backlinks from explicit wikilinks. Keep the managed catalog navigational, never inject reciprocal links, and leave title or alias mentions advisory.

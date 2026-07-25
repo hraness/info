@@ -502,7 +502,7 @@ export function renderNetscapeCookieJar(cookies: readonly StrictCookie[], target
   const hostname = target.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   return [
     "# Netscape HTTP Cookie File",
-    "# Created temporarily by info clip; deleted after media capture.",
+    "# Created temporarily by oh clip; deleted after media capture.",
     ...cookies.map((cookie) => {
       const domain = `${cookie.httpOnly ? "#HttpOnly_" : ""}${hostname}`;
       return `${domain}\tFALSE\t${cookie.path}\t${cookie.secure ? "TRUE" : "FALSE"}\t${cookie.expires}\t${cookie.name}\t${cookie.value}`;

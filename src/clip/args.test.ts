@@ -5,9 +5,9 @@ import { parseArguments } from "./args.js";
 describe("CLI arguments", () => {
   test("keeps the legacy URL and optional slug surface", () => {
     const result = parseArguments(["https://example.com/post", "Named clip"], {
-      INFO_CLIP_OUTPUT: "/tmp/clips",
+      OH_CLIP_OUTPUT: "/tmp/clips",
       FORCE: "1",
-      INFO_CLIP_USER_AGENT: "agent",
+      OH_CLIP_USER_AGENT: "agent",
     });
     expect(result).toMatchObject({
       ok: true,
@@ -30,7 +30,7 @@ describe("CLI arguments", () => {
     expect(result).toMatchObject({
       ok: true,
       value: {
-        outputBase: "info/articles",
+        outputBase: "oh/articles",
         force: false,
       },
     });

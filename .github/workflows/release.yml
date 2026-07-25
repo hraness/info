@@ -118,7 +118,7 @@ jobs:
               --verify-tag \
               --generate-notes \
               --latest \
-              --title "Info $GITHUB_REF_NAME"
+              --title "Oh $GITHUB_REF_NAME"
           fi
           release_state="$(gh release view "$GITHUB_REF_NAME" \
             --json assets,isDraft,isImmutable,isPrerelease,tagName \

@@ -29,7 +29,7 @@ export type PdfSourceDependencies = {
   readonly removeDirectory?: (path: string) => void;
 };
 
-const remoteUserAgent = "CCLRTE-info/0.4 PDF capture";
+const remoteUserAgent = "CCLRTE-oh/0.6 PDF capture";
 
 function parseRemoteUrl(input: string): URL | null {
   if (!/^https?:\/\//iu.test(input)) return null;
@@ -102,7 +102,7 @@ export async function preparePdfSource(
   assertPdfSignature(result.bytes);
 
   const makeTemporaryDirectory = dependencies.makeTemporaryDirectory
-    ?? (() => mkdtempSync(join(tmpdir(), "cclrte-info-pdf-source-")));
+    ?? (() => mkdtempSync(join(tmpdir(), "cclrte-oh-pdf-source-")));
   const removeDirectory = dependencies.removeDirectory
     ?? ((path: string) => rmSync(path, { recursive: true, force: true }));
   const directory = makeTemporaryDirectory();

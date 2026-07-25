@@ -108,7 +108,7 @@ ${images.join("\n")}
 }
 
 function sourceFixture(): { readonly root: string; readonly sourcePath: string; readonly outputBase: string } {
-  const root = mkdtempSync(join(tmpdir(), "info-pdf-capture-test-"));
+  const root = mkdtempSync(join(tmpdir(), "oh-pdf-capture-test-"));
   roots.push(root);
   const sourcePath = join(root, "fixture.pdf");
   writeFileSync(sourcePath, "%PDF-1.4\n%%EOF\n");

@@ -1,7 +1,7 @@
 // @bun
 import {
   initVault
-} from "./index-chx3zc4r.js";
+} from "./index-8v446y7q.js";
 import {
   navigateLinks
 } from "./index-9w6m3y9a.js";
@@ -19,7 +19,7 @@ import {
   scanVault,
   searchSemanticVault,
   semanticDatabasePath
-} from "./index-b9zqxdyw.js";
+} from "./index-zk5tvkvw.js";
 import {
   analyzeVault,
   catalogEnd,
@@ -32,14 +32,14 @@ import {
   replaceCatalog,
   searchableMarkdown,
   wikiLinks
-} from "./index-dq5gjkcp.js";
+} from "./index-rbfx133v.js";
 import {
   auditAgentGuideRepository,
   auditAgentGuideSource,
   auditAgentGuides,
   defaultAgentGuideIgnoredDirectories,
   discoverAgentGuides
-} from "./index-q0j2a28n.js";
+} from "./index-wnymkm9j.js";
 import {
   AgentContextRepositoryPathError,
   RepositoryScopeError,
@@ -56,7 +56,7 @@ import {
   inspectAgentContextRepository,
   normalizeRepositoryScope,
   parseAgentContextMarker
-} from "./index-ahv2qpv1.js";
+} from "./index-rhd7x0cs.js";
 export {
   wikiLinks,
   semanticDatabasePath,
