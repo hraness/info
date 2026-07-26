@@ -1,13 +1,12 @@
 # oh
 
-agent librarian.
+notes and sources for coding agents.
 
-oh keeps a coding agent's sources, notes, plans, and pull-based repository
-context in ordinary Markdown files you can open in Obsidian and version with
-Git. it captures public or signed-in web pages, converts PDFs into auditable
-bundles, maps selected `AGENTS.md` guides to scoped context hubs, traverses
-explicit wikilinks and derived backlinks, and searches locally by keyword or
-meaning with a rebuildable embedding index.
+oh keeps a coding agent's sources, notes, plans, and repository context in
+ordinary Markdown files you can open in Obsidian and track with Git. it saves
+public or signed-in web pages and PDFs with their sources, connects selected
+`AGENTS.md` guides to notes for that part of a codebase, follows links between
+notes, and searches locally by exact words or similar meaning.
 
 ```sh
 bun add --global github:hraness/oh#v0.7.0
@@ -15,10 +14,10 @@ bun add --global github:hraness/oh#v0.7.0
 
 [article](https://hraness.pub/articles/a-durable-knowledge-base-is-a-write-path)
 
-the CLI is Bun-first. refresh, repository-context lookup, graph navigation,
-exact metadata queries, and capture do not require a model, API key, database,
-or hosted service. semantic search uses a replaceable local QMD index; Markdown
-remains the source of truth.
+the command-line tool runs with Bun. rebuilding the note catalog, finding
+repository context, following links, filtering fields, and saving sources do
+not require a model, API key, database, or hosted service. search by similar
+meaning uses a replaceable local index; Markdown remains the source of truth.
 
 <!-- article:a-durable-knowledge-base-is-a-write-path:start -->
 ## [A knowledge base for your coding agents](<https://hraness.pub/articles/a-durable-knowledge-base-is-a-write-path>)

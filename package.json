@@ -1,7 +1,7 @@
 {
   "name": "@hraness/oh",
   "version": "0.7.0",
-  "description": "A local-first Markdown knowledge base for coding agents with scoped repository context, auditable capture, explicit graphs, and local semantic search.",
+  "description": "A Markdown knowledge base that connects coding agents to notes tied to specific parts of a codebase, saves web pages and PDFs with their sources, and searches locally by words or meaning.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
