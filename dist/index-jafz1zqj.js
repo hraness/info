@@ -2,7 +2,7 @@
 import {
   findOhPackageRoot,
   isolatedAgentBrowserEnvironment
-} from "./index-edhk01zd.js";
+} from "./index-gdjwymq0.js";
 import {
   BoundedByteBuffer
 } from "./index-gh719d91.js";

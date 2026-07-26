@@ -130,6 +130,7 @@ Review:
 After adding or linking the capture, run the vault's normal refresh and check:
 
 ```sh
+oh percolate "<maintained-note-id>" --root "$OH_ROOT" --limit 25 --json
 oh refresh --root "$OH_ROOT"
 oh check --root "$OH_ROOT"
 ```

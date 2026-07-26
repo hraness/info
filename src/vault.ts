@@ -3,16 +3,20 @@ import { constants } from "node:fs";
 import {
   lstat,
   open,
-  readFile,
   readdir,
   realpath,
   rename,
   rm,
+  type FileHandle,
 } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 import {
   analyzeVault,
+  isCanonicalNoteId,
+  lookupNote,
+  MAX_ANALYZED_NOTES,
+  normalizeVaultPath,
   parseNote,
   renderCatalog,
   replaceCatalog,
@@ -20,6 +24,32 @@ import {
   type Note,
   type VaultAnalysis,
 } from "./graph.js";
+
+export const MAX_SCANNED_NOTES = MAX_ANALYZED_NOTES;
+export const MAX_NOTE_UTF8_BYTES = 16 * 1_024 * 1_024;
+export const MAX_VAULT_UTF8_BYTES = 256 * 1_024 * 1_024;
+
+export type VaultScanBudgetKind =
+  | "notes"
+  | "note-bytes"
+  | "total-bytes";
+
+/** A stable failure for callers that need to distinguish bounded disk input. */
+export class VaultScanBudgetError extends RangeError {
+  readonly kind: VaultScanBudgetKind;
+  readonly limit: number;
+
+  constructor(
+    kind: VaultScanBudgetKind,
+    limit: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "VaultScanBudgetError";
+    this.kind = kind;
+    this.limit = limit;
+  }
+}
 
 export const defaultIgnoredDirectories = new Set([
   ".git",
@@ -41,9 +71,18 @@ export type VaultSnapshot = {
   readonly analysis: VaultAnalysis;
 };
 
-export type ScanVaultOptions = AnalyzeVaultOptions & {
+export type ScanVaultOptions = Omit<AnalyzeVaultOptions, "mentionScope"> & {
   readonly index?: string;
   readonly ignoredDirectories?: ReadonlySet<string>;
+  /** Maximum UTF-8 bytes accepted from one Markdown note. */
+  readonly maxNoteBytes?: number;
+  /** Maximum UTF-8 bytes accepted across all Markdown notes. */
+  readonly maxTotalBytes?: number;
+  /**
+   * `false` omits mention pairing; a note query restricts pairing to edges
+   * touching every note that query can resolve to.
+   */
+  readonly mentionScope?: string | false;
 };
 
 export async function markdownFiles(
@@ -67,14 +106,268 @@ export async function markdownFiles(
   return files;
 }
 
+type DiscoveredNoteFile = {
+  readonly absolutePath: string;
+  readonly vaultPath: string;
+  readonly rawId: string;
+};
+
+type ScannedNoteFile = DiscoveredNoteFile & {
+  readonly device: bigint;
+  readonly inode: bigint;
+};
+
+type ScannableFileMetadata = {
+  readonly dev: bigint;
+  readonly ino: bigint;
+  readonly nlink: bigint;
+  readonly size: bigint;
+  isFile(): boolean;
+  isSymbolicLink(): boolean;
+};
+
+function checkedScanLimit(
+  value: number | undefined,
+  hardMaximum: number,
+  option: "maxNotes" | "maxNoteBytes" | "maxTotalBytes",
+): number {
+  const limit = value ?? hardMaximum;
+  if (!Number.isSafeInteger(limit) || limit < 0 || limit > hardMaximum) {
+    throw new RangeError(
+      `${option} must be a safe integer from 0 through ${hardMaximum}.`,
+    );
+  }
+  return limit;
+}
+
+function normalizedRawNoteId(rawId: string): string {
+  return normalizeVaultPath(rawId).normalize("NFC");
+}
+
+function validateScannedNotePaths(
+  root: string,
+  paths: readonly string[],
+): readonly DiscoveredNoteFile[] {
+  const files = paths.map((absolutePath): DiscoveredNoteFile => {
+    const vaultPath = relative(root, absolutePath).split(sep).join("/");
+    return {
+      absolutePath,
+      vaultPath,
+      rawId: vaultPath.slice(0, -3),
+    };
+  });
+
+  const pathByNormalizedId = new Map<string, string>();
+  for (const file of files) {
+    const normalizedId = normalizedRawNoteId(file.rawId);
+    const collision = pathByNormalizedId.get(normalizedId);
+    if (collision !== undefined && collision !== file.vaultPath) {
+      throw new Error(
+        `Vault note paths ${JSON.stringify(collision)} and `
+          + `${JSON.stringify(file.vaultPath)} normalize to the same note ID `
+          + `${JSON.stringify(normalizedId)}.`,
+      );
+    }
+    pathByNormalizedId.set(normalizedId, file.vaultPath);
+  }
+
+  for (const file of files) {
+    if (isCanonicalNoteId(file.rawId)) continue;
+    if (file.rawId !== file.rawId.normalize("NFC")) {
+      throw new Error(
+        `Vault note path ${JSON.stringify(file.vaultPath)} is not NFC; `
+          + `its extensionless note ID must be exactly `
+          + `${JSON.stringify(file.rawId.normalize("NFC"))}.`,
+      );
+    }
+    if (file.rawId.includes("\\")) {
+      throw new Error(
+        `Vault note path ${JSON.stringify(file.vaultPath)} contains a backslash; `
+          + "note IDs must use exact vault-root directory separators.",
+      );
+    }
+    throw new Error(
+      `Vault note path ${JSON.stringify(file.vaultPath)} must have an exact `
+        + "canonical extensionless vault-root note ID.",
+    );
+  }
+  return files;
+}
+
+function assertScannableNoteFile(
+  vaultPath: string,
+  metadata: ScannableFileMetadata,
+): void {
+  if (metadata.isSymbolicLink()) {
+    throw new Error(`Vault note ${JSON.stringify(vaultPath)} must not be a symbolic link.`);
+  }
+  if (!metadata.isFile()) {
+    throw new Error(`Vault note ${JSON.stringify(vaultPath)} must be a regular file.`);
+  }
+  if (metadata.nlink !== 1n) {
+    throw new Error(`Vault note ${JSON.stringify(vaultPath)} must not be hard-linked.`);
+  }
+}
+
+function noteBytesError(
+  vaultPath: string,
+  limit: number,
+): VaultScanBudgetError {
+  return new VaultScanBudgetError(
+    "note-bytes",
+    limit,
+    `Vault note ${JSON.stringify(vaultPath)} exceeds the ${limit}-byte UTF-8 limit.`,
+  );
+}
+
+function totalBytesError(limit: number): VaultScanBudgetError {
+  return new VaultScanBudgetError(
+    "total-bytes",
+    limit,
+    `Vault scan exceeds the ${limit}-byte cumulative UTF-8 limit.`,
+  );
+}
+
+async function readBoundedNote(
+  handle: FileHandle,
+  vaultPath: string,
+  maxNoteBytes: number,
+  remainingTotalBytes: number,
+  maxTotalBytes: number,
+): Promise<{ readonly content: string; readonly bytes: number }> {
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  for (;;) {
+    const remaining = Math.min(
+      maxNoteBytes - bytes,
+      remainingTotalBytes - bytes,
+    );
+    const buffer = new Uint8Array(Math.min(64 * 1_024, Math.max(1, remaining + 1)));
+    const result = await handle.read(buffer, 0, buffer.byteLength, null);
+    if (result.bytesRead === 0) break;
+    bytes += result.bytesRead;
+    if (bytes > maxNoteBytes) throw noteBytesError(vaultPath, maxNoteBytes);
+    if (bytes > remainingTotalBytes) {
+      throw totalBytesError(maxTotalBytes);
+    }
+    chunks.push(buffer.slice(0, result.bytesRead));
+  }
+
+  const joined = new Uint8Array(bytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return {
+      content: new TextDecoder("utf-8", { fatal: true }).decode(joined),
+      bytes,
+    };
+  } catch (error) {
+    throw new Error(
+      `Vault note ${JSON.stringify(vaultPath)} is not valid UTF-8.`,
+      { cause: error },
+    );
+  }
+}
+
 export async function readVaultNotes(
   root: string,
   ignoredDirectories: ReadonlySet<string> = defaultIgnoredDirectories,
+  limits: Pick<
+    ScanVaultOptions,
+    "maxNotes" | "maxNoteBytes" | "maxTotalBytes"
+  > = {},
 ): Promise<Note[]> {
+  const maxNotes = checkedScanLimit(
+    limits.maxNotes,
+    MAX_SCANNED_NOTES,
+    "maxNotes",
+  );
+  const maxNoteBytes = checkedScanLimit(
+    limits.maxNoteBytes,
+    MAX_NOTE_UTF8_BYTES,
+    "maxNoteBytes",
+  );
+  const maxTotalBytes = checkedScanLimit(
+    limits.maxTotalBytes,
+    MAX_VAULT_UTF8_BYTES,
+    "maxTotalBytes",
+  );
+  const paths = await markdownFiles(root, ignoredDirectories);
+  if (paths.length > maxNotes) {
+    throw new VaultScanBudgetError(
+      "notes",
+      maxNotes,
+      `Vault scan exceeds the ${maxNotes} Markdown note limit.`,
+    );
+  }
+
+  const files = validateScannedNotePaths(root, paths);
+  let declaredTotal = 0n;
+  const preflight: ScannedNoteFile[] = [];
+  for (const file of files) {
+    const metadata = await lstat(file.absolutePath, { bigint: true });
+    assertScannableNoteFile(file.vaultPath, metadata);
+    if (metadata.size > BigInt(maxNoteBytes)) {
+      throw noteBytesError(file.vaultPath, maxNoteBytes);
+    }
+    declaredTotal += metadata.size;
+    if (declaredTotal > BigInt(maxTotalBytes)) {
+      throw totalBytesError(maxTotalBytes);
+    }
+    preflight.push({
+      ...file,
+      device: metadata.dev,
+      inode: metadata.ino,
+    });
+  }
+
   const notes: Note[] = [];
-  for (const path of await markdownFiles(root, ignoredDirectories)) {
-    const vaultPath = relative(root, path).split(sep).join("/");
-    notes.push(parseNote(vaultPath, await readFile(path, "utf8")));
+  let observedTotal = 0;
+  for (const file of preflight) {
+    const handle = await open(
+      file.absolutePath,
+      constants.O_RDONLY | constants.O_NOFOLLOW,
+    );
+    try {
+      const beforeRead = await handle.stat({ bigint: true });
+      assertScannableNoteFile(file.vaultPath, beforeRead);
+      if (beforeRead.dev !== file.device || beforeRead.ino !== file.inode) {
+        throw new Error(
+          `Vault note ${JSON.stringify(file.vaultPath)} changed during scan; retry.`,
+        );
+      }
+      if (beforeRead.size > BigInt(maxNoteBytes)) {
+        throw noteBytesError(file.vaultPath, maxNoteBytes);
+      }
+      if (BigInt(observedTotal) + beforeRead.size > BigInt(maxTotalBytes)) {
+        throw totalBytesError(maxTotalBytes);
+      }
+      const read = await readBoundedNote(
+        handle,
+        file.vaultPath,
+        maxNoteBytes,
+        maxTotalBytes - observedTotal,
+        maxTotalBytes,
+      );
+      const afterRead = await handle.stat({ bigint: true });
+      if (
+        afterRead.dev !== file.device
+        || afterRead.ino !== file.inode
+        || afterRead.size !== beforeRead.size
+        || afterRead.size !== BigInt(read.bytes)
+      ) {
+        throw new Error(
+          `Vault note ${JSON.stringify(file.vaultPath)} changed during scan; retry.`,
+        );
+      }
+      observedTotal += read.bytes;
+      notes.push(parseNote(file.vaultPath, read.content));
+    } finally {
+      await handle.close();
+    }
   }
   return notes;
 }
@@ -114,7 +407,11 @@ async function assertConfinedIndexParents(root: string, path: string): Promise<v
   }
 }
 
-async function readIndexRevision(root: string, path: string): Promise<IndexRevision> {
+async function readIndexRevision(
+  root: string,
+  path: string,
+  maxNoteBytes = MAX_NOTE_UTF8_BYTES,
+): Promise<IndexRevision> {
   await assertConfinedIndexParents(root, path);
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
@@ -125,8 +422,28 @@ async function readIndexRevision(root: string, path: string): Promise<IndexRevis
     if (!confined(root, canonicalPath)) {
       throw new Error("The managed index resolves outside the vault root.");
     }
+    const vaultPath = relative(root, path).split(sep).join("/");
+    if (metadata.size > BigInt(maxNoteBytes)) {
+      throw noteBytesError(vaultPath, maxNoteBytes);
+    }
+    const read = await readBoundedNote(
+      handle,
+      vaultPath,
+      maxNoteBytes,
+      maxNoteBytes,
+      maxNoteBytes,
+    );
+    const afterRead = await handle.stat({ bigint: true });
+    if (
+      afterRead.dev !== metadata.dev
+      || afterRead.ino !== metadata.ino
+      || afterRead.size !== metadata.size
+      || afterRead.size !== BigInt(read.bytes)
+    ) {
+      throw new Error("The managed index changed during scan; retry.");
+    }
     return {
-      content: await handle.readFile({ encoding: "utf8" }),
+      content: read.content,
       device: metadata.dev,
       inode: metadata.ino,
       mode: Number(metadata.mode & 0o777n),
@@ -200,9 +517,21 @@ async function snapshot(
   const catalogNoteId = vaultIndexPath.toLowerCase().endsWith(".md")
     ? vaultIndexPath.slice(0, -3)
     : vaultIndexPath;
-  const indexRevision = await readIndexRevision(root, indexPath);
+  const notes = await readVaultNotes(root, options.ignoredDirectories, {
+    ...(options.maxNotes === undefined ? {} : { maxNotes: options.maxNotes }),
+    ...(options.maxNoteBytes === undefined
+      ? {}
+      : { maxNoteBytes: options.maxNoteBytes }),
+    ...(options.maxTotalBytes === undefined
+      ? {}
+      : { maxTotalBytes: options.maxTotalBytes }),
+  });
+  const indexRevision = await readIndexRevision(
+    root,
+    indexPath,
+    options.maxNoteBytes ?? MAX_NOTE_UTF8_BYTES,
+  );
   const currentIndex = indexRevision.content;
-  const notes = await readVaultNotes(root, options.ignoredDirectories);
   const expectedIndex = replaceCatalog(
     currentIndex,
     renderCatalog(notes, catalogNoteId),
@@ -219,6 +548,20 @@ async function snapshot(
     else notes[noteIndex] = parsed;
   }
 
+  const mentionScope = options.mentionScope;
+  const mentionIds = new Set<string>();
+  if (typeof mentionScope === "string") {
+    const lookup = lookupNote(notes, mentionScope);
+    if (lookup.kind === "found") mentionIds.add(lookup.note.id);
+    else if (lookup.kind === "ambiguous") {
+      for (const note of lookup.candidates) mentionIds.add(note.id);
+    }
+  }
+  const mentionScopePredicate = mentionScope === undefined
+    ? undefined
+    : (note: Note): boolean =>
+        mentionScope !== false && mentionIds.has(note.id);
+
   return {
     root,
     indexPath,
@@ -229,6 +572,19 @@ async function snapshot(
       ...(options.includeInSuggestions === undefined
         ? {}
         : { includeInSuggestions: options.includeInSuggestions }),
+      ...(mentionScopePredicate === undefined
+        ? {}
+        : { mentionScope: mentionScopePredicate }),
+      ...(options.maxNotes === undefined ? {} : { maxNotes: options.maxNotes }),
+      ...(options.maxConnectionObservations === undefined
+        ? {}
+        : { maxConnectionObservations: options.maxConnectionObservations }),
+      ...(options.maxMentionPairs === undefined
+        ? {}
+        : { maxMentionPairs: options.maxMentionPairs }),
+      ...(options.maxMentions === undefined
+        ? {}
+        : { maxMentions: options.maxMentions }),
     }),
   };
 }

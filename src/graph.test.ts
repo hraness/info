@@ -10,6 +10,7 @@ import {
   renderCatalog,
   replaceCatalog,
   searchableMarkdown,
+  VaultAnalysisBudgetError,
 } from "./graph.js";
 
 describe("note parsing", () => {
@@ -97,6 +98,83 @@ describe("note parsing", () => {
 
     expect(note.tags).toEqual(["local first", "tools"]);
     expect(note.metadata.tags).toEqual([" Local First ", "#Tools", "local first"]);
+  });
+
+  test("parses scalar and list relations with strict normalized predicates", () => {
+    const note = parseNote("notes/source.md", [
+      "---",
+      "relations:",
+      "  supports: concepts/durable-memory",
+      "  depends-on:",
+      "    - notes/runtime",
+      "    - notes/shared",
+      "---",
+      "# Source",
+    ].join("\n"));
+
+    expect(note.relationDeclarations).toEqual([
+      { predicate: "depends-on", target: "notes/runtime", line: 5 },
+      { predicate: "depends-on", target: "notes/shared", line: 6 },
+      { predicate: "supports", target: "concepts/durable-memory", line: 3 },
+    ]);
+    expect(note.relationIssues).toEqual([]);
+    expect(note.metadata.relations).toEqual({
+      supports: "concepts/durable-memory",
+      "depends-on": ["notes/runtime", "notes/shared"],
+    });
+  });
+
+  test("reports malformed relation containers, predicates, and targets without hiding valid entries", () => {
+    const mixed = parseNote("notes/mixed.md", [
+      "---",
+      "relations:",
+      "  Related-To: notes/target",
+      "  related_to: notes/target",
+      "  supports:",
+      "    - notes/target",
+      "    - 42",
+      "    - ''",
+      "    - ./target",
+      "    - notes/target.md",
+      "  contains:",
+      "    nested: notes/target",
+      "---",
+      "# Mixed",
+    ].join("\n"));
+    const wrongContainer = parseNote("notes/container.md", [
+      "---",
+      "relations: [notes/target]",
+      "---",
+      "# Container",
+    ].join("\n"));
+
+    expect(mixed.relationDeclarations).toEqual([
+      { predicate: "supports", target: "notes/target", line: 6 },
+    ]);
+    expect(mixed.relationIssues?.map(({ kind, line, predicate }) => ({
+      kind,
+      line,
+      predicate,
+    }))).toEqual([
+      { kind: "malformed", line: 3, predicate: "Related-To" },
+      { kind: "malformed", line: 4, predicate: "related_to" },
+      { kind: "malformed", line: 7, predicate: "supports" },
+      { kind: "malformed", line: 8, predicate: "supports" },
+      { kind: "malformed", line: 9, predicate: "supports" },
+      { kind: "malformed", line: 10, predicate: "supports" },
+      { kind: "malformed", line: 12, predicate: "contains" },
+    ]);
+
+    const analysis = analyzeVault([wrongContainer]);
+    expect(analysis.relationIssues).toHaveLength(1);
+    expect(analysis.relationIssues[0]).toMatchObject({
+      kind: "malformed",
+      source: "notes/container.md",
+      line: 2,
+    });
+    expect(analysis.relationIssues[0]?.kind === "malformed"
+      ? analysis.relationIssues[0].message
+      : "").toContain("strict lower-kebab predicates");
   });
 
   test("rejects malformed or ambiguous frontmatter instead of splitting typed and legacy views", () => {
@@ -306,6 +384,244 @@ describe("graph lint", () => {
     expect(analysis.mentions).toEqual([]);
   });
 
+  test("bounds mention discovery to pairs touching a scoped note", () => {
+    const notes = [
+      parseNote(
+        "notes/alpha.md",
+        "# Alpha concept\n\nBeta concept and Gamma concept matter.\n",
+      ),
+      parseNote(
+        "notes/beta.md",
+        "# Beta concept\n\nGamma concept matters independently.\n",
+      ),
+      parseNote(
+        "notes/gamma.md",
+        "# Gamma concept\n\nAlpha concept matters independently.\n",
+      ),
+    ];
+    const scoped = analyzeVault(notes, {
+      mentionScope: (note) => note.id === "notes/alpha",
+    });
+
+    expect(scoped.mentions.map(({ source, target }) => [source, target]))
+      .toEqual([
+        ["notes/alpha.md", "notes/beta.md"],
+        ["notes/alpha.md", "notes/gamma.md"],
+        ["notes/gamma.md", "notes/alpha.md"],
+      ]);
+    const structureOnly = analyzeVault(notes, {
+      mentionScope: () => false,
+      maxMentionPairs: 0,
+      maxMentions: 0,
+    });
+    expect(structureOnly.mentions).toEqual([]);
+    expect(structureOnly.noteConnections).toEqual(
+      scoped.noteConnections,
+    );
+  });
+
+  test("skips quadratic mention pairing for a CLI-scale structure scan", () => {
+    const notes = Array.from({ length: 8_000 }, (_, index) =>
+      parseNote(
+        `notes/n-${index}.md`,
+        `# Structurally unique note ${index}\n`,
+      ));
+    const analysis = analyzeVault(notes, {
+      mentionScope: () => false,
+      maxMentionPairs: 0,
+      maxMentions: 0,
+    });
+
+    expect(analysis.noteCount).toBe(notes.length);
+    expect(analysis.mentions).toEqual([]);
+    expect(analysis.noteConnections).toHaveLength(notes.length);
+  }, 5_000);
+
+  test("accepts the exact connection-observation bound across links and relations", () => {
+    const source = parseNote("notes/source.md", [
+      "---",
+      "relations:",
+      "  Invalid: notes/target",
+      "  supports: notes/target",
+      "---",
+      "# Source",
+      "",
+      "[[notes/target]]",
+    ].join("\n"));
+    const analysis = analyzeVault([
+      source,
+      parseNote("notes/target.md", "# Target\n"),
+    ], {
+      maxConnectionObservations: 3,
+      mentionScope: () => false,
+      maxMentionPairs: 0,
+      maxMentions: 0,
+    });
+
+    expect(analysis.relationIssues).toHaveLength(1);
+    expect(analysis.contextualLinks).toHaveLength(1);
+    expect(analysis.authoredRelations).toHaveLength(1);
+  });
+
+  test("stops before reading or indexing a connection beyond the shared bound", () => {
+    const parsed = parseNote("notes/source.md", [
+      "---",
+      "relations:",
+      "  Invalid: notes/target",
+      "  supports: notes/target",
+      "---",
+      "# Source",
+      "",
+      "[[notes/target]]",
+    ].join("\n"));
+    let excessRecordReads = 0;
+    const source = {
+      ...parsed,
+      relationDeclarations: [
+        ...(parsed.relationDeclarations ?? []),
+        {
+          get predicate(): string {
+            excessRecordReads += 1;
+            throw new Error("excess relation record was inspected");
+          },
+          get target(): string {
+            excessRecordReads += 1;
+            throw new Error("excess relation record was inspected");
+          },
+          get line(): number {
+            excessRecordReads += 1;
+            throw new Error("excess relation record was inspected");
+          },
+        },
+      ],
+    };
+
+    let rejection: unknown;
+    try {
+      analyzeVault([
+        source,
+        parseNote("notes/target.md", "# Target\n"),
+      ], {
+        maxConnectionObservations: 3,
+        mentionScope: () => false,
+        maxMentionPairs: 0,
+        maxMentions: 0,
+      });
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(VaultAnalysisBudgetError);
+    expect(rejection).toMatchObject({
+      kind: "connection-observations",
+      limit: 3,
+    });
+    expect(excessRecordReads).toBe(0);
+  });
+
+  test("checks the shared bound before resolving an excess wikilink", () => {
+    const parsed = parseNote(
+      "notes/source.md",
+      "# Source\n\n[[notes/target]]\n",
+    );
+    let excessLinkReads = 0;
+    const source = {
+      ...parsed,
+      links: [
+        ...parsed.links,
+        {
+          get target(): string {
+            excessLinkReads += 1;
+            throw new Error("excess wikilink was inspected");
+          },
+          line: 3,
+          embedded: false,
+        },
+      ],
+    };
+
+    let rejection: unknown;
+    try {
+      analyzeVault([
+        source,
+        parseNote("notes/target.md", "# Target\n"),
+      ], {
+        maxConnectionObservations: 1,
+        mentionScope: () => false,
+        maxMentionPairs: 0,
+        maxMentions: 0,
+      });
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(VaultAnalysisBudgetError);
+    expect(rejection).toMatchObject({
+      kind: "connection-observations",
+      limit: 1,
+    });
+    expect(excessLinkReads).toBe(0);
+  });
+
+  test("stops before doing inner-pair mention work beyond the pair budget", () => {
+    let phraseComparisons = 0;
+    const lowerSearchableText = {
+      indexOf: (): number => {
+        phraseComparisons += 1;
+        return -1;
+      },
+      length: 0,
+    };
+    const source = {
+      ...parseNote("notes/alpha.md", "# Alpha concept\n"),
+      searchableText: {
+        toLocaleLowerCase: () => lowerSearchableText,
+      } as unknown as string,
+    };
+
+    let rejection: unknown;
+    try {
+      analyzeVault([
+        source,
+        parseNote("notes/beta.md", "# Beta concept\n"),
+        parseNote("notes/gamma.md", "# Gamma concept\n"),
+      ], {
+        maxMentionPairs: 1,
+        maxMentions: 1,
+      });
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(VaultAnalysisBudgetError);
+    expect(rejection).toMatchObject({
+      kind: "mention-pairs",
+      limit: 1,
+    });
+    expect(phraseComparisons).toBe(1);
+  });
+
+  test("checks the materialized mention budget before appending", () => {
+    let rejection: unknown;
+    try {
+      analyzeVault([
+        parseNote(
+          "notes/alpha.md",
+          "# Alpha concept\n\nBeta concept belongs here.\n",
+        ),
+        parseNote("notes/beta.md", "# Beta concept\n"),
+      ], {
+        maxMentionPairs: 2,
+        maxMentions: 0,
+      });
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(VaultAnalysisBudgetError);
+    expect(rejection).toMatchObject({ kind: "mentions", limit: 0 });
+  });
+
   test("ignores attachment embeds", () => {
     const analysis = analyzeVault([
       parseNote("note.md", "# Note\n\n![[assets/diagram.png]]\n"),
@@ -333,6 +649,9 @@ describe("graph lint", () => {
         inboundContextualCount: 0,
         outboundContextualCount: 2,
         backlinks: [],
+        inboundRelationCount: 0,
+        outboundRelationCount: 0,
+        relationBacklinks: [],
       },
       {
         id: "notes/beta",
@@ -340,6 +659,9 @@ describe("graph lint", () => {
         inboundContextualCount: 1,
         outboundContextualCount: 1,
         backlinks: [{ source: "notes/alpha.md", target: "notes/beta.md", line: 3 }],
+        inboundRelationCount: 0,
+        outboundRelationCount: 0,
+        relationBacklinks: [],
       },
       {
         id: "notes/gamma",
@@ -350,7 +672,144 @@ describe("graph lint", () => {
           { source: "notes/alpha.md", target: "notes/gamma.md", line: 3 },
           { source: "notes/beta.md", target: "notes/gamma.md", line: 3 },
         ],
+        inboundRelationCount: 0,
+        outboundRelationCount: 0,
+        relationBacklinks: [],
       },
+    ]);
+  });
+
+  test("resolves only exact relation IDs and diagnoses shorthand instead of guessing", () => {
+    const source = parseNote("notes/deep/source.md", [
+      "---",
+      "relations:",
+      "  exact-match: concepts/exact",
+      "  nearby: ./neighbor",
+      "  named-after: unique",
+      "  conflicts-with: shared",
+      "  depends-on: missing",
+      "---",
+      "# Source",
+    ].join("\n"));
+    const notes = [
+      source,
+      parseNote("concepts/exact.md", "# Exact\n"),
+      parseNote("notes/deep/neighbor.md", "# Neighbor\n"),
+      parseNote("other/unique.md", "# Unique\n"),
+      parseNote("one/shared.md", "# Shared one\n"),
+      parseNote("two/shared.md", "# Shared two\n"),
+    ];
+    const analysis = analyzeVault(notes);
+    const reversed = analyzeVault([...notes].reverse());
+
+    expect(analysis.authoredRelations).toEqual([
+      {
+        source: "notes/deep/source",
+        target: "concepts/exact",
+        predicate: "exact-match",
+        provenance: {
+          kind: "frontmatter",
+          source: "notes/deep/source.md",
+          line: 3,
+          authoredTarget: "concepts/exact",
+        },
+      },
+    ]);
+    expect(analysis.relationIssues.map((issue) => {
+      const { kind, source: issueSource, line, predicate, target } = issue;
+      return { kind, source: issueSource, line, predicate, target };
+    })).toEqual([
+      {
+        kind: "malformed",
+        source: "notes/deep/source.md",
+        line: 4,
+        predicate: "nearby",
+        target: "./neighbor",
+      },
+      {
+        kind: "malformed",
+        source: "notes/deep/source.md",
+        line: 5,
+        predicate: "named-after",
+        target: "unique",
+      },
+      {
+        kind: "malformed",
+        source: "notes/deep/source.md",
+        line: 6,
+        predicate: "conflicts-with",
+        target: "shared",
+      },
+      {
+        kind: "broken",
+        source: "notes/deep/source.md",
+        line: 7,
+        predicate: "depends-on",
+        target: "missing",
+      },
+    ]);
+    const malformedMessages = analysis.relationIssues.flatMap((issue) =>
+      issue.kind === "malformed" ? [issue.message] : []);
+    expect(malformedMessages[0]).toContain("extensionless vault-root note ID");
+    expect(malformedMessages[1]).toContain("only a basename");
+    expect(malformedMessages[2]).toContain("only a basename");
+    expect(reversed.authoredRelations).toEqual(analysis.authoredRelations);
+    expect(reversed.relationIssues).toEqual(analysis.relationIssues);
+    expect(analysis.issues).toEqual([]);
+    expect(analysis.backlinks).toEqual([]);
+    expect(analysis.noteConnections.find(({ id }) => id === "concepts/exact"))
+      .toMatchObject({
+        inboundRelationCount: 1,
+        outboundRelationCount: 0,
+        relationBacklinks: [analysis.authoredRelations[0]],
+      });
+  });
+
+  test("deduplicates canonical assertions, keeps predicates distinct, and never adds reciprocals", () => {
+    const source = parseNote("notes/source.md", [
+      "---",
+      "relations:",
+      "  supports:",
+      "    - notes/target",
+      "    - notes/target",
+      "  challenges: notes/target",
+      "---",
+      "# Source",
+    ].join("\n"));
+    const target = parseNote("notes/target.md", "# Target\n");
+    const analysis = analyzeVault([target, source]);
+    const reversed = analyzeVault([source, target]);
+
+    expect(analysis.authoredRelations.map(({ source: owner, predicate, target: related }) => ({
+      source: owner,
+      predicate,
+      target: related,
+    }))).toEqual([
+      { source: "notes/source", predicate: "challenges", target: "notes/target" },
+      { source: "notes/source", predicate: "supports", target: "notes/target" },
+    ]);
+    expect(analysis.authoredRelations[1]?.provenance).toMatchObject({
+      line: 4,
+      authoredTarget: "notes/target",
+    });
+    expect(reversed.authoredRelations).toEqual(analysis.authoredRelations);
+    expect(reversed.noteConnections).toEqual(analysis.noteConnections);
+    expect(analysis.authoredRelations).not.toContainEqual(
+      expect.objectContaining({ source: "notes/target", target: "notes/source" }),
+    );
+    expect(analysis.noteConnections).toEqual([
+      expect.objectContaining({
+        id: "notes/source",
+        inboundRelationCount: 0,
+        outboundRelationCount: 2,
+        relationBacklinks: [],
+      }),
+      expect.objectContaining({
+        id: "notes/target",
+        inboundRelationCount: 2,
+        outboundRelationCount: 0,
+        relationBacklinks: analysis.authoredRelations,
+      }),
     ]);
   });
 

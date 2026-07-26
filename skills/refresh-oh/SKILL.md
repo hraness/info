@@ -1,6 +1,6 @@
 ---
 name: refresh-oh
-description: Refresh and validate a hraness/oh Markdown vault after notes or repository-context mappings change. Use when an agent needs to update the managed catalog, inspect graph findings, validate scope hubs and reciprocal guide markers, review deterministic agent-guide advisories, or complete a vault health check.
+description: Refresh and validate a hraness/oh Markdown and Datalog knowledge graph after notes, concepts, typed relationships, or repository-context mappings change. Use when an agent needs to update the managed catalog, inspect graph and percolation findings, validate scope hubs and reciprocal guide markers, or complete a vault health check.
 ---
 
 # Refresh a knowledge base
@@ -20,6 +20,15 @@ Use a refresh-review-check loop. Keep authored prose under deliberate editorial 
 
 ## 2. Refresh the managed catalog
 
+When several agents are still editing different notes, do not refresh the
+shared catalog in each lane. Validate the lane's Markdown and graph facts with:
+
+```sh
+oh check --root "$OH_ROOT" --no-catalog
+```
+
+The integrating agent performs the refresh once after the lanes join.
+
 Run:
 
 ```sh
@@ -33,12 +42,26 @@ This command atomically updates only the marked catalog region in `index.md` and
 Open every reported source line and the relevant target notes before deciding whether to edit.
 
 - Repair a broken wikilink only when its intended target is clear. Otherwise, report the uncertainty.
+- Repair a broken or ambiguous typed relationship only after confirming its exact canonical target and predicate from the source note.
 - Disambiguate a wikilink with a vault-root path only after confirming the author's intent.
 - Treat a contextual orphan as a prompt to inspect the note, not as a demand to add a link.
 - Treat an unlinked title or alias mention as a candidate, not proof that the sentence should link.
 - Add a contextual wikilink only when it improves the meaning or navigation of the sentence.
 
-Backlinks are derived from explicit contextual wikilinks, and mention candidates are derived analysis. Never inject reciprocal links or generated backlink sections to improve graph counts. Never mutate authored prose automatically or apply link suggestions mechanically in bulk.
+Backlinks are derived from explicit contextual wikilinks and typed
+relationships. Mention and percolation candidates are derived analysis. Never
+inject reciprocal, transitive, or similarity-derived relationships or generated
+backlink sections to improve graph counts. Never mutate authored prose
+automatically or apply suggestions mechanically in bulk.
+
+Run a bounded percolation review for each materially changed note:
+
+```sh
+oh percolate "<changed-note-id>" --root "$OH_ROOT" --limit 25 --json
+```
+
+Open the cited notes before deciding whether to create a reusable
+`type: concept` note or a source-owned typed relationship.
 
 Intentional orphans and unlinked mentions may remain. Record the reason instead of manufacturing a connection.
 
@@ -83,6 +106,6 @@ oh check --root "$OH_ROOT"
 ```
 
 Finish only when the graph check and any required agent-context check succeed,
-the managed catalog is current, and broken or ambiguous links are resolved.
-Summarize deliberate link edits, mapping changes, and advisories intentionally
-left in place.
+the managed catalog is current, and broken or ambiguous links and relationships
+are resolved. Summarize deliberate concept, relationship, link, and mapping
+edits plus advisories intentionally left in place.

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { open } from "node:fs/promises";
 import { relative } from "node:path";
 
 import {
@@ -19,19 +20,36 @@ import {
   type AgentGuideAuditReport,
   type AgentGuideDiscoveryIssue,
 } from "./agent-guide-audit.js";
+import {
+  addNoteRelation,
+  createNote,
+  removeNoteRelation,
+  type CreateNoteInput,
+  type NoteAuthoringResult,
+} from "./authoring.js";
 import { main as runClipCommand } from "./clip/cli.js";
 import { redactSensitiveText } from "./clip/persist.js";
 import { sanitizeTerminalLine, sanitizeTerminalText } from "./clip/terminal.js";
 import { main as runPdfCommand } from "./pdf/cli.js";
 import {
   lookupNote,
+  type AuthoredRelation,
   type Backlink,
   type LinkIssue,
   type MetadataScalar,
+  type RelationIssue,
   type VaultAnalysis,
 } from "./graph.js";
 import { initVault, type InitVaultResult } from "./init.js";
 import { navigateLinks, type LinkDirection, type LinkNeighborhood } from "./navigation.js";
+import {
+  MAX_PERCOLATION_MENTION_PAIRS,
+  MAX_PERCOLATION_MENTIONS,
+  MAX_PERCOLATION_NOTES,
+  MAX_SCOPED_PERCOLATION_MENTION_PAIRS,
+  percolateVault,
+  type PercolationResult,
+} from "./percolate.js";
 import {
   queryVault,
   type MetadataFilter,
@@ -52,6 +70,11 @@ import {
   type ScanVaultOptions,
   type VaultSnapshot,
 } from "./vault.js";
+import {
+  queryDatalog,
+  type DatalogQueryOptions,
+  type DatalogQueryResult,
+} from "./datalog.js";
 
 type Output = {
   readonly stdout: (value: string) => void;
@@ -63,6 +86,38 @@ const defaultOutput: Output = {
   stderr: (value) => process.stderr.write(value),
 };
 
+async function readBoundedUtf8(
+  path: string,
+  maximumBytes: number,
+  label: string,
+): Promise<string> {
+  const handle = await open(path, "r");
+  try {
+    const bytes = new Uint8Array(maximumBytes + 1);
+    let offset = 0;
+    while (offset < bytes.byteLength) {
+      const { bytesRead } = await handle.read(
+        bytes,
+        offset,
+        bytes.byteLength - offset,
+        null,
+      );
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    if (offset > maximumBytes) {
+      throw new Error(`${label} exceeds the ${maximumBytes}-byte limit`);
+    }
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, offset));
+    } catch (error) {
+      throw new Error(`${label} is not valid UTF-8`, { cause: error });
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
 export const usage = `oh — auditable capture and derived links for Markdown vaults
 
 Usage:
@@ -71,10 +126,17 @@ Usage:
   oh inspect <url> [capture options]
   oh pdf <file-or-url> [PDF options]
   oh refresh [--root <directory>] [--index <path>] [--json]
-  oh check [--root <directory>] [--index <path>] [--json]
+  oh check [--root <directory>] [--index <path>] [--no-catalog] [--json]
   oh graph [--root <directory>] [--index <path>] [--json]
   oh backlinks <note> [--root <directory>] [--index <path>] [--json]
   oh links <note> [--root <directory>] [--direction <in|out|both>] [--depth <count>] [--limit <count>] [--json]
+  oh note create <id> --title <title> [--type <type>] [--tag <tag>] [--body <markdown> | --body-file <path>] [--root <directory>] [--json]
+  oh relation add <source> <predicate> <target> [--root <directory>] [--expected-revision <sha256:...>] [--json]
+  oh relation remove <source> <predicate> <target> [--root <directory>] [--expected-revision <sha256:...>] [--json]
+  oh relation list <note> [--root <directory>] [--json]
+  oh datalog <query> [--rules-file <path>] [--root <directory>] [--limit <count>] [--timeout-ms <milliseconds>] [--json]
+  oh datalog --query-file <path> [--rules-file <path>] [--root <directory>] [--limit <count>] [--timeout-ms <milliseconds>] [--json]
+  oh percolate [note] [--root <directory>] [--min-support <count>] [--limit <count>] [--json]
   oh list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
   oh index [--root <directory>] [--database <path>] [--force] [--json]
   oh search <query> [--root <directory>] [--database <path>] [--mode <semantic|keyword>] [--limit <count>] [--min-score <score>] [--json]
@@ -152,6 +214,43 @@ type ParsedCommand =
       readonly direction?: LinkDirection;
       readonly depth?: number;
       readonly limit?: number;
+      readonly noCatalog?: boolean;
+    }
+  | {
+      readonly kind: "note-create";
+      readonly root: string;
+      readonly input: Omit<CreateNoteInput, "body">;
+      readonly body?: string;
+      readonly bodyFile?: string;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "relation";
+      readonly action: "add" | "remove" | "list";
+      readonly root: string;
+      readonly source: string;
+      readonly predicate?: string;
+      readonly target?: string;
+      readonly expectedRevision?: `sha256:${string}`;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "datalog";
+      readonly root: string;
+      readonly query?: string;
+      readonly queryFile?: string;
+      readonly rulesFile?: string;
+      readonly limit: number;
+      readonly timeoutMs?: number;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "percolate";
+      readonly root: string;
+      readonly note?: string;
+      readonly minSupport: number;
+      readonly limit: number;
+      readonly json: boolean;
     };
 
 type ParseResult =
@@ -166,6 +265,11 @@ type CliDependencies = {
   readonly refreshVault?: typeof refreshVault;
   readonly indexSemanticVault?: typeof indexSemanticVault;
   readonly searchSemanticVault?: typeof searchSemanticVault;
+  readonly createNote?: typeof createNote;
+  readonly addNoteRelation?: typeof addNoteRelation;
+  readonly removeNoteRelation?: typeof removeNoteRelation;
+  readonly queryDatalog?: typeof queryDatalog;
+  readonly percolateVault?: typeof percolateVault;
   readonly inspectAgentContextRepository?: typeof inspectAgentContextRepository;
   readonly auditAgentGuideRepository?: typeof auditAgentGuideRepository;
 };
@@ -196,6 +300,7 @@ function parseVaultCommand(command: VaultCommand, arguments_: readonly string[])
   let direction: LinkDirection = "both";
   let depth = 1;
   let limit: number | undefined;
+  let noCatalog = false;
   const positional: string[] = [];
 
   for (let cursor = 0; cursor < arguments_.length; cursor += 1) {
@@ -203,6 +308,10 @@ function parseVaultCommand(command: VaultCommand, arguments_: readonly string[])
     if (argument === undefined) continue;
     if (argument === "--json") {
       json = true;
+      continue;
+    }
+    if (argument === "--no-catalog" && command === "check") {
+      noCatalog = true;
       continue;
     }
     if (argument === "--root" || argument === "--index") {
@@ -268,6 +377,7 @@ function parseVaultCommand(command: VaultCommand, arguments_: readonly string[])
       root,
       options: index === undefined ? {} : { index },
       json,
+      ...(command === "check" && noCatalog ? { noCatalog: true } : {}),
     },
   };
 }
@@ -589,6 +699,286 @@ function parseAgentsCommand(arguments_: readonly string[]): ParseResult {
   };
 }
 
+function boundedInteger(
+  raw: string,
+  option: string,
+  minimum: number,
+  maximum: number,
+): number | ParseResult {
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    return {
+      ok: false,
+      message: `${option} must be an integer from ${minimum} through ${maximum}`,
+    };
+  }
+  return value;
+}
+
+function parseNoteCommand(arguments_: readonly string[]): ParseResult {
+  if (arguments_[0] !== "create") {
+    return { ok: false, message: "note requires create" };
+  }
+  let root = ".";
+  let title: string | undefined;
+  let type = "note";
+  let body: string | undefined;
+  let bodyFile: string | undefined;
+  let json = false;
+  const tags: string[] = [];
+  const positional: string[] = [];
+  for (let cursor = 1; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined) continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (
+      argument === "--root"
+      || argument === "--title"
+      || argument === "--type"
+      || argument === "--tag"
+      || argument === "--body"
+      || argument === "--body-file"
+    ) {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root") root = value;
+      else if (argument === "--title") title = value;
+      else if (argument === "--type") type = value;
+      else if (argument === "--tag") tags.push(value);
+      else if (argument === "--body") body = value;
+      else bodyFile = value;
+      cursor += 1;
+      continue;
+    }
+    if (argument.startsWith("--")) {
+      return { ok: false, message: "unknown note create option" };
+    }
+    positional.push(argument);
+  }
+  const id = positional[0];
+  if (id === undefined || positional.length !== 1) {
+    return { ok: false, message: "note create requires exactly one canonical note ID" };
+  }
+  if (title === undefined) return { ok: false, message: "note create requires --title" };
+  if (body !== undefined && bodyFile !== undefined) {
+    return { ok: false, message: "note create accepts either --body or --body-file, not both" };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "note-create",
+      root,
+      input: { id, title, type, ...(tags.length === 0 ? {} : { tags }) },
+      ...(body === undefined ? {} : { body }),
+      ...(bodyFile === undefined ? {} : { bodyFile }),
+      json,
+    },
+  };
+}
+
+function isNoteRevision(value: string): value is `sha256:${string}` {
+  return /^sha256:[0-9a-f]{64}$/u.test(value);
+}
+
+function parseRelationCommand(arguments_: readonly string[]): ParseResult {
+  const action = arguments_[0];
+  if (action !== "add" && action !== "remove" && action !== "list") {
+    return { ok: false, message: "relation requires add, remove, or list" };
+  }
+  let root = ".";
+  let expectedRevision: `sha256:${string}` | undefined;
+  let json = false;
+  const positional: string[] = [];
+  for (let cursor = 1; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined) continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (argument === "--root" || argument === "--expected-revision") {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root") {
+        root = value;
+      } else {
+        if (!isNoteRevision(value)) {
+          return {
+            ok: false,
+            message: "--expected-revision must be sha256 followed by 64 lowercase hexadecimal characters",
+          };
+        }
+        expectedRevision = value;
+      }
+      cursor += 1;
+      continue;
+    }
+    if (argument.startsWith("--")) {
+      return { ok: false, message: `unknown relation ${action} option` };
+    }
+    positional.push(argument);
+  }
+  const source = positional[0];
+  if (action === "list") {
+    if (source === undefined || positional.length !== 1) {
+      return { ok: false, message: "relation list requires exactly one canonical note ID" };
+    }
+    if (expectedRevision !== undefined) {
+      return { ok: false, message: "relation list does not accept --expected-revision" };
+    }
+    return { ok: true, value: { kind: "relation", action, root, source, json } };
+  }
+  const predicate = positional[1];
+  const target = positional[2];
+  if (
+    source === undefined
+    || predicate === undefined
+    || target === undefined
+    || positional.length !== 3
+  ) {
+    return {
+      ok: false,
+      message: `relation ${action} requires exact source, predicate, and target IDs`,
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "relation",
+      action,
+      root,
+      source,
+      predicate,
+      target,
+      ...(expectedRevision === undefined ? {} : { expectedRevision }),
+      json,
+    },
+  };
+}
+
+function parseDatalogCommand(arguments_: readonly string[]): ParseResult {
+  let root = ".";
+  let queryFile: string | undefined;
+  let rulesFile: string | undefined;
+  let limit = 100;
+  let timeoutMs: number | undefined;
+  let json = false;
+  const positional: string[] = [];
+  for (let cursor = 0; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined) continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (
+      argument === "--root"
+      || argument === "--query-file"
+      || argument === "--rules-file"
+      || argument === "--limit"
+      || argument === "--timeout-ms"
+    ) {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root") root = value;
+      else if (argument === "--query-file") queryFile = value;
+      else if (argument === "--rules-file") rulesFile = value;
+      else if (argument === "--limit") {
+        const parsed = boundedInteger(value, "--limit", 1, 1_000);
+        if (typeof parsed !== "number") return parsed;
+        limit = parsed;
+      } else {
+        const parsed = boundedInteger(value, "--timeout-ms", 1, 5_000);
+        if (typeof parsed !== "number") return parsed;
+        timeoutMs = parsed;
+      }
+      cursor += 1;
+      continue;
+    }
+    if (argument.startsWith("--")) {
+      return { ok: false, message: "unknown datalog option" };
+    }
+    positional.push(argument);
+  }
+  const query = positional.join(" ").trim();
+  if ((query === "") === (queryFile === undefined)) {
+    return {
+      ok: false,
+      message: "datalog requires exactly one query or --query-file",
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "datalog",
+      root,
+      ...(query === "" ? {} : { query }),
+      ...(queryFile === undefined ? {} : { queryFile }),
+      ...(rulesFile === undefined ? {} : { rulesFile }),
+      limit,
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      json,
+    },
+  };
+}
+
+function parsePercolateCommand(arguments_: readonly string[]): ParseResult {
+  let root = ".";
+  let minSupport = 2;
+  let limit = 25;
+  let json = false;
+  const positional: string[] = [];
+  for (let cursor = 0; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined) continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (argument === "--root" || argument === "--min-support" || argument === "--limit") {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root") {
+        root = value;
+      } else {
+        const parsed = boundedInteger(
+          value,
+          argument,
+          argument === "--min-support" ? 2 : 1,
+          1_000,
+        );
+        if (typeof parsed !== "number") return parsed;
+        if (argument === "--min-support") minSupport = parsed;
+        else limit = parsed;
+      }
+      cursor += 1;
+      continue;
+    }
+    if (argument.startsWith("--")) {
+      return { ok: false, message: "unknown percolate option" };
+    }
+    positional.push(argument);
+  }
+  const note = positional[0];
+  if (positional.length > 1) {
+    return { ok: false, message: "percolate accepts at most one note ID" };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "percolate",
+      root,
+      ...(note === undefined ? {} : { note }),
+      minSupport,
+      limit,
+      json,
+    },
+  };
+}
+
 export function parseArguments(arguments_: readonly string[]): ParseResult {
   const command = arguments_[0];
   if (command === undefined || command === "help" || command === "--help" || command === "-h") {
@@ -629,6 +1019,10 @@ export function parseArguments(arguments_: readonly string[]): ParseResult {
   }
   if (command === "context") return parseContextCommand(arguments_.slice(1));
   if (command === "agents") return parseAgentsCommand(arguments_.slice(1));
+  if (command === "note") return parseNoteCommand(arguments_.slice(1));
+  if (command === "relation") return parseRelationCommand(arguments_.slice(1));
+  if (command === "datalog") return parseDatalogCommand(arguments_.slice(1));
+  if (command === "percolate") return parsePercolateCommand(arguments_.slice(1));
   return { ok: false, message: "unknown command" };
 }
 
@@ -698,15 +1092,25 @@ function issueJson(issue: LinkIssue): Record<string, unknown> {
       };
 }
 
-function summary(snapshot: VaultSnapshot): Record<string, unknown> {
+function relationIssueJson(issue: RelationIssue): Record<string, unknown> {
+  return { ...issue };
+}
+
+function summary(
+  snapshot: VaultSnapshot,
+  options: { readonly noCatalog?: boolean } = {},
+): Record<string, unknown> {
   return {
     root: snapshot.root,
     indexPath: snapshot.indexPath,
     index: snapshot.index,
+    catalogRequired: options.noCatalog !== true,
     noteCount: snapshot.analysis.noteCount,
     contextualLinkCount: snapshot.analysis.contextualLinks.length,
     backlinkCount: snapshot.analysis.backlinks.length,
+    authoredRelationCount: snapshot.analysis.authoredRelations.length,
     issues: snapshot.analysis.issues.map(issueJson),
+    relationIssues: snapshot.analysis.relationIssues.map(relationIssueJson),
     orphans: snapshot.analysis.orphans,
     mentions: snapshot.analysis.mentions,
   };
@@ -717,6 +1121,16 @@ function renderIssue(issue: LinkIssue): string {
     return `${safe(issue.source)}:${issue.line}: broken wikilink [[${safe(issue.target)}]]`;
   }
   return `${safe(issue.source)}:${issue.line}: ambiguous wikilink [[${safe(issue.target)}]] (${issue.candidates.map(safe).join(", ")})`;
+}
+
+function renderRelationIssue(issue: RelationIssue): string {
+  if (issue.kind === "malformed") {
+    return `${safe(issue.source)}:${issue.line}: malformed relationship${issue.predicate === undefined ? "" : ` ${safe(issue.predicate)}`}: ${safe(issue.message)}`;
+  }
+  if (issue.kind === "broken") {
+    return `${safe(issue.source)}:${issue.line}: broken relationship ${safe(issue.predicate)} → ${safe(issue.target)}`;
+  }
+  return `${safe(issue.source)}:${issue.line}: ambiguous relationship ${safe(issue.predicate)} → ${safe(issue.target)} (${issue.candidates.map(safe).join(", ")})`;
 }
 
 function renderAdvisories(analysis: VaultAnalysis): string[] {
@@ -734,17 +1148,30 @@ function renderAdvisories(analysis: VaultAnalysis): string[] {
   return lines;
 }
 
-function checkExitCode(snapshot: VaultSnapshot): number {
-  return snapshot.index === "stale" || snapshot.analysis.issues.length > 0 ? 3 : 0;
+function checkExitCode(snapshot: VaultSnapshot, noCatalog = false): number {
+  return (
+    (!noCatalog && snapshot.index === "stale")
+    || snapshot.analysis.issues.length > 0
+    || snapshot.analysis.relationIssues.length > 0
+  ) ? 3 : 0;
 }
 
-function renderSnapshot(command: "refresh" | "check", snapshot: VaultSnapshot): string {
+function renderSnapshot(
+  command: "refresh" | "check",
+  snapshot: VaultSnapshot,
+  noCatalog = false,
+): string {
   const lines = [
     `${command === "refresh" ? "Refreshed" : "Checked"} ${safe(snapshot.root)}`,
-    `Index: ${snapshot.index}; notes: ${snapshot.analysis.noteCount}; contextual links: ${snapshot.analysis.contextualLinks.length}.`,
+    `Index: ${noCatalog ? `not required (${snapshot.index})` : snapshot.index}; notes: ${snapshot.analysis.noteCount}; contextual links: ${snapshot.analysis.contextualLinks.length}; typed relationships: ${snapshot.analysis.authoredRelations.length}.`,
   ];
-  if (snapshot.index === "stale") lines.push(`error: generated catalog is stale (${safe(snapshot.indexPath)})`);
+  if (!noCatalog && snapshot.index === "stale") {
+    lines.push(`error: generated catalog is stale (${safe(snapshot.indexPath)})`);
+  }
   for (const issue of snapshot.analysis.issues) lines.push(`error: ${renderIssue(issue)}`);
+  for (const issue of snapshot.analysis.relationIssues) {
+    lines.push(`error: ${renderRelationIssue(issue)}`);
+  }
   lines.push(...renderAdvisories(snapshot.analysis));
   return `${lines.join("\n")}\n`;
 }
@@ -755,7 +1182,7 @@ function graphJson(snapshot: VaultSnapshot): Record<string, unknown> {
 
 function renderGraph(snapshot: VaultSnapshot): string {
   const lines = [
-    `Graph: ${snapshot.analysis.noteCount} notes; ${snapshot.analysis.contextualLinks.length} contextual links.`,
+    `Graph: ${snapshot.analysis.noteCount} notes; ${snapshot.analysis.contextualLinks.length} contextual links; ${snapshot.analysis.authoredRelations.length} typed relationships.`,
   ];
   for (const note of snapshot.analysis.noteConnections) {
     lines.push(`${safe(note.path)}  ← ${note.inboundContextualCount}  → ${note.outboundContextualCount}`);
@@ -766,19 +1193,52 @@ function renderGraph(snapshot: VaultSnapshot): string {
       lines.push(`  ${safe(link.source)}:${link.line} → ${safe(link.target)}`);
     }
   }
+  if (snapshot.analysis.authoredRelations.length > 0) {
+    lines.push("Typed relationships:");
+    for (const relation of snapshot.analysis.authoredRelations) {
+      lines.push(
+        `  ${safe(relation.source)}:${relation.provenance.line} ${safe(relation.predicate)} → ${safe(relation.target)}`,
+      );
+    }
+  }
   for (const issue of snapshot.analysis.issues) lines.push(`error: ${renderIssue(issue)}`);
+  for (const issue of snapshot.analysis.relationIssues) {
+    lines.push(`error: ${renderRelationIssue(issue)}`);
+  }
   lines.push(...renderAdvisories(snapshot.analysis));
   return `${lines.join("\n")}\n`;
 }
 
-function backlinkPayload(notePath: string, backlinks: readonly Backlink[]): Record<string, unknown> {
-  return { note: notePath, count: backlinks.length, backlinks };
+function backlinkPayload(
+  notePath: string,
+  backlinks: readonly Backlink[],
+  relationships: readonly AuthoredRelation[],
+): Record<string, unknown> {
+  return {
+    note: notePath,
+    count: backlinks.length + relationships.length,
+    backlinkCount: backlinks.length,
+    relationshipCount: relationships.length,
+    backlinks,
+    relationships,
+  };
 }
 
-function renderBacklinks(notePath: string, backlinks: readonly Backlink[]): string {
-  const lines = [`Backlinks to ${safe(notePath)} (${backlinks.length})`];
-  if (backlinks.length === 0) lines.push("  None.");
+function renderBacklinks(
+  notePath: string,
+  backlinks: readonly Backlink[],
+  relationships: readonly AuthoredRelation[],
+): string {
+  const lines = [
+    `Backlinks to ${safe(notePath)} (${backlinks.length} links, ${relationships.length} typed relationships)`,
+  ];
+  if (backlinks.length === 0 && relationships.length === 0) lines.push("  None.");
   else for (const backlink of backlinks) lines.push(`  ${safe(backlink.source)}:${backlink.line}`);
+  for (const relation of relationships) {
+    lines.push(
+      `  ${safe(relation.source)}:${relation.provenance.line} ${safe(relation.predicate)} → ${safe(relation.target)}`,
+    );
+  }
   return `${lines.join("\n")}\n`;
 }
 
@@ -797,7 +1257,19 @@ function renderLinks(neighborhood: LinkNeighborhood): string {
       lines.push(`  ${safe(edge.source)}:${edge.line} → ${safe(edge.target)}`);
     }
   }
-  if (neighborhood.truncated) lines.push(`Truncated at ${neighborhood.limit} notes; lower the depth or raise --limit.`);
+  if (neighborhood.relations.length > 0) {
+    lines.push("Typed relationships:");
+    for (const relation of neighborhood.relations) {
+      lines.push(
+        `  ${safe(relation.source)}:${relation.provenance.line} ${safe(relation.predicate)} → ${safe(relation.target)}`,
+      );
+    }
+  }
+  if (neighborhood.truncated) {
+    lines.push(
+      "Results were truncated by the node or connection limit; lower the depth or raise --limit.",
+    );
+  }
   return `${lines.join("\n")}\n`;
 }
 
@@ -811,6 +1283,274 @@ function renderList(rows: readonly QueryRow[]): string {
     );
   }
   return `${lines.join("\n")}\n`;
+}
+
+function renderAuthoringResult(
+  verb: string,
+  result: NoteAuthoringResult,
+): string {
+  return [
+    `${result.changed ? verb : "Unchanged"} ${safe(result.path)}`,
+    `Revision: ${safe(result.revision)}; outbound relationships: ${result.relations.length}.`,
+    "",
+  ].join("\n");
+}
+
+async function runNoteCreate(
+  command: Extract<ParsedCommand, { readonly kind: "note-create" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const body = command.body ?? (
+    command.bodyFile === undefined
+      ? undefined
+      : await readBoundedUtf8(command.bodyFile, 16 * 1024 * 1024, "note body")
+  );
+  const result = await (dependencies.createNote ?? createNote)(
+    command.root,
+    {
+      ...command.input,
+      ...(body === undefined ? {} : { body }),
+    },
+  );
+  output.stdout(command.json
+    ? terminalSafeJson(result)
+    : sanitizeTerminalText(renderAuthoringResult("Created", result)));
+  return 0;
+}
+
+async function runRelation(
+  command: Extract<ParsedCommand, { readonly kind: "relation" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  if (command.action === "list") {
+    const snapshot = await (dependencies.scanVault ?? scanVault)(
+      command.root,
+      { mentionScope: false },
+    );
+    const lookup = lookupNote(snapshot.notes, command.source);
+    if (lookup.kind === "missing") {
+      output.stderr("error: note was not found\n");
+      return 3;
+    }
+    if (lookup.kind === "ambiguous") {
+      if (command.json) {
+        output.stdout(terminalSafeJson({
+          ok: false,
+          kind: "ambiguous",
+          candidates: lookup.candidates.map(({ id }) => id),
+        }));
+      } else {
+        output.stderr(`error: note is ambiguous (${lookup.candidates.map(({ id }) => safe(id)).join(", ")})\n`);
+      }
+      return 3;
+    }
+    const outbound = snapshot.analysis.authoredRelations.filter(
+      ({ source }) => source === lookup.note.id,
+    );
+    const inbound = snapshot.analysis.authoredRelations.filter(
+      ({ target }) => target === lookup.note.id,
+    );
+    const payload = {
+      note: lookup.note.id,
+      outboundCount: outbound.length,
+      inboundCount: inbound.length,
+      outbound,
+      inbound,
+    };
+    if (command.json) {
+      output.stdout(terminalSafeJson(payload));
+    } else {
+      const lines = [
+        `Relationships for ${safe(lookup.note.id)} (${outbound.length} out, ${inbound.length} in)`,
+      ];
+      if (outbound.length === 0 && inbound.length === 0) lines.push("  None.");
+      for (const relation of outbound) {
+        lines.push(`  → ${safe(relation.predicate)} → ${safe(relation.target)}`);
+      }
+      for (const relation of inbound) {
+        lines.push(`  ← ${safe(relation.predicate)} ← ${safe(relation.source)}`);
+      }
+      output.stdout(`${lines.join("\n")}\n`);
+    }
+    return 0;
+  }
+
+  const predicate = command.predicate;
+  const target = command.target;
+  if (predicate === undefined || target === undefined) {
+    throw new Error("relation command parser lost its predicate or target");
+  }
+  const options = command.expectedRevision === undefined
+    ? {}
+    : { expectedRevision: command.expectedRevision };
+  const result = command.action === "add"
+    ? await (dependencies.addNoteRelation ?? addNoteRelation)(
+        command.root,
+        command.source,
+        predicate,
+        target,
+        options,
+      )
+    : await (dependencies.removeNoteRelation ?? removeNoteRelation)(
+        command.root,
+        command.source,
+        predicate,
+        target,
+        options,
+      );
+  output.stdout(command.json
+    ? terminalSafeJson(result)
+    : sanitizeTerminalText(renderAuthoringResult(
+        "Updated",
+        result,
+      )));
+  return 0;
+}
+
+function datalogCell(value: string | number | boolean | null): string {
+  return value === null ? "null" : safe(
+    typeof value === "string" ? value : String(value),
+  );
+}
+
+function renderDatalog(result: DatalogQueryResult): string {
+  const lines = [
+    `Datalog: ${result.rows.length} row${result.rows.length === 1 ? "" : "s"} from ${result.factCount} facts${result.truncated ? " (truncated)" : ""}.`,
+    `  ${result.columns.map(safe).join("  |  ")}`,
+  ];
+  for (const row of result.rows) {
+    lines.push(`  ${row.map(datalogCell).join("  |  ")}`);
+  }
+  if (result.rows.length === 0) lines.push("  None.");
+  return `${lines.join("\n")}\n`;
+}
+
+async function runDatalog(
+  command: Extract<ParsedCommand, { readonly kind: "datalog" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const query = command.query ?? (
+    command.queryFile === undefined
+      ? undefined
+      : await readBoundedUtf8(command.queryFile, 65_536, "Datalog query")
+  );
+  if (query === undefined) throw new Error("datalog command parser lost its query");
+  const rules = command.rulesFile === undefined
+    ? undefined
+    : await readBoundedUtf8(command.rulesFile, 65_536, "Datalog rules");
+  const snapshot = await (dependencies.scanVault ?? scanVault)(
+    command.root,
+    { mentionScope: false },
+  );
+  const options: DatalogQueryOptions = {
+    notes: snapshot.notes,
+    analysis: snapshot.analysis,
+    query,
+    ...(rules === undefined ? {} : { rules }),
+    limit: command.limit,
+    ...(command.timeoutMs === undefined
+      ? {}
+      : { timeoutMs: command.timeoutMs }),
+  };
+  const result = await (dependencies.queryDatalog ?? queryDatalog)(options);
+  output.stdout(command.json
+    ? terminalSafeJson({
+        root: snapshot.root,
+        query,
+        ...result,
+      })
+    : sanitizeTerminalText(renderDatalog(result)));
+  return 0;
+}
+
+function renderPercolation(result: PercolationResult, note: string | undefined): string {
+  const lines = [
+    `Percolation${note === undefined ? "" : ` for ${safe(note)}`}: ${result.candidates.length} candidate${result.candidates.length === 1 ? "" : "s"}${result.truncated ? " (truncated)" : ""}.`,
+  ];
+  if (result.candidates.length === 0) lines.push("  None.");
+  for (const candidate of result.candidates) {
+    if (candidate.kind === "missing-concept") {
+      lines.push(
+        `  concept  #${safe(candidate.tag)} → ${safe(candidate.suggestedId)}  (${candidate.support} supporting notes)`
+          + (candidate.collidesWith === null
+            ? ""
+            : `; natural ID is occupied by ${safe(candidate.collidesWith)}`),
+      );
+    } else if (candidate.kind === "missing-relation") {
+      lines.push(
+        `  relation  ${safe(candidate.source)} ${safe(candidate.suggestedPredicate)} ${safe(candidate.target)}  (${candidate.support} shared signals)`,
+      );
+    } else if (candidate.kind === "unlinked-mention") {
+      lines.push(
+        `  mention  ${safe(candidate.source)} → ${safe(candidate.target)}  (${candidate.support})`,
+      );
+    } else {
+      lines.push(
+        `  hygiene  ${safe(candidate.problem)} in ${safe(candidate.source)}${candidate.target === null ? "" : ` → ${safe(candidate.target)}`}: ${safe(candidate.message)}`,
+      );
+    }
+    for (const evidence of candidate.evidence.slice(0, 3)) {
+      if (evidence.kind === "tag") {
+        lines.push(`    ${safe(evidence.path)}  #${safe(evidence.tag)}`);
+      } else if (evidence.kind === "shared-tag") {
+        lines.push(`    ${safe(evidence.path)} shares #${safe(evidence.tag)}`);
+      } else if (evidence.kind === "shared-concept") {
+        lines.push(`    ${safe(evidence.path)} shares ${safe(evidence.concept)}`);
+      } else if (evidence.kind === "mention") {
+        lines.push(`    ${safe(evidence.source)}:${evidence.line} mentions “${safe(evidence.phrase)}”`);
+      } else if (evidence.kind === "relation") {
+        lines.push(
+          `    ${safe(evidence.source)}:${evidence.line} ${safe(evidence.predicate)} → ${safe(evidence.target)}`,
+        );
+      } else {
+        lines.push(`    ${safe(evidence.source)}:${evidence.line} ${safe(evidence.message)}`);
+      }
+    }
+    if (candidate.evidence.length > 3) {
+      lines.push(`    … ${candidate.evidence.length - 3} more evidence records`);
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+async function runPercolate(
+  command: Extract<ParsedCommand, { readonly kind: "percolate" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const maxMentionPairs = command.note === undefined
+    ? MAX_PERCOLATION_MENTION_PAIRS
+    : MAX_SCOPED_PERCOLATION_MENTION_PAIRS;
+  const snapshot = await (dependencies.scanVault ?? scanVault)(
+    command.root,
+    {
+      maxNotes: MAX_PERCOLATION_NOTES,
+      maxMentionPairs,
+      maxMentions: Math.min(MAX_PERCOLATION_MENTIONS, maxMentionPairs),
+      ...(command.note === undefined ? {} : { mentionScope: command.note }),
+    },
+  );
+  const result = (dependencies.percolateVault ?? percolateVault)(
+    snapshot.notes,
+    snapshot.analysis,
+    {
+      ...(command.note === undefined ? {} : { note: command.note }),
+      minSupport: command.minSupport,
+      limit: command.limit,
+    },
+  );
+  output.stdout(command.json
+    ? terminalSafeJson({
+        root: snapshot.root,
+        note: command.note ?? null,
+        minSupport: command.minSupport,
+        ...result,
+      })
+    : sanitizeTerminalText(renderPercolation(result, command.note)));
+  return 0;
 }
 
 async function runList(
@@ -1166,8 +1906,11 @@ async function runVault(
     : await (dependencies.scanVault ?? scanVault)(command.root, command.options);
 
   if (command.kind === "refresh" || command.kind === "check") {
-    output.stdout(command.json ? terminalSafeJson(summary(snapshot)) : sanitizeTerminalText(renderSnapshot(command.kind, snapshot)));
-    return checkExitCode(snapshot);
+    const noCatalog = command.kind === "check" && command.noCatalog === true;
+    output.stdout(command.json
+      ? terminalSafeJson(summary(snapshot, { noCatalog }))
+      : sanitizeTerminalText(renderSnapshot(command.kind, snapshot, noCatalog)));
+    return checkExitCode(snapshot, noCatalog);
   }
   if (command.kind === "graph") {
     output.stdout(command.json ? terminalSafeJson(graphJson(snapshot)) : sanitizeTerminalText(renderGraph(snapshot)));
@@ -1200,9 +1943,10 @@ async function runVault(
   }
   const connection = snapshot.analysis.noteConnections.find(({ id }) => id === lookup.note.id);
   const backlinks = connection?.backlinks ?? [];
+  const relationBacklinks = connection?.relationBacklinks ?? [];
   output.stdout(command.json
-    ? terminalSafeJson(backlinkPayload(lookup.note.path, backlinks))
-    : sanitizeTerminalText(renderBacklinks(lookup.note.path, backlinks)));
+    ? terminalSafeJson(backlinkPayload(lookup.note.path, backlinks, relationBacklinks))
+    : sanitizeTerminalText(renderBacklinks(lookup.note.path, backlinks, relationBacklinks)));
   return 0;
 }
 
@@ -1238,6 +1982,10 @@ export async function main(
     if (command.kind === "context") return await runContext(command, output, dependencies);
     if (command.kind === "agent-identity") return runAgentIdentity(command, output);
     if (command.kind === "agents") return await runAgents(command, output, dependencies);
+    if (command.kind === "note-create") return await runNoteCreate(command, output, dependencies);
+    if (command.kind === "relation") return await runRelation(command, output, dependencies);
+    if (command.kind === "datalog") return await runDatalog(command, output, dependencies);
+    if (command.kind === "percolate") return await runPercolate(command, output, dependencies);
     if (command.kind === "list") return await runList(command, output, dependencies);
     return await runVault(command, output, dependencies);
   } catch (error) {

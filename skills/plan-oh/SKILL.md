@@ -75,9 +75,12 @@ humans or structured queries.
 
 ## Connect and verify
 
-Add wikilinks only where the prose explains a useful relationship. Then run:
+Add wikilinks or typed relationships only where the prose and evidence explain
+a useful connection. Review the changed plan for reusable concepts before
+refreshing:
 
 ```sh
+oh percolate "<plan-note-id>" --root "$OH_ROOT" --limit 25 --json
 oh refresh --root "$OH_ROOT"
 oh check --root "$OH_ROOT"
 ```
@@ -85,6 +88,8 @@ oh check --root "$OH_ROOT"
 Run those commands when the plan lives in an initialized hraness/oh vault. In a
 repository-native planning directory, use that repository's own validation
 instead. Review broken links first, then inspect orphan and mention advisories
-in context. An independently useful plan may legitimately remain an orphan in
-a new or sparse vault. Record that disposition mentally or in the task handoff;
-do not manufacture links merely to improve graph counts.
+in context. Promote only concepts likely to be reused, and ground every typed
+relationship in the plan's prose. An independently useful plan may legitimately
+remain an orphan in a new or sparse vault. Record that disposition mentally or
+in the task handoff; do not manufacture links or relations merely to improve
+graph counts.

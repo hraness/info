@@ -32,10 +32,13 @@ _No durable notes have been filed yet._
 - Treat this directory as one Git-backed, Obsidian-compatible Markdown vault.
 - Use vault-root wikilinks without \`.md\`, such as \`[[notes/context-engineering|context engineering]]\`.
 - Put links in explanatory prose when they carry part of the argument. Do not add bare reciprocal links to improve graph counts.
+- Keep reusable concepts as ordinary notes with \`type: concept\`. Store typed outbound assertions under \`relations\` with lower-kebab-case predicates and exact vault-root target IDs; ground each assertion in prose or evidence.
+- Never write reciprocal, transitive, similarity-derived, or otherwise inferred relationships into notes. DataScript, backlinks, and percolation candidates are disposable views.
 - Preserve source authority: article bodies are captures, riffs retain the speaker's claims, and maintained notes own later synthesis.
 - Keep \`AGENTS.md\` normative and concise without removing load-bearing rules. A scope hub may hold rationale, history, examples, and linked decisions, but never silently overrides a guide or becomes the only home of an edit-time rule.
-- Run \`oh refresh --root .\` after changing notes, inspect advisory link candidates, then run \`oh check --root .\`.
-- Use \`oh context <path> --root . --repo <repository>\` for scoped repository knowledge, \`oh list\` for exact metadata or tags, \`oh links\` for explicit relationships, and \`oh search\` when the concept may use different words.
+- Run \`oh percolate <changed-note> --root .\` after materially changing a note, review the cited evidence, then run \`oh refresh --root .\` and \`oh check --root .\`.
+- During parallel edits, each lane runs \`oh check --root . --no-catalog\`; the integrating agent performs one final refresh and normal check.
+- Use \`oh context <path> --root . --repo <repository>\` for scoped repository knowledge, \`oh list\` for exact metadata or tags, \`oh links\` for explicit relationships, \`oh datalog\` for joins or recursive paths, and \`oh search\` when the concept may use different words.
 `,
   "articles/AGENTS.md": `# Contents
 
@@ -55,6 +58,7 @@ _No durable notes have been filed yet._
 
 - Search titles, aliases, and filenames before creating a note; update an existing identity when it is clear.
 - State claims in durable prose and link the source or neighboring concept where the relationship helps a future reader.
+- Use \`type: concept\` only for a reusable idea with a maintained definition. Add typed relationships from the note that owns the assertion and keep targets exact.
 - Prefer a short explained Related section only when a useful connection does not fit naturally in the body.
 `,
   "plans/AGENTS.md": `# Contents

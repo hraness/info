@@ -64,7 +64,7 @@ jobs:
             exit 1
           fi
       - run: bun pm pack --dry-run --ignore-scripts
-      - run: node --input-type=module -e 'await Promise.all(["./dist/index.js","./dist/agent-context.js","./dist/agent-guide-audit.js","./dist/clip/browser-profiles.js","./dist/capture.js","./dist/clip/acquire.js","./dist/clip/args.js","./dist/clip/bounded-byte-buffer.js","./dist/clip/cli.js","./dist/clip/cookies.js","./dist/clip/doctor.js","./dist/clip/network.js","./dist/clip/network-proxy.js","./dist/clip/persist.js","./dist/clip/terminal.js","./dist/graph.js","./dist/navigation.js","./dist/pdf.js","./dist/query.js","./dist/semantic.js"].map((path) => import(path)))'
+      - run: node --input-type=module -e 'await Promise.all(["./dist/index.js","./dist/agent-context.js","./dist/agent-guide-audit.js","./dist/authoring.js","./dist/clip/browser-profiles.js","./dist/capture.js","./dist/clip/acquire.js","./dist/clip/args.js","./dist/clip/bounded-byte-buffer.js","./dist/clip/cli.js","./dist/clip/cookies.js","./dist/clip/doctor.js","./dist/clip/network.js","./dist/clip/network-proxy.js","./dist/clip/persist.js","./dist/clip/terminal.js","./dist/datalog.js","./dist/facts.js","./dist/graph.js","./dist/navigation.js","./dist/pdf.js","./dist/percolate.js","./dist/query.js","./dist/semantic.js"].map((path) => import(path)))'
 
   publish:
     name: Publish

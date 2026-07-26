@@ -31,6 +31,11 @@ describe("vault initialization", () => {
     const scopeGuide = readFileSync(join(root, "scopes/AGENTS.md"), "utf8");
     expect(rootGuide).toContain("# Guidelines");
     expect(rootGuide).toContain("oh search");
+    expect(rootGuide).toContain("oh datalog");
+    expect(rootGuide).toContain("oh percolate");
+    expect(rootGuide).toContain("--no-catalog");
+    expect(rootGuide).toContain("type: concept");
+    expect(rootGuide).toContain("relations");
     expect(planGuide).toContain("type: plan");
     expect(planGuide).toContain("verification");
     expect(planGuide).toContain("same file");

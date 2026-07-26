@@ -1,6 +1,10 @@
 # Design
 
-hraness/oh treats a knowledge base as durable Markdown plus replaceable views. A vault must remain useful when the CLI is absent, and a capture must remain inspectable when the original page changes or disappears. Exact graph and metadata views are deterministic; semantic search is optional derived state that can be deleted and rebuilt.
+hraness/oh treats a knowledge base as durable Markdown plus replaceable views.
+A vault must remain useful when the CLI is absent, and a capture must remain
+inspectable when the original page changes or disappears. Exact graph,
+metadata, and Datalog views are deterministic; semantic search is optional
+derived state that can be deleted and rebuilt.
 
 ## Storage is the interface
 
@@ -103,25 +107,145 @@ keep the inherited chain reproducible and confined to the selected repository.
 
 ## The graph is explicit
 
-The graph is built from wikilinks in authored Markdown. A scan parses note identity, title, aliases, properties, readable text, and outgoing links; resolves each note target; and reports broken or ambiguous references rather than choosing a convenient match.
+The graph is built from wikilinks and typed relationships in authored Markdown.
+A scan parses note identity, title, aliases, tags, typed metadata, readable
+text, outgoing links, and outbound assertions. It resolves each target and
+reports broken or ambiguous references rather than choosing a convenient
+match.
 
-Three rules keep the result honest:
+Reusable concepts are ordinary notes:
 
-1. Backlinks are derived, never written into source notes.
-2. The managed catalog is navigation, so links to or from its note (`index.md` by default) do not count as contextual edges.
-3. A title or alias found in prose is only a mention candidate. It becomes an edge only after a person or agent decides that the link improves the sentence.
+```md
+---
+type: concept
+title: Durable agent memory
+aliases:
+  - persistent agent memory
+---
 
-This makes inbound counts, outbound counts, backlinks, and orphans reproducible. It also prevents reciprocal link sections and index catalogs from making a disconnected vault appear healthy.
+# Durable agent memory
+```
 
-Fenced code, inline code, frontmatter, and HTML comments are excluded from mention analysis. Line breaks are preserved during masking so diagnostics continue to point at the authored source.
+A note owns each typed assertion it makes:
+
+```yaml
+relations:
+  supports:
+    - notes/durable-agent-memory
+  contrasts-with:
+    - notes/conversation-history
+```
+
+Predicates use lower-kebab-case and targets use exact vault-root note IDs
+without `.md`. The source note is the implicit subject. Different agents can
+therefore edit relationships on different notes without contending on a central
+ontology or edge file.
+
+Four rules keep the result honest:
+
+1. Backlinks and inverse relationships are derived, never written into source
+   notes.
+2. The managed catalog is navigation, so links to or from its note (`index.md`
+   by default) do not count as contextual edges.
+3. A title, alias, recurring tag, shared neighborhood, or semantic match is a
+   candidate. It becomes an edge only after an agent or person reviews the
+   evidence and authors the assertion.
+4. Transitive paths and other inferred relationships remain query results.
+   They never silently become Markdown facts.
+
+This makes inbound and outbound counts, backlinks, relationships, and orphans
+reproducible. It also prevents reciprocal sections and generated catalogs from
+making a disconnected vault appear healthy.
+
+Fenced code, inline code, frontmatter, and HTML comments are excluded from
+mention analysis. Line breaks are preserved during masking so diagnostics
+continue to point at the authored source.
+
+## Datalog is a disposable projection
+
+Each Datalog command projects the current notes into an immutable in-memory
+[DataScript](https://github.com/tonsky/datascript) database. Note entities carry
+stable string IDs, titles, aliases, tags, and types. Edge entities retain their
+source, target, predicate, kind, and provenance. Nested frontmatter becomes
+typed metadata-leaf entities with stable paths. DataScript's numeric entity IDs
+never appear in the public API or command output.
+
+The adapter queries an EAV relation with a fixed vocabulary. Every entity has
+`:oh/id` and `:oh/kind`; notes use `:note/*`, metadata leaves use
+`:metadata/*`, and edges use `:edge/*`. Conventional EDN attribute keywords are
+normalized only when they match that owned vocabulary, so quoted strings and
+foreign query inputs keep their literal meaning. Edge endpoints are semantic
+entity references; join them through `:note/id` to return canonical note IDs.
+
+`oh datalog` provides bounded joins, aggregates, and recursive rules over that
+projection. `oh percolate` runs named, read-only rules that surface repeated
+tags without concept notes, unconnected shared-concept neighborhoods, exact
+unlinked mentions, and relationship-hygiene findings. The output cites the
+authored facts that caused each candidate. A person or agent decides whether to
+run `oh note create` or `oh relation add`.
+
+Projection spends its fact budget while it walks metadata, rather than
+materializing an unbounded nested tree and checking afterward. Query evaluation
+runs in a disposable one-shot subprocess with a 2-second default deadline and
+a 5-second absolute deadline. Before IPC, Oh caps the projection at 250,000
+facts and validates a 16 MiB snapshot, 100,000 input values, 64 KiB scalar
+values, and 4 MiB of extra inputs. The child and parent both enforce 10,000
+rows, 100,000 result values, 64 KiB scalar values, and a 4 MiB result transfer.
+`--timeout-ms` may lower or raise the deadline within the hard range. Node 24
+children also receive a 256 MiB V8 old-space ceiling; Bun 1.3 children use its
+lower-memory `--smol` mode, which is not presented as a hard heap limit. The
+programmatic `queryDatalog` API is asynchronous, and budget failures expose
+owned `DatalogBudgetError` or `FactProjectionBudgetError` kinds so callers can
+distinguish a timeout, result growth, transfer growth, and projection growth
+without parsing an engine error string.
+
+Recursive CLI queries declare `:in $ %` and receive their EDN rule vector from
+an explicit, bounded `--rules-file`. This keeps shell quoting small and makes
+the rule program independently reviewable. DataScript evaluates rules
+top-down, so a rule over graph edges that may cycle carries and decrements an
+explicit remaining-depth argument. An unbounded recursive rule over a cycle is
+contained by the subprocess deadline; the focused `oh links` command supplies
+cycle-safe bounded traversal without a custom rule.
+
+Commands that only need links and typed relationships (`oh datalog` and
+`oh relation list`) skip quadratic prose-mention discovery. A scoped
+`oh percolate <note>` considers only mention pairs touching the resolved note;
+vault-wide percolation and ordinary graph maintenance use explicit pair and
+result budgets. Scans reject more than 10,000 notes before parsing, then bound
+each note at 16 MiB of valid UTF-8 and the vault at 256 MiB. These are package
+ceilings; callers may select lower operation-specific limits.
+
+Oh never commits a DataScript database, serialized snapshot, generated fact
+file, or event log. The JavaScript engine serializes a complete database rather
+than providing incremental durable storage, and a shared snapshot would become
+a repository-wide merge hotspot. Rebuilding from Markdown keeps the database
+replaceable and keeps Git history on the assertions humans can read. A future
+cache may live outside the vault only if measurements justify it; it must be
+content-addressed by source, projection schema, and engine version and rebuild
+on any mismatch.
 
 ## Refresh owns one region
 
 `oh refresh` scans the vault, renders a sorted catalog, and atomically replaces only the region between the catalog markers in the configured index note (`index.md` by default). Text outside those markers belongs to the author. If markers are malformed or duplicated, refresh fails instead of guessing.
 
-`oh check` computes the expected catalog and graph policy without writing. It fails when the managed region is stale or required graph invariants do not hold. The split gives local work a deliberate mutation command and CI a read-only gate.
+`oh check` computes the expected catalog and graph policy without writing. It
+fails when the managed region is stale or required graph invariants do not
+hold. `oh check --no-catalog` applies the graph gate without requiring the
+shared catalog to be current. Parallel edit lanes use that mode while touching
+their owned notes; the integrating agent performs one final refresh and normal
+check. This confines the only generated Markdown hotspot to integration.
 
-`oh graph` exposes the scan as a human-readable or structured report. `oh backlinks` uses the same identity rules to retrieve incoming contextual links for one note. `oh links` traverses incoming, outgoing, or bidirectional contextual edges to a bounded depth and node count, reporting when a high-degree neighborhood reaches the cap. There is no second graph state to synchronize.
+`oh graph` exposes the scan as a human-readable or structured report.
+`oh backlinks` and `oh relation list` use the same identities to retrieve
+incoming links and typed assertions. `oh links` traverses both kinds of authored
+edge to a bounded depth and node count, reporting when a high-degree
+neighborhood reaches the cap. There is no second graph state to synchronize.
+
+Single-note authoring commands confine paths to the vault, reject symbolic and
+hard-linked targets, serialize local same-note writers, compare an optimistic
+source revision, and atomically replace the source file. Different-note writes
+do not share a lock or graph file. Git remains the cross-worktree review and
+merge mechanism.
 
 ## Exact metadata is authored
 
@@ -186,7 +310,13 @@ These boundaries are not entitlement mechanisms. Capture does not bypass authent
 
 ## Dependencies follow capabilities
 
-[Bun](https://bun.sh) is the required runtime. [YAML](https://eemeli.org/yaml/) parses typed frontmatter, and [QMD](https://github.com/tobi/qmd) supplies the optional local keyword and embedding index. QMD is loaded only by index and search commands, so deterministic graph and metadata commands do not initialize its native runtime or model.
+[Bun](https://bun.sh) is the required runtime.
+[YAML](https://eemeli.org/yaml/) parses typed frontmatter,
+[DataScript](https://github.com/tonsky/datascript) supplies the disposable
+in-memory Datalog view, and [QMD](https://github.com/tobi/qmd) supplies the
+optional local keyword and embedding index. QMD is loaded only by index and
+search commands, so deterministic graph, Datalog, and metadata commands do not
+initialize its native runtime or model.
 
 [Defuddle](https://github.com/kepano/defuddle) performs article extraction. [agent-browser](https://github.com/vercel-labs/agent-browser) provides optional rendered acquisition. The pinned [Sweet Cookie safety fork](https://github.com/hraness/sweet-cookie) supports explicit browser-cookie import while retaining host-only scope and rejecting partitioned or container-scoped state that the capture lanes cannot replay faithfully.
 

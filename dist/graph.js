@@ -1,8 +1,14 @@
 // @bun
 import {
+  MAX_ANALYZED_NOTES,
+  MAX_CONNECTION_OBSERVATIONS,
+  MAX_MENTIONS,
+  MAX_MENTION_PAIRS,
+  VaultAnalysisBudgetError,
   analyzeVault,
   catalogEnd,
   catalogStart,
+  isCanonicalNoteId,
   lookupNote,
   metadataValueFromUnknown,
   normalizeVaultPath,
@@ -11,7 +17,7 @@ import {
   replaceCatalog,
   searchableMarkdown,
   wikiLinks
-} from "./index-rbfx133v.js";
+} from "./index-q2ks380z.js";
 export {
   wikiLinks,
   searchableMarkdown,
@@ -21,7 +27,13 @@ export {
   normalizeVaultPath,
   metadataValueFromUnknown,
   lookupNote,
+  isCanonicalNoteId,
   catalogStart,
   catalogEnd,
-  analyzeVault
+  analyzeVault,
+  VaultAnalysisBudgetError,
+  MAX_MENTION_PAIRS,
+  MAX_MENTIONS,
+  MAX_CONNECTION_OBSERVATIONS,
+  MAX_ANALYZED_NOTES
 };

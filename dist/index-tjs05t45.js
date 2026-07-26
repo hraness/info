@@ -11,6 +11,9 @@ import {
   safeFetch
 } from "./index-b0b0vy11.js";
 import {
+  BoundedByteBuffer
+} from "./index-gh719d91.js";
+import {
   redactSensitiveText,
   sanitizeArtifactUrl
 } from "./index-ey9rycsn.js";
@@ -18,9 +21,6 @@ import {
   sanitizeTerminalLine,
   sanitizeTerminalText
 } from "./index-1xxnjn0d.js";
-import {
-  BoundedByteBuffer
-} from "./index-gh719d91.js";
 
 // src/pdf/args.ts
 var pdfUsage = `oh pdf \u2014 save a local or public remote PDF as an auditable Markdown bundle

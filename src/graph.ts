@@ -1,13 +1,75 @@
 import { posix } from "node:path";
-import { parseDocument } from "yaml";
+import {
+  isMap,
+  isNode,
+  isScalar,
+  isSeq,
+  LineCounter,
+  parseDocument,
+  type Node,
+} from "yaml";
 
 export const catalogStart = "<!-- oh:catalog:start -->";
 export const catalogEnd = "<!-- oh:catalog:end -->";
+
+export const MAX_ANALYZED_NOTES = 10_000;
+export const MAX_CONNECTION_OBSERVATIONS = 250_000;
+export const MAX_MENTION_PAIRS = 1_000_000;
+export const MAX_MENTIONS = 50_000;
+
+export type VaultAnalysisBudgetKind =
+  | "notes"
+  | "connection-observations"
+  | "mention-pairs"
+  | "mentions";
+
+/** A stable failure for callers that need to distinguish bounded graph work. */
+export class VaultAnalysisBudgetError extends RangeError {
+  readonly kind: VaultAnalysisBudgetKind;
+  readonly limit: number;
+
+  constructor(
+    kind: VaultAnalysisBudgetKind,
+    limit: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "VaultAnalysisBudgetError";
+    this.kind = kind;
+    this.limit = limit;
+  }
+}
 
 export type WikiLink = {
   target: string;
   line: number;
   embedded: boolean;
+};
+
+export type RelationDeclaration = {
+  /** Strict lower-kebab predicate as authored after Unicode normalization. */
+  readonly predicate: string;
+  /** Authored target, normalized and trimmed but not yet resolved. */
+  readonly target: string;
+  readonly line: number;
+};
+
+export type RelationProvenance = {
+  readonly kind: "frontmatter";
+  /** Vault-relative Markdown path that owns the outbound assertion. */
+  readonly source: string;
+  readonly line: number;
+  /** Target spelling retained for diagnostics and auditable projection. */
+  readonly authoredTarget: string;
+};
+
+export type AuthoredRelation = {
+  /** Canonical extensionless note ID. */
+  readonly source: string;
+  /** Canonical extensionless note ID. */
+  readonly target: string;
+  readonly predicate: string;
+  readonly provenance: RelationProvenance;
 };
 
 export type MetadataScalar = string | number | boolean | null;
@@ -37,6 +99,13 @@ export type Note = {
   summary: string;
   searchableText: string;
   links: readonly WikiLink[];
+  /**
+   * Always present on parser-produced notes. Optionality preserves compatibility
+   * for callers that construct the older structural Note shape themselves.
+   */
+  relationDeclarations?: readonly RelationDeclaration[];
+  /** Parser diagnostics promoted into VaultAnalysis.relationIssues. */
+  relationIssues?: readonly MalformedRelationIssue[];
 };
 
 export type ResolvedLink = {
@@ -60,6 +129,33 @@ export type LinkIssue =
       candidates: readonly string[];
     };
 
+export type MalformedRelationIssue = {
+  readonly kind: "malformed";
+  readonly source: string;
+  readonly line: number;
+  readonly predicate?: string;
+  readonly target?: string;
+  readonly message: string;
+};
+
+export type RelationIssue =
+  | MalformedRelationIssue
+  | {
+      readonly kind: "broken";
+      readonly source: string;
+      readonly line: number;
+      readonly predicate: string;
+      readonly target: string;
+    }
+  | {
+      readonly kind: "ambiguous";
+      readonly source: string;
+      readonly line: number;
+      readonly predicate: string;
+      readonly target: string;
+      readonly candidates: readonly string[];
+    };
+
 export type MentionCandidate = {
   source: string;
   line: number;
@@ -79,6 +175,9 @@ export type NoteConnections = {
   inboundContextualCount: number;
   outboundContextualCount: number;
   backlinks: readonly Backlink[];
+  inboundRelationCount: number;
+  outboundRelationCount: number;
+  relationBacklinks: readonly AuthoredRelation[];
 };
 
 export type NoteLookupResult =
@@ -88,6 +187,19 @@ export type NoteLookupResult =
 
 export type AnalyzeVaultOptions = {
   includeInSuggestions?: (note: Note) => boolean;
+  /**
+   * Restrict mention discovery to pairs touching an included note. An empty
+   * scope skips mention pairing while retaining links and authored relations.
+   */
+  mentionScope?: (note: Note) => boolean;
+  /** Maximum notes accepted by this analysis, up to the hard package limit. */
+  maxNotes?: number;
+  /** Maximum parsed wikilinks and relation records inspected in aggregate. */
+  maxConnectionObservations?: number;
+  /** Maximum source/target phrase pairs inspected for prose mentions. */
+  maxMentionPairs?: number;
+  /** Maximum mention candidates materialized in the result. */
+  maxMentions?: number;
   /** Vault-relative path of the generated navigation catalog. */
   catalogNoteId?: string;
 };
@@ -96,8 +208,10 @@ export type VaultAnalysis = {
   noteCount: number;
   contextualLinks: readonly ResolvedLink[];
   backlinks: readonly Backlink[];
+  authoredRelations: readonly AuthoredRelation[];
   noteConnections: readonly NoteConnections[];
   issues: readonly LinkIssue[];
+  relationIssues: readonly RelationIssue[];
   orphans: readonly string[];
   mentions: readonly MentionCandidate[];
 };
@@ -107,6 +221,8 @@ type Frontmatter = {
   aliases: readonly string[];
   tags: readonly string[];
   metadata: MetadataObject;
+  relationDeclarations: readonly RelationDeclaration[];
+  relationIssues: readonly MalformedRelationIssue[];
 };
 
 type MetadataParseResult =
@@ -191,21 +307,223 @@ function emptyMetadata(): MetadataObject {
   return Object.create(null) as MetadataObject;
 }
 
-function parseMetadata(source: string, path: string): MetadataObject {
-  if (source.trim() === "") return emptyMetadata();
+type ParsedMetadata = {
+  readonly metadata: MetadataObject;
+  readonly relationDeclarations: readonly RelationDeclaration[];
+  readonly relationIssues: readonly MalformedRelationIssue[];
+};
+
+const relationPredicatePattern = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+const maxNoteIdLength = 2_048;
+
+/**
+ * Whether a value is the exact, extensionless vault-root ID used on disk.
+ *
+ * Relationship metadata and the authoring API share this predicate so a
+ * value accepted by the reader can always be passed back to the writer
+ * without a second normalization language.
+ */
+export function isCanonicalNoteId(value: string): boolean {
+  if (
+    value === ""
+    || value.length > maxNoteIdLength
+    || value !== value.trim()
+    || value !== value.normalize("NFC")
+    || value.includes("\\")
+    || value.includes("\0")
+    || value.includes("\n")
+    || value.includes("\r")
+    || value.startsWith("/")
+    || value.endsWith("/")
+    || value.toLocaleLowerCase("en-US").endsWith(".md")
+  ) {
+    return false;
+  }
+  const segments = value.split("/");
+  return !segments.some((segment) =>
+    segment === ""
+    || segment === "."
+    || segment === ".."
+    || segment.startsWith("."))
+    && posix.normalize(value) === value
+    && posix.basename(`${value}.md`) !== "AGENTS.md";
+}
+
+function frontmatterSourceLine(
+  lineCounter: LineCounter,
+  node: Node | null | undefined,
+  fallback = 2,
+): number {
+  const offset = node?.range?.[0];
+  if (offset === undefined) return fallback;
+  // The parsed source starts immediately after the opening frontmatter marker.
+  return lineCounter.linePos(offset).line + 1;
+}
+
+function malformedRelation(
+  source: string,
+  line: number,
+  message: string,
+  details: {
+    readonly predicate?: string;
+    readonly target?: string;
+  } = {},
+): MalformedRelationIssue {
+  return {
+    kind: "malformed",
+    source,
+    line,
+    ...details,
+    message,
+  };
+}
+
+function relationTarget(
+  node: Node | null,
+  predicate: string,
+  source: string,
+  lineCounter: LineCounter,
+  fallbackLine: number,
+): RelationDeclaration | MalformedRelationIssue {
+  const line = frontmatterSourceLine(lineCounter, node, fallbackLine);
+  if (!isScalar(node) || typeof node.value !== "string") {
+    return malformedRelation(
+      source,
+      line,
+      `Relation "${predicate}" targets must be non-empty strings.`,
+      { predicate },
+    );
+  }
+  const target = node.value;
+  if (!isCanonicalNoteId(target)) {
+    return malformedRelation(
+      source,
+      line,
+      `Relation "${predicate}" target ${JSON.stringify(target)} must be an exact `
+        + "extensionless vault-root note ID.",
+      { predicate, target: node.value },
+    );
+  }
+  return { predicate, target, line };
+}
+
+function parsedRelations(
+  contents: Node | null,
+  source: string,
+  lineCounter: LineCounter,
+): Pick<ParsedMetadata, "relationDeclarations" | "relationIssues"> {
+  if (!isMap(contents)) return { relationDeclarations: [], relationIssues: [] };
+  const relationsPair = contents.items.find((pair) =>
+    isScalar(pair.key)
+    && typeof pair.key.value === "string"
+    && pair.key.value.toLocaleLowerCase("en-US") === "relations");
+  if (relationsPair === undefined) {
+    return { relationDeclarations: [], relationIssues: [] };
+  }
+
+  const relationsLine = frontmatterSourceLine(
+    lineCounter,
+    isScalar(relationsPair.key) ? relationsPair.key : null,
+  );
+  if (!isMap(relationsPair.value)) {
+    return {
+      relationDeclarations: [],
+      relationIssues: [
+        malformedRelation(
+          source,
+          relationsLine,
+          "Relations must map strict lower-kebab predicates to a string or string list.",
+        ),
+      ],
+    };
+  }
+
+  const relationDeclarations: RelationDeclaration[] = [];
+  const relationIssues: MalformedRelationIssue[] = [];
+  for (const pair of relationsPair.value.items) {
+    const predicateLine = frontmatterSourceLine(
+      lineCounter,
+      isNode(pair.key) ? pair.key : null,
+      relationsLine,
+    );
+    if (!isScalar(pair.key) || typeof pair.key.value !== "string") {
+      relationIssues.push(malformedRelation(
+        source,
+        predicateLine,
+        "Relation predicates must be strict lower kebab-case strings.",
+      ));
+      continue;
+    }
+
+    const predicate = pair.key.value.normalize("NFC");
+    if (!relationPredicatePattern.test(predicate)) {
+      relationIssues.push(malformedRelation(
+        source,
+        predicateLine,
+        `Invalid relation predicate "${predicate}"; use strict lower kebab-case.`,
+        { predicate },
+      ));
+      continue;
+    }
+
+    const nodes = isSeq(pair.value) ? pair.value.items : [pair.value];
+    for (const node of nodes) {
+      const parsed = relationTarget(
+        isNode(node) ? node : null,
+        predicate,
+        source,
+        lineCounter,
+        predicateLine,
+      );
+      if ("kind" in parsed) relationIssues.push(parsed);
+      else relationDeclarations.push(parsed);
+    }
+  }
+
+  return {
+    relationDeclarations: relationDeclarations.toSorted((left, right) =>
+      left.predicate.localeCompare(right.predicate)
+      || left.target.localeCompare(right.target)
+      || left.line - right.line),
+    relationIssues: relationIssues.toSorted((left, right) =>
+      left.line - right.line
+      || (left.predicate ?? "").localeCompare(right.predicate ?? "")
+      || (left.target ?? "").localeCompare(right.target ?? "")),
+  };
+}
+
+function parseMetadata(source: string, path: string): ParsedMetadata {
+  if (source.trim() === "") {
+    return {
+      metadata: emptyMetadata(),
+      relationDeclarations: [],
+      relationIssues: [],
+    };
+  }
   try {
+    const lineCounter = new LineCounter();
     const document = parseDocument(source, {
+      lineCounter,
       schema: "core",
       uniqueKeys: true,
     });
     if (document.errors.length > 0) {
       throw new Error("the YAML parser reported an error");
     }
-    if (document.contents === null) return emptyMetadata();
+    if (document.contents === null) {
+      return {
+        metadata: emptyMetadata(),
+        relationDeclarations: [],
+        relationIssues: [],
+      };
+    }
     const parsed: unknown = document.toJS({ mapAsMap: false, maxAliasCount: 50 });
     const metadata = metadataObjectFromUnknown(parsed);
     if (metadata === null) throw new Error("the YAML document is not a JSON-like object");
-    return metadata;
+    return {
+      metadata,
+      ...parsedRelations(document.contents, path, lineCounter),
+    };
   } catch (error) {
     throw new Error(`Invalid YAML frontmatter in ${path}.`, { cause: error });
   }
@@ -270,6 +588,8 @@ function frontmatterOf(content: string, path: string): Frontmatter {
       aliases: [],
       tags: [],
       metadata: emptyMetadata(),
+      relationDeclarations: [],
+      relationIssues: [],
     };
   }
   const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
@@ -277,7 +597,8 @@ function frontmatterOf(content: string, path: string): Frontmatter {
     throw new Error(`Invalid YAML frontmatter in ${path}: missing closing delimiter.`);
   }
 
-  const metadata = parseMetadata(lines.slice(1, end).join("\n"), path);
+  const parsed = parseMetadata(lines.slice(1, end).join("\n"), path);
+  const metadata = parsed.metadata;
 
   const values = new Map<string, string>();
   const seenKeys = new Set<string>();
@@ -296,6 +617,8 @@ function frontmatterOf(content: string, path: string): Frontmatter {
     aliases: aliasesFromMetadata(metadata),
     tags: normalizedTags(metadata),
     metadata,
+    relationDeclarations: parsed.relationDeclarations,
+    relationIssues: parsed.relationIssues,
   };
 }
 
@@ -549,6 +872,8 @@ export function parseNote(path: string, content: string): Note {
     summary,
     searchableText: searchable,
     links: wikiLinks(searchable),
+    relationDeclarations: metadata.relationDeclarations,
+    relationIssues: metadata.relationIssues,
   };
 }
 
@@ -631,6 +956,27 @@ function resolveTarget(
 const pairKey = (left: string, right: string): string =>
   left.localeCompare(right) <= 0 ? `${left}\0${right}` : `${right}\0${left}`;
 
+function compareAuthoredRelations(
+  left: AuthoredRelation,
+  right: AuthoredRelation,
+): number {
+  return left.source.localeCompare(right.source)
+    || left.predicate.localeCompare(right.predicate)
+    || left.target.localeCompare(right.target)
+    || left.provenance.line - right.provenance.line
+    || left.provenance.authoredTarget.localeCompare(right.provenance.authoredTarget);
+}
+
+function compareRelationIssues(left: RelationIssue, right: RelationIssue): number {
+  const predicateComparison = (left.predicate ?? "").localeCompare(right.predicate ?? "");
+  const targetComparison = (left.target ?? "").localeCompare(right.target ?? "");
+  return left.source.localeCompare(right.source)
+    || left.line - right.line
+    || left.kind.localeCompare(right.kind)
+    || predicateComparison
+    || targetComparison;
+}
+
 const wordCharacter = (value: string): boolean => /[A-Za-z0-9]/.test(value);
 
 function phraseOffset(lowerHaystack: string, lowerPhrase: string): number {
@@ -688,10 +1034,55 @@ function uniquePhrasesByTarget(notes: readonly Note[]): ReadonlyMap<string, read
   return phrasesByTarget;
 }
 
+function checkedAnalysisLimit(
+  value: number | undefined,
+  hardMaximum: number,
+  option:
+    | "maxNotes"
+    | "maxConnectionObservations"
+    | "maxMentionPairs"
+    | "maxMentions",
+): number {
+  const limit = value ?? hardMaximum;
+  if (!Number.isSafeInteger(limit) || limit < 0 || limit > hardMaximum) {
+    throw new RangeError(
+      `${option} must be a safe integer from 0 through ${hardMaximum}.`,
+    );
+  }
+  return limit;
+}
+
 export function analyzeVault(
   notes: readonly Note[],
   options: AnalyzeVaultOptions = {},
 ): VaultAnalysis {
+  const maxNotes = checkedAnalysisLimit(
+    options.maxNotes,
+    MAX_ANALYZED_NOTES,
+    "maxNotes",
+  );
+  const maxMentionPairs = checkedAnalysisLimit(
+    options.maxMentionPairs,
+    MAX_MENTION_PAIRS,
+    "maxMentionPairs",
+  );
+  const maxMentions = checkedAnalysisLimit(
+    options.maxMentions,
+    MAX_MENTIONS,
+    "maxMentions",
+  );
+  const maxConnectionObservations = checkedAnalysisLimit(
+    options.maxConnectionObservations,
+    MAX_CONNECTION_OBSERVATIONS,
+    "maxConnectionObservations",
+  );
+  if (notes.length > maxNotes) {
+    throw new VaultAnalysisBudgetError(
+      "notes",
+      maxNotes,
+      `Vault analysis exceeds the ${maxNotes} note limit.`,
+    );
+  }
   const catalogNoteId = withoutMarkdownExtension(
     normalizeVaultPath(options.catalogNoteId ?? "index"),
   );
@@ -703,12 +1094,34 @@ export function analyzeVault(
     matches.push(note.id);
     byBasename.set(basename, matches);
   }
+  for (const matches of byBasename.values()) matches.sort();
+
+  let connectionObservations = 0;
+  const observeConnection = (): void => {
+    if (connectionObservations >= maxConnectionObservations) {
+      throw new VaultAnalysisBudgetError(
+        "connection-observations",
+        maxConnectionObservations,
+        `Vault analysis exceeds the ${maxConnectionObservations} `
+          + "connection-observation limit.",
+      );
+    }
+    connectionObservations += 1;
+  };
 
   const issues: LinkIssue[] = [];
+  const relationIssues: RelationIssue[] = [];
+  for (const note of notes) {
+    for (const issue of note.relationIssues ?? []) {
+      observeConnection();
+      relationIssues.push(issue);
+    }
+  }
   const contextualLinks: ResolvedLink[] = [];
   const edgeKeys = new Set<string>();
   for (const source of notes) {
     for (const link of source.links) {
+      observeConnection();
       const resolution = resolveTarget(source, link.target, byId, byBasename);
       if (resolution.kind === "attachment") continue;
       if (resolution.kind === "broken") {
@@ -737,10 +1150,77 @@ export function analyzeVault(
     }
   }
 
+  const authoredRelations: AuthoredRelation[] = [];
+  const declarationKeys = new Set<string>();
+  const relationEdgeKeys = new Set<string>();
+  for (const source of notes) {
+    const declarations: RelationDeclaration[] = [];
+    for (const declaration of source.relationDeclarations ?? []) {
+      observeConnection();
+      declarations.push(declaration);
+    }
+    declarations.sort((left, right) =>
+      left.line - right.line
+      || left.predicate.localeCompare(right.predicate)
+      || left.target.localeCompare(right.target));
+    for (const declaration of declarations) {
+      const declarationKey = `${source.id}\0${declaration.predicate}\0${declaration.target}`;
+      if (declarationKeys.has(declarationKey)) continue;
+      declarationKeys.add(declarationKey);
+
+      const exactTarget = byId.get(declaration.target);
+      if (exactTarget === undefined) {
+        const basenameMatches = declaration.target.includes("/")
+          ? []
+          : (byBasename.get(declaration.target) ?? [])
+            .filter((candidate) => candidate !== declaration.target);
+        if (basenameMatches.length > 0) {
+          relationIssues.push(malformedRelation(
+            source.path,
+            declaration.line,
+            `Relation "${declaration.predicate}" target `
+              + `${JSON.stringify(declaration.target)} is only a basename; `
+              + "store the exact vault-root note ID.",
+            {
+              predicate: declaration.predicate,
+              target: declaration.target,
+            },
+          ));
+          continue;
+        }
+        relationIssues.push({
+          kind: "broken",
+          source: source.path,
+          line: declaration.line,
+          predicate: declaration.predicate,
+          target: declaration.target,
+        });
+        continue;
+      }
+      if (source.id === catalogNoteId || exactTarget.id === catalogNoteId) continue;
+
+      const edgeKey = `${source.id}\0${declaration.predicate}\0${exactTarget.id}`;
+      if (relationEdgeKeys.has(edgeKey)) continue;
+      relationEdgeKeys.add(edgeKey);
+      authoredRelations.push({
+        source: source.id,
+        target: exactTarget.id,
+        predicate: declaration.predicate,
+        provenance: {
+          kind: "frontmatter",
+          source: source.path,
+          line: declaration.line,
+          authoredTarget: declaration.target,
+        },
+      });
+    }
+  }
+
   const sortedContextualLinks = contextualLinks.toSorted((left, right) =>
     left.source.localeCompare(right.source)
     || left.target.localeCompare(right.target)
     || left.line - right.line);
+  const sortedAuthoredRelations = authoredRelations.toSorted(compareAuthoredRelations);
   const backlinks = sortedContextualLinks.toSorted((left, right) =>
     left.target.localeCompare(right.target)
     || left.source.localeCompare(right.source)
@@ -750,6 +1230,8 @@ export function analyzeVault(
   const linkedPairs = new Set<string>();
   const inboundById = new Map<string, Backlink[]>();
   const outboundById = new Map<string, number>();
+  const inboundRelationsById = new Map<string, AuthoredRelation[]>();
+  const outboundRelationsById = new Map<string, number>();
   for (const link of sortedContextualLinks) {
     const sourceId = withoutMarkdownExtension(link.source);
     const targetId = withoutMarkdownExtension(link.target);
@@ -761,18 +1243,58 @@ export function analyzeVault(
     inboundById.set(targetId, inbound);
     outboundById.set(sourceId, (outboundById.get(sourceId) ?? 0) + 1);
   }
+  for (const relation of sortedAuthoredRelations) {
+    connected.add(relation.source);
+    connected.add(relation.target);
+    linkedPairs.add(pairKey(relation.source, relation.target));
+    const inbound = inboundRelationsById.get(relation.target) ?? [];
+    inbound.push(relation);
+    inboundRelationsById.set(relation.target, inbound);
+    outboundRelationsById.set(
+      relation.source,
+      (outboundRelationsById.get(relation.source) ?? 0) + 1,
+    );
+  }
 
   const includeInSuggestions = options.includeInSuggestions ?? (() => true);
   const suggestionNotes = contentNotes.filter(includeInSuggestions);
-  const phrasesByTarget = uniquePhrasesByTarget(suggestionNotes);
+  const scopedMentionNotes = options.mentionScope === undefined
+    ? suggestionNotes
+    : suggestionNotes.filter(options.mentionScope);
+  const scopedMentionIds = new Set(scopedMentionNotes.map((note) => note.id));
+  const phrasesByTarget = scopedMentionNotes.length === 0
+    ? new Map<string, readonly UniquePhrase[]>()
+    : uniquePhrasesByTarget(suggestionNotes);
   const mentions: MentionCandidate[] = [];
+  let mentionPairs = 0;
   for (const source of suggestionNotes) {
-    const lowerSearchableText = source.searchableText.toLocaleLowerCase("en-US");
-    for (const target of suggestionNotes) {
-      if (source.id === target.id || linkedPairs.has(pairKey(source.id, target.id))) continue;
+    const targets = options.mentionScope === undefined
+      || scopedMentionIds.has(source.id)
+      ? suggestionNotes
+      : scopedMentionNotes;
+    let lowerSearchableText: string | undefined;
+    for (const target of targets) {
+      if (source.id === target.id) continue;
+      if (mentionPairs >= maxMentionPairs) {
+        throw new VaultAnalysisBudgetError(
+          "mention-pairs",
+          maxMentionPairs,
+          `Vault analysis exceeds the ${maxMentionPairs} mention-pair limit.`,
+        );
+      }
+      mentionPairs += 1;
+      if (linkedPairs.has(pairKey(source.id, target.id))) continue;
+      lowerSearchableText ??= source.searchableText.toLocaleLowerCase("en-US");
       for (const { phrase, lowerPhrase } of phrasesByTarget.get(target.id) ?? []) {
         const offset = phraseOffset(lowerSearchableText, lowerPhrase);
         if (offset === -1) continue;
+        if (mentions.length >= maxMentions) {
+          throw new VaultAnalysisBudgetError(
+            "mentions",
+            maxMentions,
+            `Vault analysis exceeds the ${maxMentions} mention limit.`,
+          );
+        }
         mentions.push({
           source: source.path,
           line: source.searchableText.slice(0, offset).split("\n").length,
@@ -788,6 +1310,7 @@ export function analyzeVault(
     noteCount: contentNotes.length,
     contextualLinks: sortedContextualLinks,
     backlinks,
+    authoredRelations: sortedAuthoredRelations,
     noteConnections: contentNotes
       .map((note): NoteConnections => ({
         id: note.id,
@@ -795,10 +1318,14 @@ export function analyzeVault(
         inboundContextualCount: inboundById.get(note.id)?.length ?? 0,
         outboundContextualCount: outboundById.get(note.id) ?? 0,
         backlinks: inboundById.get(note.id) ?? [],
+        inboundRelationCount: inboundRelationsById.get(note.id)?.length ?? 0,
+        outboundRelationCount: outboundRelationsById.get(note.id) ?? 0,
+        relationBacklinks: inboundRelationsById.get(note.id) ?? [],
       }))
       .toSorted((left, right) => left.path.localeCompare(right.path)),
     issues: issues.sort((left, right) =>
       left.source.localeCompare(right.source) || left.line - right.line || left.target.localeCompare(right.target)),
+    relationIssues: relationIssues.toSorted(compareRelationIssues),
     orphans: suggestionNotes
       .filter((note) => !connected.has(note.id))
       .map((note) => note.path)

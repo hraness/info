@@ -1,15 +1,63 @@
 // @bun
 import {
   initVault
-} from "./index-8v446y7q.js";
+} from "./index-tr7a81e2.js";
 import {
+  DEFAULT_DATALOG_LIMIT,
+  DEFAULT_DATALOG_TIMEOUT_MS,
+  DatalogBudgetError,
+  MAX_DATALOG_FACTS,
+  MAX_DATALOG_INPUT_BYTES,
+  MAX_DATALOG_INPUT_VALUES,
+  MAX_DATALOG_LIMIT,
+  MAX_DATALOG_QUERY_LENGTH,
+  MAX_DATALOG_RESULT_BYTES,
+  MAX_DATALOG_RESULT_ROWS,
+  MAX_DATALOG_RESULT_VALUES,
+  MAX_DATALOG_SCALAR_BYTES,
+  MAX_DATALOG_SNAPSHOT_BYTES,
+  MAX_DATALOG_TIMEOUT_MS,
+  buildDatalogSnapshot,
+  datalogWorkerUrl,
+  queryDatalog
+} from "./index-w2b0xwx3.js";
+import {
+  FACT_ATTRIBUTES,
+  FactProjectionBudgetError,
+  MAX_METADATA_PROJECTION_DEPTH,
+  MAX_PROJECTED_FACTS,
+  linkFactEntityId,
+  metadataFactEntityId,
+  noteFactEntityId,
+  projectVaultFacts,
+  relationFactEntityId
+} from "./index-9b89cmna.js";
+import {
+  MAX_NAVIGATION_INDEXED_CONNECTIONS,
+  MAX_NAVIGATION_RETURNED_CONNECTIONS,
+  NavigationBudgetError,
   navigateLinks
-} from "./index-9w6m3y9a.js";
+} from "./index-d13v9ckt.js";
+import {
+  DEFAULT_PERCOLATION_LIMIT,
+  DEFAULT_PERCOLATION_MIN_SUPPORT,
+  MAX_PERCOLATION_EVIDENCE_PER_CANDIDATE,
+  MAX_PERCOLATION_LIMIT,
+  MAX_PERCOLATION_MENTIONS,
+  MAX_PERCOLATION_MENTION_PAIRS,
+  MAX_PERCOLATION_NOTES,
+  MAX_SCOPED_PERCOLATION_MENTION_PAIRS,
+  percolateVault
+} from "./index-vm6zwjyn.js";
 import {
   metadataAtPath,
   queryVault
 } from "./index-m4bexhht.js";
 import {
+  MAX_NOTE_UTF8_BYTES,
+  MAX_SCANNED_NOTES,
+  MAX_VAULT_UTF8_BYTES,
+  VaultScanBudgetError,
   defaultIgnoredDirectories,
   indexSemanticVault,
   markdownFiles,
@@ -19,20 +67,7 @@ import {
   scanVault,
   searchSemanticVault,
   semanticDatabasePath
-} from "./index-vht7kftn.js";
-import {
-  analyzeVault,
-  catalogEnd,
-  catalogStart,
-  lookupNote,
-  metadataValueFromUnknown,
-  normalizeVaultPath,
-  parseNote,
-  renderCatalog,
-  replaceCatalog,
-  searchableMarkdown,
-  wikiLinks
-} from "./index-rbfx133v.js";
+} from "./index-h04ktqdh.js";
 import {
   auditAgentGuideRepository,
   auditAgentGuideSource,
@@ -57,6 +92,39 @@ import {
   normalizeRepositoryScope,
   parseAgentContextMarker
 } from "./index-rhd7x0cs.js";
+import {
+  InvalidCanonicalNoteIdError,
+  NoteAlreadyExistsError,
+  NoteRecoveryRequiredError,
+  NoteRevisionConflictError,
+  addNoteRelation,
+  canonicalNoteId,
+  createConceptNote,
+  createNote,
+  listNoteRelations,
+  normalizeRelationPredicate,
+  noteRevision,
+  removeNoteRelation
+} from "./index-gjr3vwy3.js";
+import {
+  MAX_ANALYZED_NOTES,
+  MAX_CONNECTION_OBSERVATIONS,
+  MAX_MENTIONS,
+  MAX_MENTION_PAIRS,
+  VaultAnalysisBudgetError,
+  analyzeVault,
+  catalogEnd,
+  catalogStart,
+  isCanonicalNoteId,
+  lookupNote,
+  metadataValueFromUnknown,
+  normalizeVaultPath,
+  parseNote,
+  renderCatalog,
+  replaceCatalog,
+  searchableMarkdown,
+  wikiLinks
+} from "./index-q2ks380z.js";
 export {
   wikiLinks,
   semanticDatabasePath,
@@ -65,19 +133,31 @@ export {
   scanVault,
   replaceCatalog,
   renderCatalog,
+  removeNoteRelation,
+  relationFactEntityId,
   refreshVault,
   recommendedEmbeddingModel,
   readVaultNotes,
   queryVault,
+  queryDatalog,
+  projectVaultFacts,
+  percolateVault,
   parseNote,
   parseAgentContextMarker,
+  noteRevision,
+  noteFactEntityId,
   normalizeVaultPath,
   normalizeRepositoryScope,
+  normalizeRelationPredicate,
   navigateLinks,
   metadataValueFromUnknown,
+  metadataFactEntityId,
   metadataAtPath,
   markdownFiles,
   lookupNote,
+  listNoteRelations,
+  linkFactEntityId,
+  isCanonicalNoteId,
   inspectAgentContextRepository,
   initVault,
   indexSemanticVault,
@@ -85,8 +165,13 @@ export {
   discoverAgentGuides,
   defaultIgnoredDirectories,
   defaultAgentGuideIgnoredDirectories,
+  datalogWorkerUrl,
+  createNote,
+  createConceptNote,
   catalogStart,
   catalogEnd,
+  canonicalNoteId,
+  buildDatalogSnapshot,
   auditAgentGuides,
   auditAgentGuideSource,
   auditAgentGuideRepository,
@@ -100,6 +185,49 @@ export {
   agentContextHashLength,
   agentContextGuidePath,
   agentContextDirectory,
+  addNoteRelation,
+  VaultScanBudgetError,
+  VaultAnalysisBudgetError,
   RepositoryScopeError,
+  NoteRevisionConflictError,
+  NoteRecoveryRequiredError,
+  NoteAlreadyExistsError,
+  NavigationBudgetError,
+  MAX_VAULT_UTF8_BYTES,
+  MAX_SCOPED_PERCOLATION_MENTION_PAIRS,
+  MAX_SCANNED_NOTES,
+  MAX_PROJECTED_FACTS,
+  MAX_PERCOLATION_NOTES,
+  MAX_PERCOLATION_MENTION_PAIRS,
+  MAX_PERCOLATION_MENTIONS,
+  MAX_PERCOLATION_LIMIT,
+  MAX_PERCOLATION_EVIDENCE_PER_CANDIDATE,
+  MAX_NOTE_UTF8_BYTES,
+  MAX_NAVIGATION_RETURNED_CONNECTIONS,
+  MAX_NAVIGATION_INDEXED_CONNECTIONS,
+  MAX_METADATA_PROJECTION_DEPTH,
+  MAX_MENTION_PAIRS,
+  MAX_MENTIONS,
+  MAX_DATALOG_TIMEOUT_MS,
+  MAX_DATALOG_SNAPSHOT_BYTES,
+  MAX_DATALOG_SCALAR_BYTES,
+  MAX_DATALOG_RESULT_VALUES,
+  MAX_DATALOG_RESULT_ROWS,
+  MAX_DATALOG_RESULT_BYTES,
+  MAX_DATALOG_QUERY_LENGTH,
+  MAX_DATALOG_LIMIT,
+  MAX_DATALOG_INPUT_VALUES,
+  MAX_DATALOG_INPUT_BYTES,
+  MAX_DATALOG_FACTS,
+  MAX_CONNECTION_OBSERVATIONS,
+  MAX_ANALYZED_NOTES,
+  InvalidCanonicalNoteIdError,
+  FactProjectionBudgetError,
+  FACT_ATTRIBUTES,
+  DatalogBudgetError,
+  DEFAULT_PERCOLATION_MIN_SUPPORT,
+  DEFAULT_PERCOLATION_LIMIT,
+  DEFAULT_DATALOG_TIMEOUT_MS,
+  DEFAULT_DATALOG_LIMIT,
   AgentContextRepositoryPathError
 };

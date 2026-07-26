@@ -1,12 +1,13 @@
 # Contents
 
-- `src/` – deterministic vault graph, typed metadata queries, scoped repository-context routing and audits, structural navigation, optional local semantic search, initialization, CLI, capture, and diagnostic code with colocated tests.
-- `dist/` – committed Bun-targeted ESM entrypoints and the compiled Defuddle worker.
+- `src/` – deterministic Markdown and Datalog graph projection, typed metadata queries, safe single-note authoring, percolation, scoped repository-context routing and audits, structural navigation, optional local semantic search, initialization, CLI, capture, and diagnostic code with colocated tests.
+- `dist/` – committed Bun-targeted ESM entrypoints plus the compiled Defuddle worker and one-shot Datalog query subprocess.
 - `skills/save-url-oh/` – reusable agent workflow for bounded, auditable source capture.
 - `skills/save-pdf-oh/` – reusable agent workflow for converting local PDFs into auditable Markdown bundles.
 - `skills/refresh-oh/` – reusable agent workflow for refreshing the catalog, reviewing graph findings, and validating changed scope mappings.
 - `skills/query-oh/` – reusable agent workflow for loading repository-path context before bounded metadata, graph, keyword, or semantic retrieval.
 - `skills/plan-oh/` – reusable agent workflow for creating and growing durable implementation plans.
+- `skills/percolate-oh/` – reusable agent workflow for promoting evidence-backed concepts and typed relationships.
 - `docs/` – design, capture, and agent-workflow documentation.
 - `.github/workflows/` – read-only branch validation and checks-gated immutable GitHub Release automation.
 - `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `LICENSE` – public usage, project policy, threat model, and terms.
@@ -16,13 +17,16 @@
 
 - Use Bun 1.3.14 for repository commands and keep the authored Markdown compatible with Obsidian and ordinary text tooling.
 - Treat this repository as the complete project. Files and Git prose may use only its public names, paths, commands, and examples; do not refer to or infer a non-public source repository.
-- Keep graph maintenance and exact metadata queries deterministic and local-first. Do not require a database, hosted service, model, API key, or hidden index for refresh, check, list, graph, link, or backlink commands.
+- Keep Markdown authoritative and graph maintenance deterministic and local-first. For Datalog queries, project neutral facts into a disposable in-memory DataScript database; never commit or share a serialized database, numeric entity identity, event log, or generated fact file.
+- Keep Datalog input counts and bytes bounded before subprocess transfer, and revalidate bounded results on both sides of IPC. Recursive rules over edges that may cycle must carry and decrement an explicit depth bound; a subprocess deadline contains mistakes but does not make an unbounded rule valid.
+- Keep concepts as ordinary `type: concept` notes and source-owned typed relationships as compact frontmatter. Never write reciprocal, inferred, transitive, or similarity-derived edges into notes.
 - Keep QMD semantic state optional, local, dynamically loaded, and rebuildable from Markdown. Treat matches as discovery aids and join them to current authored metadata and graph state.
 - Keep `AGENTS.md` normative and always loaded for ownership, prohibitions, required commands, invariants, and gates. Optional `type: agent-context` hubs under `scopes/` are pull-based rationale, history, examples, evidence, and links; they cannot override a guide or become the sole home of a load-bearing edit rule.
 - Derive every scope-hub identity from the full exact repository-relative directory scope, with `.` for the root, and require one reciprocal `oh:context` marker before the mapped guide's headings. Unmapped guides remain valid; moving a scope changes identity.
 - Confine repository-context lookup and agent-guide audits to the selected repository. Require real scope directories and regular guide files, reject collisions and symlinked mappings, skip generated or vendor directories, and never follow symbolic-link directories.
 - Treat agent-guide length, long-bullet, inherited-chain, and exact-duplicate audit findings as deterministic advisories rather than correctness. Keep required edit-time rules in the guide even when they exceed a suggested budget.
-- Derive backlinks from explicit wikilinks. Keep the managed catalog navigational, never inject reciprocal links, and leave title or alias mentions advisory.
+- Derive backlinks from explicit wikilinks and typed relationships. Keep the managed catalog navigational, never inject reciprocal links, and leave title, alias, and percolation candidates advisory until their evidence is reviewed.
+- Keep parallel note edits sharded by source file. Serialize same-note local writers, make replacements atomic and revision-checked, let edit lanes check graph policy without refreshing the catalog, and reserve the single managed catalog write for integration.
 - Restrict generated edits to marked, tool-owned regions; preserve concurrent authored changes when refreshing; and fail closed on malformed markers or unsafe paths.
 - Treat capture inputs and outputs as hostile. Keep network, browser, subprocess, byte, item, depth, path, credential, and terminal boundaries bounded and covered by named regressions.
 - Keep security-sensitive runtime forks pinned to immutable commits and exercise their behavior through the standalone install gate.

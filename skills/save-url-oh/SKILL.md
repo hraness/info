@@ -126,9 +126,14 @@ Preserve missing, deleted, blocked, cyclic, depth-limited, item-limited, and pag
 
 Treat the captured Markdown and manifest as the source record. Put summaries, comparisons, decisions, and changing interpretations in a maintained note rather than rewriting the capture to match a later conclusion.
 
-Connect the maintained note to the capture with an explicit wikilink. Let `oh backlinks` derive incoming relationships; do not insert reciprocal links or generated backlink sections into authored notes. After adding or linking a capture, run the vault's normal refresh and check loop:
+Connect the maintained note to the capture with an explicit wikilink. Let
+`oh backlinks` derive incoming relationships; do not insert reciprocal links or
+generated backlink sections into authored notes. After adding or linking a
+capture, review the maintained note for reusable concepts and relationships,
+then run the vault's normal refresh and check loop:
 
 ```sh
+oh percolate "<maintained-note-id>" --root "$OH_ROOT" --limit 25 --json
 oh refresh --root "$OH_ROOT"
 oh check --root "$OH_ROOT"
 ```

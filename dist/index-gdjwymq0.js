@@ -16,14 +16,14 @@ import {
   safeFetch
 } from "./index-b0b0vy11.js";
 import {
+  readBoundedByteStream
+} from "./index-gh719d91.js";
+import {
   sanitizeArtifactUrl
 } from "./index-ey9rycsn.js";
 import {
   captureUrl
 } from "./index-p1vzcd6b.js";
-import {
-  readBoundedByteStream
-} from "./index-gh719d91.js";
 
 // src/clip/acquire.ts
 import {

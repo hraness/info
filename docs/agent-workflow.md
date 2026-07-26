@@ -1,6 +1,9 @@
 # Working in a hraness/oh vault
 
-This guide gives coding agents a conservative workflow for reading and maintaining a vault. The Markdown is the durable record. Tool output, catalogs, backlinks, and mention candidates are views over that record.
+This guide gives coding agents a conservative workflow for reading and
+maintaining a vault. Markdown is the durable record. Tool output, catalogs,
+DataScript databases, backlinks, inferred paths, and percolation candidates are
+views over that record.
 
 ## Orient before editing
 
@@ -11,7 +14,8 @@ This guide gives coding agents a conservative workflow for reading and maintaini
 3. Read the notes that already own the concept or source in question.
 4. Use the narrowest view that answers the question:
    - `oh list` for exact frontmatter or tag filters.
-   - `oh links <note>` or `oh backlinks <note>` for authored relationships.
+   - `oh links <note>`, `oh backlinks <note>`, or `oh relation list <note>` for authored relationships.
+   - `oh datalog` for joins, aggregates, predicates, or recursive paths.
    - `oh search` when the same idea may be expressed in different words.
    - `oh graph` for whole-vault diagnostics.
 
@@ -65,7 +69,36 @@ Use bounded traversal to understand explicit context around a note:
 oh links plans/improve-ingestion --direction both --depth 2 --limit 25
 ```
 
-Traversal defaults to at most 50 notes and reports when that cap truncates a high-degree neighborhood. Lower the limit for agent context discipline; raise it deliberately when the structural question requires a wider view.
+Traversal defaults to at most 50 notes and reports when either the node or
+combined-connection cap truncates a high-degree neighborhood. Lower the limit
+for agent context discipline; raise it deliberately when the structural
+question requires a wider view.
+
+Use Datalog only when the question needs a structural operation that the
+focused commands cannot express:
+
+```sh
+oh datalog '[:find ?source ?target :where [?edge :edge/predicate "supports"] [?edge :edge/source ?source-ref] [?source-ref :note/id ?source] [?edge :edge/target ?target-ref] [?target-ref :note/id ?target]]' --limit 50 --json
+```
+
+Each call rebuilds a disposable DataScript projection from current Markdown.
+Results use canonical string IDs, are sorted and bounded, and remain derived
+answers. Open the returned notes and inspect edge provenance before treating a
+relationship as supported. Evaluation runs in an isolated one-shot subprocess
+with a 2-second deadline by default and a hard 5-second ceiling; use
+`--timeout-ms <milliseconds>` within that range when a reviewed recursive
+program has a known cost. Counts and UTF-8 bytes are bounded before IPC, and
+the child and parent both validate bounded results. A deadline, value, byte,
+or row-budget error is a signal to narrow the query, not to persist a shared
+database.
+
+For recursive paths, put the query and EDN rule vector in separate reviewed
+files, declare `:in $ %`, and pass `--query-file` with `--rules-file`.
+DataScript evaluates rules top-down: when the authored graph may cycle, carry a
+numeric remaining-depth argument and decrement it on every recursive branch.
+Invoke the rule with a fixed bound in the query. An unbounded recursive rule
+over cyclic edges reaches the subprocess deadline; use `oh links` for the common
+cycle-safe traversal case.
 
 Use semantic search for recall rather than exact selection:
 
@@ -104,6 +137,23 @@ The capture strategy follows [[notes/bounded-acquisition|bounded acquisition]] s
 Use ordinary Markdown links for external URLs. Add an internal link where the relationship helps a reader understand the sentence. Do not add bare reciprocal links, manufactured `Related` lists, or links whose only purpose is to improve graph counts.
 
 Backlinks are derived from explicit wikilinks. Never paste generated backlink sections into notes. Catalog links in `index.md` are navigation and do not establish contextual relationships. Mention candidates are prompts for review, not instructions to edit.
+
+Promote a reusable idea into an ordinary concept note:
+
+```sh
+oh note create notes/local-first --title "Local-first" --type concept --tag architecture
+```
+
+Author a typed relationship from the note that owns the assertion:
+
+```sh
+oh relation add notes/write-path supports notes/durable-agent-memory
+```
+
+Predicates use lower-kebab-case and targets use exact vault-root IDs without
+`.md`. Explain the assertion in prose or evidence. Do not author reciprocal
+edges, inferred transitive paths, or relationships derived only from an
+embedding score.
 
 ## Capture a source
 
@@ -150,12 +200,28 @@ page.
 After adding, renaming, moving, or materially revising notes:
 
 ```sh
+oh percolate "<changed-note-id>" --root . --limit 25 --json
 oh refresh --root .
 oh graph --root .
 oh check --root .
 ```
 
-Review broken and ambiguous links first. Then inspect orphans and high-confidence title or alias mentions in context. Add a suggested link only when it improves the prose. Finish with a clean `oh check` and inspect the resulting diff so the managed catalog is the only derived Markdown change.
+Open the evidence cited by each percolation candidate. Promote only concepts
+likely to be reused and relationships established by the source material.
+Review broken and ambiguous links and typed relationships first. Then inspect
+orphans and high-confidence title or alias mentions in context. Add a suggested
+link only when it improves the prose. Finish with a clean `oh check` and inspect
+the resulting diff so the managed catalog is the only derived Markdown change.
+
+When multiple agents are editing different notes, each lane runs:
+
+```sh
+oh check --root . --no-catalog
+```
+
+The integrating agent runs one final refresh and normal check after the lanes
+join. This avoids repeated merge conflicts in `index.md`; no DataScript file or
+generated fact log exists to contend on.
 
 If the change adds, removes, renames, or moves a scope hub, changes its
 `type` or `scope`, or edits an `oh:context` marker, also run:

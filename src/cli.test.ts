@@ -8,6 +8,7 @@ import {
   agentContextNotePath,
 } from "./agent-context.js";
 import { main, parseArguments } from "./cli.js";
+import { scanVault, type ScanVaultOptions } from "./vault.js";
 
 function captureOutput(): {
   readonly output: { stdout: (value: string) => void; stderr: (value: string) => void };
@@ -24,6 +25,36 @@ function captureOutput(): {
     stdout: () => stdout.join(""),
     stderr: () => stderr.join(""),
   };
+}
+
+function parseJsonObject(value: string): Readonly<Record<string, unknown>> {
+  const parsed: unknown = JSON.parse(value);
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new TypeError("expected CLI JSON output to be an object");
+  }
+  return parsed as Readonly<Record<string, unknown>>;
+}
+
+function stringProperty(
+  object: Readonly<Record<string, unknown>>,
+  key: string,
+): string {
+  const value = object[key];
+  if (typeof value !== "string") {
+    throw new TypeError(`expected ${key} to be a string`);
+  }
+  return value;
+}
+
+function arrayProperty(
+  object: Readonly<Record<string, unknown>>,
+  key: string,
+): readonly unknown[] {
+  const value = object[key];
+  if (!Array.isArray(value)) {
+    throw new TypeError(`expected ${key} to be an array`);
+  }
+  return value as readonly unknown[];
 }
 
 describe("oh argument parsing", () => {
@@ -170,6 +201,219 @@ describe("oh argument parsing", () => {
         depth: 3,
         limit: 25,
       },
+    });
+  });
+
+  test("parses compact note and relationship authoring commands", () => {
+    expect(parseArguments([
+      "note",
+      "create",
+      "notes/durable-memory",
+      "--title",
+      "Durable memory",
+      "--type",
+      "concept",
+      "--tag",
+      "agents",
+      "--tag",
+      "memory",
+      "--body-file",
+      "draft.md",
+      "--root",
+      "vault",
+      "--json",
+    ])).toEqual({
+      ok: true,
+      value: {
+        kind: "note-create",
+        root: "vault",
+        input: {
+          id: "notes/durable-memory",
+          title: "Durable memory",
+          type: "concept",
+          tags: ["agents", "memory"],
+        },
+        bodyFile: "draft.md",
+        json: true,
+      },
+    });
+
+    const revision: `sha256:${string}` = `sha256:${"a".repeat(64)}`;
+    expect(parseArguments([
+      "relation",
+      "add",
+      "notes/a",
+      "builds-on",
+      "notes/b",
+      "--expected-revision",
+      revision,
+      "--root",
+      "vault",
+      "--json",
+    ])).toEqual({
+      ok: true,
+      value: {
+        kind: "relation",
+        action: "add",
+        root: "vault",
+        source: "notes/a",
+        predicate: "builds-on",
+        target: "notes/b",
+        expectedRevision: revision,
+        json: true,
+      },
+    });
+    expect(parseArguments([
+      "relation",
+      "remove",
+      "notes/a",
+      "builds-on",
+      "notes/b",
+    ])).toEqual({
+      ok: true,
+      value: {
+        kind: "relation",
+        action: "remove",
+        root: ".",
+        source: "notes/a",
+        predicate: "builds-on",
+        target: "notes/b",
+        json: false,
+      },
+    });
+    expect(parseArguments(["relation", "list", "notes/a", "--json"])).toEqual({
+      ok: true,
+      value: {
+        kind: "relation",
+        action: "list",
+        root: ".",
+        source: "notes/a",
+        json: true,
+      },
+    });
+
+    expect(parseArguments([
+      "note",
+      "create",
+      "notes/a",
+      "--title",
+      "A",
+      "--body",
+      "inline",
+      "--body-file",
+      "body.md",
+    ])).toEqual({
+      ok: false,
+      message: "note create accepts either --body or --body-file, not both",
+    });
+    expect(parseArguments([
+      "relation",
+      "add",
+      "notes/a",
+      "builds-on",
+      "notes/b",
+      "--expected-revision",
+      "sha256:not-a-revision",
+    ])).toEqual({
+      ok: false,
+      message: "--expected-revision must be sha256 followed by 64 lowercase hexadecimal characters",
+    });
+  });
+
+  test("parses Datalog, percolation, and lane-safe catalog checks with strict bounds", () => {
+    const query = '[:find ?id :where [?note ":note/id" ?id]]';
+    expect(parseArguments([
+      "datalog",
+      query,
+      "--root",
+      "vault",
+      "--limit",
+      "12",
+      "--timeout-ms",
+      "250",
+      "--json",
+    ])).toEqual({
+      ok: true,
+      value: {
+        kind: "datalog",
+        root: "vault",
+        query,
+        limit: 12,
+        timeoutMs: 250,
+        json: true,
+      },
+    });
+    expect(parseArguments([
+      "datalog",
+      "--query-file",
+      "query.edn",
+      "--rules-file",
+      "rules.edn",
+    ])).toEqual({
+      ok: true,
+      value: {
+        kind: "datalog",
+        root: ".",
+        queryFile: "query.edn",
+        rulesFile: "rules.edn",
+        limit: 100,
+        json: false,
+      },
+    });
+    expect(parseArguments([
+      "percolate",
+      "notes/alpha",
+      "--root",
+      "vault",
+      "--min-support",
+      "3",
+      "--limit",
+      "8",
+      "--json",
+    ])).toEqual({
+      ok: true,
+      value: {
+        kind: "percolate",
+        root: "vault",
+        note: "notes/alpha",
+        minSupport: 3,
+        limit: 8,
+        json: true,
+      },
+    });
+    expect(parseArguments(["check", "--root", "vault", "--no-catalog", "--json"]))
+      .toEqual({
+        ok: true,
+        value: {
+          kind: "check",
+          root: "vault",
+          options: {},
+          noCatalog: true,
+          json: true,
+        },
+      });
+
+    expect(parseArguments(["datalog", query, "--query-file", "query.edn"]))
+      .toEqual({
+        ok: false,
+        message: "datalog requires exactly one query or --query-file",
+      });
+    expect(parseArguments(["datalog", query, "--limit", "1001"])).toEqual({
+      ok: false,
+      message: "--limit must be an integer from 1 through 1000",
+    });
+    expect(parseArguments(["datalog", query, "--timeout-ms", "5001"]))
+      .toEqual({
+        ok: false,
+        message: "--timeout-ms must be an integer from 1 through 5000",
+      });
+    expect(parseArguments(["percolate", "--min-support", "1"])).toEqual({
+      ok: false,
+      message: "--min-support must be an integer from 2 through 1000",
+    });
+    expect(parseArguments(["graph", "--no-catalog"])).toEqual({
+      ok: false,
+      message: "unknown graph option",
     });
   });
 
@@ -352,6 +596,477 @@ describe("oh vault commands", () => {
     }
   });
 
+  test("authors notes and typed relationships, queries Datalog, and percolates evidence end to end", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-oh-cli-graph-"));
+    const vault = join(temporary, "vault");
+    try {
+      expect(await main(["init", vault], captureOutput().output)).toBe(0);
+
+      const alphaOutput = captureOutput();
+      expect(await main([
+        "note",
+        "create",
+        "notes/alpha",
+        "--title",
+        "Alpha",
+        "--tag",
+        "agent-memory",
+        "--body",
+        "# Alpha\n\nA durable write path.\n",
+        "--root",
+        vault,
+        "--json",
+      ], alphaOutput.output)).toBe(0);
+      const alpha = parseJsonObject(alphaOutput.stdout());
+      expect(alpha).toMatchObject({
+        changed: true,
+        path: "notes/alpha.md",
+        relations: [],
+      });
+      const alphaRevision = stringProperty(alpha, "revision");
+      expect(alphaRevision).toMatch(/^sha256:[0-9a-f]{64}$/u);
+
+      const betaBody = join(temporary, "beta-body.md");
+      await writeFile(betaBody, "# Beta\n\nA local graph projection.\n", "utf8");
+      const betaOutput = captureOutput();
+      expect(await main([
+        "note",
+        "create",
+        "notes/beta",
+        "--title",
+        "Beta",
+        "--tag",
+        "agent-memory",
+        "--body-file",
+        betaBody,
+        "--root",
+        vault,
+        "--json",
+      ], betaOutput.output)).toBe(0);
+      expect(JSON.parse(betaOutput.stdout())).toMatchObject({
+        changed: true,
+        path: "notes/beta.md",
+      });
+
+      const gammaOutput = captureOutput();
+      expect(await main([
+        "note",
+        "create",
+        "notes/gamma",
+        "--title",
+        "Gamma",
+        "--tag",
+        "agent-memory",
+        "--root",
+        vault,
+        "--json",
+      ], gammaOutput.output)).toBe(0);
+
+      const laneCheck = captureOutput();
+      expect(await main([
+        "check",
+        "--root",
+        vault,
+        "--no-catalog",
+        "--json",
+      ], laneCheck.output)).toBe(0);
+      expect(JSON.parse(laneCheck.stdout())).toMatchObject({
+        index: "stale",
+        catalogRequired: false,
+        relationIssues: [],
+      });
+      expect(await main([
+        "check",
+        "--root",
+        vault,
+      ], captureOutput().output)).toBe(3);
+
+      const addOutput = captureOutput();
+      expect(await main([
+        "relation",
+        "add",
+        "notes/alpha",
+        "supports",
+        "notes/beta",
+        "--expected-revision",
+        alphaRevision,
+        "--root",
+        vault,
+        "--json",
+      ], addOutput.output)).toBe(0);
+      const added = parseJsonObject(addOutput.stdout());
+      expect(added).toMatchObject({
+        changed: true,
+        path: "notes/alpha.md",
+        relations: [{ predicate: "supports", target: "notes/beta" }],
+      });
+      const addedRevision = stringProperty(added, "revision");
+
+      const outboundOutput = captureOutput();
+      expect(await main([
+        "relation",
+        "list",
+        "notes/alpha",
+        "--root",
+        vault,
+        "--json",
+      ], outboundOutput.output)).toBe(0);
+      expect(JSON.parse(outboundOutput.stdout())).toMatchObject({
+        note: "notes/alpha",
+        outboundCount: 1,
+        inboundCount: 0,
+        outbound: [{
+          source: "notes/alpha",
+          predicate: "supports",
+          target: "notes/beta",
+        }],
+      });
+
+      const inboundOutput = captureOutput();
+      expect(await main([
+        "relation",
+        "list",
+        "notes/beta",
+        "--root",
+        vault,
+        "--json",
+      ], inboundOutput.output)).toBe(0);
+      expect(JSON.parse(inboundOutput.stdout())).toMatchObject({
+        note: "notes/beta",
+        outboundCount: 0,
+        inboundCount: 1,
+        inbound: [{
+          source: "notes/alpha",
+          predicate: "supports",
+          target: "notes/beta",
+        }],
+      });
+
+      const relationshipQuery = [
+        "[:find ?source-id ?predicate ?target-id",
+        " :where",
+        ' [?edge :edge/kind "relation"]',
+        " [?edge :edge/source ?source]",
+        " [?edge :edge/target ?target]",
+        " [?edge :edge/predicate ?predicate]",
+        " [?source :note/id ?source-id]",
+        " [?target :note/id ?target-id]]",
+      ].join("");
+      const datalogOutput = captureOutput();
+      expect(await main([
+        "datalog",
+        relationshipQuery,
+        "--root",
+        vault,
+        "--json",
+      ], datalogOutput.output)).toBe(0);
+      expect(JSON.parse(datalogOutput.stdout())).toMatchObject({
+        query: relationshipQuery,
+        columns: ["?source-id", "?predicate", "?target-id"],
+        rows: [["notes/alpha", "supports", "notes/beta"]],
+        truncated: false,
+      });
+
+      const rulesFile = join(temporary, "relationship-rules.edn");
+      await writeFile(rulesFile, [
+        "[",
+        " [(direct-support ?source ?target)",
+        '  [?edge :edge/predicate "supports"]',
+        "  [?edge :edge/source ?source]",
+        "  [?edge :edge/target ?target]]",
+        " [(supports-path ?source ?target)",
+        "  (direct-support ?source ?target)]",
+        " [(supports-path ?source ?target)",
+        "  (direct-support ?source ?middle)",
+        "  (supports-path ?middle ?target)]",
+        "]",
+      ].join(""), "utf8");
+      const recursiveOutput = captureOutput();
+      expect(await main([
+        "datalog",
+        "[:find ?source-id ?target-id :in $ % :where (supports-path ?source ?target) [?source :note/id ?source-id] [?target :note/id ?target-id]]",
+        "--rules-file",
+        rulesFile,
+        "--root",
+        vault,
+        "--json",
+      ], recursiveOutput.output)).toBe(0);
+      expect(JSON.parse(recursiveOutput.stdout())).toMatchObject({
+        rows: [["notes/alpha", "notes/beta"]],
+      });
+
+      const queryFile = join(temporary, "tag-query.edn");
+      await writeFile(
+        queryFile,
+        '[:find ?id :where [?note ":note/id" ?id] [?note ":note/tag" "agent-memory"]]',
+        "utf8",
+      );
+      const fileQueryOutput = captureOutput();
+      expect(await main([
+        "datalog",
+        "--query-file",
+        queryFile,
+        "--root",
+        vault,
+        "--limit",
+        "2",
+        "--json",
+      ], fileQueryOutput.output)).toBe(0);
+      expect(JSON.parse(fileQueryOutput.stdout())).toMatchObject({
+        columns: ["?id"],
+        rows: [["notes/alpha"], ["notes/beta"]],
+        truncated: true,
+      });
+
+      const percolationOutput = captureOutput();
+      expect(await main([
+        "percolate",
+        "notes/alpha",
+        "--root",
+        vault,
+        "--min-support",
+        "2",
+        "--json",
+      ], percolationOutput.output)).toBe(0);
+      const percolation = parseJsonObject(percolationOutput.stdout());
+      expect(percolation).toMatchObject({
+        note: "notes/alpha",
+        minSupport: 2,
+      });
+      expect(arrayProperty(percolation, "candidates")).toContainEqual(expect.objectContaining({
+        kind: "missing-concept",
+        tag: "agent-memory",
+        suggestedId: "notes/agent-memory",
+        support: 3,
+      }));
+
+      const removeOutput = captureOutput();
+      expect(await main([
+        "relation",
+        "remove",
+        "notes/alpha",
+        "supports",
+        "notes/beta",
+        "--expected-revision",
+        addedRevision,
+        "--root",
+        vault,
+        "--json",
+      ], removeOutput.output)).toBe(0);
+      expect(JSON.parse(removeOutput.stdout())).toMatchObject({
+        changed: true,
+        path: "notes/alpha.md",
+        relations: [],
+      });
+
+      const emptyRelations = captureOutput();
+      expect(await main([
+        "relation",
+        "list",
+        "notes/alpha",
+        "--root",
+        vault,
+        "--json",
+      ], emptyRelations.output)).toBe(0);
+      expect(JSON.parse(emptyRelations.stdout())).toMatchObject({
+        note: "notes/alpha",
+        outboundCount: 0,
+        inboundCount: 0,
+      });
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("fails checks on authored relationship issues even when the catalog is optional", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-oh-cli-relations-"));
+    try {
+      await writeFile(join(temporary, "index.md"), "# Index\n", "utf8");
+      await mkdir(join(temporary, "notes"), { recursive: true });
+      await writeFile(join(temporary, "notes", "source.md"), [
+        "---",
+        "relations:",
+        "  supports:",
+        "    - notes/missing",
+        "---",
+        "# Source",
+        "",
+      ].join("\n"), "utf8");
+
+      const output = captureOutput();
+      expect(await main([
+        "check",
+        "--root",
+        temporary,
+        "--no-catalog",
+        "--json",
+      ], output.output)).toBe(3);
+      expect(JSON.parse(output.stdout())).toMatchObject({
+        catalogRequired: false,
+        relationIssues: [{
+          kind: "broken",
+          source: "notes/source.md",
+          predicate: "supports",
+          target: "notes/missing",
+        }],
+      });
+
+      const terminalOutput = captureOutput();
+      expect(await main([
+        "check",
+        "--root",
+        temporary,
+        "--no-catalog",
+      ], terminalOutput.output)).toBe(3);
+      expect(terminalOutput.stdout()).toContain(
+        "broken relationship supports → notes/missing",
+      );
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("sanitizes foreign Datalog cells and secrets in JSON output", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-oh-cli-json-"));
+    try {
+      await writeFile(join(temporary, "index.md"), "# Index\n", "utf8");
+      const output = captureOutput();
+      expect(await main([
+        "datalog",
+        '[:find ?value :where [?entity ":oh/id" ?value]]',
+        "--root",
+        temporary,
+        "--json",
+      ], output.output, {
+        queryDatalog: () => Promise.resolve({
+          columns: ["?value"],
+          rows: [[
+            "bad\u001b]8;;https://evil.example\u0007path\u001b]8;;\u0007 Authorization: Bearer runtime-secret",
+          ]],
+          truncated: false,
+          factCount: 1,
+        }),
+      })).toBe(0);
+      expect(output.stdout()).not.toContain("\u001b");
+      expect(output.stdout()).not.toContain("runtime-secret");
+      expect(arrayProperty(parseJsonObject(output.stdout()), "rows")).toEqual([[
+        "badpath Authorization: [REDACTED]",
+      ]]);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("explains collision-safe concept IDs in terminal percolation output", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-oh-cli-concept-collision-"));
+    try {
+      await writeFile(join(temporary, "index.md"), "# Index\n", "utf8");
+      await mkdir(join(temporary, "notes"), { recursive: true });
+      await writeFile(
+        join(temporary, "notes", "foo.md"),
+        "---\ntype: note\n---\n# Foo memo\n",
+        "utf8",
+      );
+      await writeFile(
+        join(temporary, "notes", "alpha.md"),
+        "---\ntags: [foo]\n---\n# Alpha\n",
+        "utf8",
+      );
+      await writeFile(
+        join(temporary, "notes", "beta.md"),
+        "---\ntags: [foo]\n---\n# Beta\n",
+        "utf8",
+      );
+
+      const output = captureOutput();
+      expect(await main([
+        "percolate",
+        "--root",
+        temporary,
+      ], output.output)).toBe(0);
+      expect(output.stdout()).toContain(
+        "notes/foo-concept  (2 supporting notes); natural ID is occupied by notes/foo",
+      );
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("uses structure-only scans for graph queries and endpoint-scoped scans for percolation", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-oh-cli-scan-mode-"));
+    try {
+      await writeFile(join(temporary, "index.md"), "# Index\n", "utf8");
+      await mkdir(join(temporary, "notes"), { recursive: true });
+      await writeFile(
+        join(temporary, "notes", "alpha.md"),
+        "# Alpha concept\n\nBeta concept appears here.\n",
+        "utf8",
+      );
+      await writeFile(
+        join(temporary, "notes", "beta.md"),
+        "# Beta concept\n\nAlpha concept appears here.\n",
+        "utf8",
+      );
+      const scans: unknown[] = [];
+      const dependencies = {
+        scanVault: (
+          root = ".",
+          options: ScanVaultOptions = {},
+        ) => {
+          scans.push(options);
+          return scanVault(root, options);
+        },
+      };
+
+      expect(await main([
+        "relation",
+        "list",
+        "notes/alpha",
+        "--root",
+        temporary,
+        "--json",
+      ], captureOutput().output, dependencies)).toBe(0);
+      expect(await main([
+        "datalog",
+        "[:find ?id :where [?note :note/id ?id]]",
+        "--root",
+        temporary,
+        "--json",
+      ], captureOutput().output, dependencies)).toBe(0);
+      expect(await main([
+        "percolate",
+        "Alpha concept",
+        "--root",
+        temporary,
+        "--json",
+      ], captureOutput().output, dependencies)).toBe(0);
+      expect(await main([
+        "percolate",
+        "--root",
+        temporary,
+        "--json",
+      ], captureOutput().output, dependencies)).toBe(0);
+
+      expect(scans).toEqual([
+        { mentionScope: false },
+        { mentionScope: false },
+        {
+          maxNotes: 10_000,
+          maxMentionPairs: 20_000,
+          maxMentions: 20_000,
+          mentionScope: "Alpha concept",
+        },
+        {
+          maxNotes: 10_000,
+          maxMentionPairs: 250_000,
+          maxMentions: 50_000,
+        },
+      ]);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
   test("delegates clip arguments and preserves its exit code", async () => {
     const captured: string[][] = [];
     const output = captureOutput();
@@ -448,11 +1163,6 @@ describe("oh vault commands", () => {
     try {
       await writeFile(join(temporary, "index.md"), "# Index\n", "utf8");
       await writeFile(join(temporary, "note.md"), "# Note\n\n[[missing]]\n", "utf8");
-      await writeFile(
-        join(temporary, "clean.md\nREADY: forged.md"),
-        "# Untrusted filename\n",
-        "utf8",
-      );
       await main(["refresh", "--root", temporary], captureOutput().output);
       const checked = captureOutput();
       expect(await main(["check", "--root", temporary], checked.output)).toBe(3);
@@ -460,8 +1170,17 @@ describe("oh vault commands", () => {
 
       const graph = captureOutput();
       expect(await main(["graph", "--root", temporary], graph.output)).toBe(0);
-      expect(graph.stdout()).not.toContain("\nREADY: forged.md");
-      expect(graph.stdout()).toContain("clean.md READY: forged.md");
+      expect(graph.stdout()).toContain("note.md");
+
+      await writeFile(
+        join(temporary, "clean.md\nREADY: forged.md"),
+        "# Untrusted filename\n",
+        "utf8",
+      );
+      const rejectedPath = captureOutput();
+      expect(await main(["graph", "--root", temporary], rejectedPath.output)).toBe(1);
+      expect(rejectedPath.stderr()).not.toContain("\nREADY: forged.md");
+      expect(rejectedPath.stderr()).toContain("clean.md\\nREADY: forged.md");
 
       const failed = captureOutput();
       expect(await main(["check"], failed.output, {

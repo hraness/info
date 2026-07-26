@@ -6,13 +6,20 @@ import {
   readdirSync,
   rmSync,
   symlinkSync,
+  truncateSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
-import { refreshVault, scanVault } from "./vault.js";
+import { VaultAnalysisBudgetError } from "./graph.js";
+import {
+  MAX_NOTE_UTF8_BYTES,
+  refreshVault,
+  scanVault,
+  VaultScanBudgetError,
+} from "./vault.js";
 
 const roots: string[] = [];
 
@@ -35,6 +42,145 @@ afterEach(() => {
 });
 
 describe("vault scan and refresh", () => {
+  test("rejects the discovered note count before reading or parsing notes", async () => {
+    const root = fixture();
+    writeFileSync(join(root, "index.md"), "---\nmalformed: [\n---\n", "utf8");
+
+    let rejection: unknown;
+    try {
+      await scanVault(root, { maxNotes: 2 });
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(VaultScanBudgetError);
+    expect(rejection).toMatchObject({ kind: "notes", limit: 2 });
+  });
+
+  test("rejects raw paths before parsing and reports normalization collisions", async () => {
+    const root = fixture();
+    writeFileSync(join(root, "index.md"), "---\nmalformed: [\n---\n", "utf8");
+    writeFileSync(join(root, "notes\\alpha.md"), "---\nalso: [\n---\n", "utf8");
+
+    let rejection: unknown;
+    try {
+      await scanVault(root);
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(Error);
+    if (!(rejection instanceof Error)) throw new Error("scan unexpectedly succeeded");
+    expect(rejection.message).toContain("normalize to the same note ID");
+    expect(rejection.message).toContain("notes/alpha");
+    expect(rejection.message).not.toContain("YAML");
+  });
+
+  test("rejects standalone backslash and non-extensionless note identities", async () => {
+    const backslashRoot = fixture();
+    writeFileSync(join(backslashRoot, "back\\slash.md"), "# Backslash\n", "utf8");
+    let backslashRejection: unknown;
+    try {
+      await scanVault(backslashRoot);
+    } catch (error) {
+      backslashRejection = error;
+    }
+    expect(backslashRejection).toBeInstanceOf(Error);
+    if (!(backslashRejection instanceof Error)) {
+      throw new Error("backslash scan unexpectedly succeeded");
+    }
+    expect(backslashRejection.message).toContain("contains a backslash");
+
+    const extensionRoot = fixture();
+    writeFileSync(join(extensionRoot, "index.md"), "---\nmalformed: [\n---\n", "utf8");
+    writeFileSync(join(extensionRoot, "extra.md.md"), "# Extra\n", "utf8");
+    let extensionRejection: unknown;
+    try {
+      await scanVault(extensionRoot);
+    } catch (error) {
+      extensionRejection = error;
+    }
+    expect(extensionRejection).toBeInstanceOf(Error);
+    if (!(extensionRejection instanceof Error)) {
+      throw new Error("extension scan unexpectedly succeeded");
+    }
+    expect(extensionRejection.message).toContain("canonical extensionless");
+    expect(extensionRejection.message).not.toContain("YAML");
+  });
+
+  test("rejects non-NFC disk identities with an actionable diagnostic", async () => {
+    const root = fixture();
+    const decomposedName = `caf${"e\u0301"}.md`;
+    writeFileSync(join(root, decomposedName), "# Cafe\n", "utf8");
+
+    let rejection: unknown;
+    try {
+      await scanVault(root);
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(Error);
+    if (!(rejection instanceof Error)) throw new Error("scan unexpectedly succeeded");
+    expect(rejection.message).toContain("is not NFC");
+    expect(rejection.message).toContain("café");
+  });
+
+  test("rejects a sparse oversized note from metadata before reading it", async () => {
+    const root = fixture();
+    truncateSync(join(root, "notes", "alpha.md"), MAX_NOTE_UTF8_BYTES + 1);
+
+    let rejection: unknown;
+    try {
+      await scanVault(root);
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(VaultScanBudgetError);
+    expect(rejection).toMatchObject({
+      kind: "note-bytes",
+      limit: MAX_NOTE_UTF8_BYTES,
+    });
+  });
+
+  test("rejects cumulative bytes before parsing any preflighted note", async () => {
+    const root = fixture();
+    writeFileSync(join(root, "index.md"), "---\nmalformed: [\n---\n", "utf8");
+
+    let rejection: unknown;
+    try {
+      await scanVault(root, { maxTotalBytes: 1 });
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(VaultScanBudgetError);
+    expect(rejection).toMatchObject({ kind: "total-bytes", limit: 1 });
+  });
+
+  test("forwards a lowered aggregate connection-observation bound", async () => {
+    const root = fixture();
+
+    let rejection: unknown;
+    try {
+      await scanVault(root, {
+        maxConnectionObservations: 0,
+        mentionScope: false,
+        maxMentionPairs: 0,
+        maxMentions: 0,
+      });
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(VaultAnalysisBudgetError);
+    expect(rejection).toMatchObject({
+      kind: "connection-observations",
+      limit: 0,
+    });
+  });
+
   test("reports a stale catalog without changing the index", async () => {
     const root = fixture();
     const before = readFileSync(join(root, "index.md"), "utf8");

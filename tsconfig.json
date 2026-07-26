@@ -18,6 +18,9 @@
       "@hraness/oh/agent-guide-audit": [
         "./src/agent-guide-audit.ts"
       ],
+      "@hraness/oh/authoring": [
+        "./src/authoring.ts"
+      ],
       "@hraness/oh/browser-profiles": [
         "./src/clip/browser-profiles.ts"
       ],
@@ -54,6 +57,12 @@
       "@hraness/oh/clip/terminal": [
         "./src/clip/terminal.ts"
       ],
+      "@hraness/oh/datalog": [
+        "./src/datalog.ts"
+      ],
+      "@hraness/oh/facts": [
+        "./src/facts.ts"
+      ],
       "@hraness/oh/graph": [
         "./src/graph.ts"
       ],
@@ -62,6 +71,9 @@
       ],
       "@hraness/oh/pdf": [
         "./src/pdf.ts"
+      ],
+      "@hraness/oh/percolate": [
+        "./src/percolate.ts"
       ],
       "@hraness/oh/query": [
         "./src/query.ts"

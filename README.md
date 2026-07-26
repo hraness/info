@@ -5,11 +5,13 @@ notes and sources for coding agents.
 oh keeps a coding agent's sources, notes, plans, and repository context in
 ordinary Markdown files you can open in Obsidian and track with Git. it saves
 public or signed-in web pages and PDFs with their sources, connects selected
-`AGENTS.md` guides to notes for that part of a codebase, follows links between
-notes, and searches locally by exact words or similar meaning.
+`AGENTS.md` guides to notes for that part of a codebase, follows links and typed
+relationships between notes, helps agents surface reusable concepts, searches
+locally by exact words or similar meaning, and can query the live Markdown as a
+temporary Datalog graph.
 
 ```sh
-bun add --global github:hraness/oh#v0.7.0
+bun add --global github:hraness/oh#v0.8.0
 ```
 
 [article](https://hraness.pub/articles/a-durable-knowledge-base-is-a-write-path)
@@ -22,7 +24,7 @@ meaning uses a replaceable local index; Markdown remains the source of truth.
 <!-- article:a-durable-knowledge-base-is-a-write-path:start -->
 ## [A knowledge base for your coding agents](<https://hraness.pub/articles/a-durable-knowledge-base-is-a-write-path>)
 
-> Keep load-bearing rules in scoped AGENTS.md files, then pull rationale, evidence, plans, and linked decisions from a plain-Markdown Oh vault when a task needs them.
+> Keep load-bearing rules in scoped AGENTS.md files, then let agents grow concepts and relationships in a plain-Markdown Oh vault with disposable local Datalog and semantic views.
 
 A coding agent needs two kinds of repository memory. It needs rules that govern the edit now, and it needs explanations and evidence that may help it reason. Mixing both into one automatically loaded prompt makes every task pay for history it may not need. Putting hard rules only in an optional knowledge base lets an agent miss them.
 
@@ -53,10 +55,11 @@ repository/
 
 authored Markdown + frontmatter + wikilinks
               ├── oh list / oh links
+              ├── oh datalog / percolate  # in-memory DataScript view
               └── oh search               # derived local QMD index
 ```
 
-Markdown is authoritative in this map. The catalog, backlink view, and semantic database can be deleted and rebuilt. Obsidian can browse the same files, but it is a compatible editor rather than a runtime dependency. Git supplies review, history, and recovery for both rules and knowledge.
+Markdown is authoritative in this map. The catalog, backlink view, DataScript database, and semantic index can be deleted and rebuilt. Obsidian can browse the same files, but it is a compatible editor rather than a runtime dependency. Git supplies review, history, and recovery for both rules and knowledge.
 
 ### Separate rules from explanations
 
@@ -142,23 +145,87 @@ oh list --root oh --where type=plan --where status=in-progress --sort area --jso
 oh links scopes/packages-parser--94a91e4eddfa --root oh --direction both --depth 2 --limit 25 --json
 ```
 
-Wikilinks answer another exact question: which relationships did an author state? The scanner resolves exact and relative targets or a unique basename, and reports broken or ambiguous links rather than guessing. `oh links` walks an explicit number of incoming and outgoing hops with a result limit and cycle handling. Backlinks reverse those resolved edges at read time. Traversal never expands through semantic similarity, so an agent can inspect a bounded neighborhood without loading the vault.
+Wikilinks answer another exact question: which relationships did an author state in prose? The scanner resolves exact and relative targets or a unique basename, and reports broken or ambiguous links rather than guessing. `oh links` walks an explicit number of incoming and outgoing hops with a result limit and cycle handling. Backlinks reverse those resolved edges at read time. Traversal never expands through semantic similarity, so an agent can inspect a bounded neighborhood without loading the vault.
+
+### Let concepts and relationships percolate
+
+A useful vault eventually contains ideas that recur across source boundaries. Keeping every occurrence as an isolated tag makes the pattern hard to inspect; moving all graph state into one generated file gives parallel agents a permanent merge conflict. Oh uses a smaller convention. A reusable concept is an ordinary Markdown note with `type: concept`. A note stores only the typed outbound assertions it owns:
+
+**A source-owned typed relationship**
+
+```markdown
+---
+type: note
+tags:
+  - local-first
+relations:
+  supports:
+    - notes/durable-agent-memory
+  contrasts-with:
+    - notes/conversation-history
+---
+
+# The write path
+
+The local-first write path supports durable agent memory because ...
+```
+
+Predicates use lower-kebab-case and targets use exact vault-root note IDs. The explanatory sentence matters: frontmatter makes an assertion queryable, but it does not supply its reason. Inverse edges, backlinks, transitive paths, and shared-concept neighborhoods are derived at read time. Oh does not inject them into another note.
+
+`oh percolate <note>` reviews repeated tags without concept notes, notes that share ideas but lack a contextual edge, exact unlinked title or alias mentions, and relationship-hygiene findings. Each result carries inspectable support; relationship candidates count independent shared tags or concept neighbors, not both endpoints of one match. The command is read-only. An agent opens the cited notes, promotes only concepts likely to be reused, and authors a relationship only when the prose or evidence establishes it:
+
+**Review, create, and relate without a central graph file**
+
+```shell
+oh percolate notes/write-path --root oh --limit 25 --json
+oh note create notes/durable-agent-memory \
+  --root oh --title "Durable agent memory" --type concept \
+  --body-file /path/to/reviewed-concept.md
+oh relation add notes/write-path supports notes/durable-agent-memory \
+  --root oh
+```
+
+### Project Markdown into Datalog
+
+Oh projects the current notes into an immutable in-memory [DataScript](<https://github.com/tonsky/datascript>) database for each structural query. Notes, tags, typed metadata leaves, wikilinks, and relationship edges receive stable semantic string identities. DataScript's numeric entity IDs never appear in the public result. `oh datalog` can then express joins, aggregates, predicates, and recursive paths that would be awkward as a collection of bespoke commands:
+
+The engine choice is intentionally narrow. [Datalevin getting-started guide](<https://datalevin.org/docs/02-getting-started>) and [CozoDB documentation](<https://docs.cozodb.org/en/latest/>) are compelling when the graph database itself owns durable state. Oh already has a durable, mergeable source of truth in Git, so adding native storage, a JVM, migrations, or a second synchronization protocol would solve the wrong problem. DataScript supplies recursive Datalog over a temporary relation and then gets out of the way.
+
+Raw queries run in a disposable one-shot subprocess with a 2-second default deadline, a 5-second ceiling, and bounded inputs and results. Fact projection spends its limit while it walks nested metadata, and the parent validates the result again before returning it to the CLI. An accidental Cartesian product therefore ends as a typed budget error or a terminated child process instead of occupying the agent indefinitely.
+
+DataScript 1.7.8 evaluates recursive rules top-down. A rule that walks relationships which may cycle must carry an explicit remaining-depth argument and decrement it on every recursive hop; an unbounded recursive rule over a cycle is contained by the subprocess deadline. For ordinary path questions, `oh links` already provides bounded traversal and cycle handling.
+
+**A bounded Datalog relationship query**
+
+```shell
+oh datalog '[
+  :find ?source ?target
+  :where
+  [?edge :edge/predicate "supports"]
+  [?edge :edge/source ?source-ref]
+  [?source-ref :note/id ?source]
+  [?edge :edge/target ?target-ref]
+  [?target-ref :note/id ?target]
+]' --root oh --limit 50 --json
+```
+
+The database is never committed, shared, or treated as storage. DataScript's JavaScript persistence serializes a complete database; using that snapshot as a repository artifact would create the central merge hotspot this design is meant to avoid. Rebuilding from Markdown keeps facts readable, diffs local to the note that owns them, and the query engine replaceable. During parallel work, each lane can run `oh check --no-catalog` without rewriting `index.md`; the integrating agent performs one final refresh.
 
 Exact structure cannot find a note whose author used unexpected language. For that lane, hraness/oh embeds [QMD, a local search engine for Markdown](<https://github.com/tobi/qmd>). `oh index` builds or refreshes a derived database in a local cache outside the vault. `oh search` checks for changed Markdown, then returns semantic candidates joined to authored metadata, tags, backlinks, and edge counts. Keyword BM25 search remains available with `--mode keyword` when exact terms fit better.
 
-A vector score means two passages occupy a nearby region in an embedding model's representation. It does not mean the passage is current, correct, or supported by its sources. Use semantic results to find candidates, metadata to narrow them, links to inspect stated relationships, and the Markdown plus cited captures to verify the answer. QMD remains optional and local; deleting its index does not delete knowledge.
+A vector score means two passages occupy a nearby region in an embedding model's representation. It does not mean the passage is current, correct, or supported by its sources. Use semantic results to find candidates, metadata and Datalog to narrow them, links and typed edges to inspect stated relationships, and the Markdown plus cited captures to verify the answer. QMD remains optional and local; deleting its index does not delete knowledge.
 
 ### Keep plans durable and promote rules to AGENTS.md
 
 A plan shown only in chat has the same session boundary as the reasoning that produced it. The `plan-oh` skill writes a normal Markdown file with an outcome, status, area, assumptions, dependencies, decisions, and verification method. During execution, the same plan accumulates deviations, review findings, command evidence, and the final result. Completed plans remain as history. A finding that becomes a load-bearing edit rule moves into the applicable `AGENTS.md`; its rationale and evidence may stay linked from the scope hub.
 
-hraness/oh also ships five Agent Skills that preserve the same file contract. `save-url-oh` selects a URL acquisition route and records completeness; `save-pdf-oh` preserves a PDF's text, images, bytes, and provenance; `query-oh` chooses exact metadata, graph, or semantic retrieval; `refresh-oh` regenerates the catalog and reviews link diagnostics; and `plan-oh` keeps execution knowledge durable. The [agent workflow documentation](<https://github.com/hraness/oh/blob/main/docs/agent-workflow.md>) defines how these skills meet the CLI contracts across agent runners. Skills guide writes and retrieval; they do not make application code depend on Oh.
+hraness/oh also ships six Agent Skills that preserve the same file contract. `save-url-oh` selects a URL acquisition route and records completeness; `save-pdf-oh` preserves a PDF's text, images, bytes, and provenance; `query-oh` chooses exact metadata, Datalog, graph, or semantic retrieval; `percolate-oh` reviews changed notes for reusable concepts and evidence-backed relationships; `refresh-oh` regenerates the catalog and reviews graph diagnostics; and `plan-oh` keeps execution knowledge durable. The [agent workflow documentation](<https://github.com/hraness/oh/blob/main/docs/agent-workflow.md>) defines how these skills meet the CLI contracts across agent runners. Skills guide writes and retrieval; they do not make application code depend on Oh.
 
 ### Adopt the smallest useful split
 
-Start with a short inherited `AGENTS.md` path for rules whose omission would make an edit wrong. Add a scope hub only when its rationale, evidence, plans, or linked decisions deserve pull-based retrieval. A small Oh vault may need only Markdown, Git, an index, and ordinary file search. Add metadata queries, graph traversal, QMD, browser capture, or PDF ingestion only when the simpler layer stops answering the repository's questions.
+Start with a short inherited `AGENTS.md` path for rules whose omission would make an edit wrong. Add a scope hub only when its rationale, evidence, plans, or linked decisions deserve pull-based retrieval. A small Oh vault may need only Markdown, Git, an index, and ordinary file search. Add typed relationships, Datalog, metadata queries, graph traversal, QMD, browser capture, or PDF ingestion only when the simpler layer stops answering the repository's questions.
 
-This is a file-backed control plane paired with an optional knowledge plane, not autonomous memory. Checks validate mappings, not truth. Capture preserves a selected surface, not the source's trustworthiness. A link records a relationship, not agreement, and semantic similarity supplies candidates, not conclusions. The design works only while people and agents keep hard rules in scope and revise the evidence and explanations those rules point to.
+This is a file-backed control plane paired with an optional knowledge plane, not autonomous memory. Checks validate structure, not truth. Capture preserves a selected surface, not the source's trustworthiness. A typed edge records an authored assertion, not proof; Datalog derives answers, not facts; and semantic similarity supplies candidates, not conclusions. The design works only while people and agents keep hard rules in scope and revise the concepts, evidence, and explanations those rules point to.
 <!-- article:a-durable-knowledge-base-is-a-write-path:end -->
 
 ## Install
@@ -171,7 +238,7 @@ Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
 Install hraness/oh and its bundled Agent Skills from
-https://github.com/hraness/oh at the immutable v0.7.0 tag. Follow the repository
+https://github.com/hraness/oh at the immutable v0.8.0 tag. Follow the repository
 README, install the `oh` CLI, copy or link the skills I need into this agent
 runner's configured skills directory, and verify the installation with
 `oh doctor` and `oh --help`. Do not initialize or modify a vault until I ask.
@@ -181,10 +248,10 @@ The repository and packed package carry the same skill directories, so an agent
 can inspect the tagged instructions before placing them in its runner-specific
 discovery path.
 
-Install the CLI from the immutable `v0.7.0` tag:
+Install the CLI from the immutable `v0.8.0` tag:
 
 ```sh
-bun add --global github:hraness/oh#v0.7.0
+bun add --global github:hraness/oh#v0.8.0
 oh --help
 ```
 
@@ -193,7 +260,7 @@ For programmatic use, declare the same pinned source in a project:
 ```json
 {
   "dependencies": {
-    "@hraness/oh": "github:hraness/oh#v0.7.0"
+    "@hraness/oh": "github:hraness/oh#v0.8.0"
   }
 }
 ```
@@ -210,7 +277,12 @@ oh --help
 
 HTTP capture works with the installed JavaScript dependencies. Rendered capture additionally needs a local Chromium-compatible browser. [yt-dlp](https://github.com/yt-dlp/yt-dlp) adds YouTube metadata, thumbnails, and transcripts; full audio or video localization is opt-in and some formats also need [FFmpeg](https://ffmpeg.org). PDF ingestion uses the open-source Poppler tools `pdfinfo` and `pdftohtml`; [Tesseract](https://github.com/tesseract-ocr/tesseract) adds local OCR for scans and screenshots.
 
-Semantic search uses [QMD](https://github.com/tobi/qmd) and its recommended compact local EmbeddingGemma model. The first `oh index` or semantic `oh search` downloads the model (about 300 MB); keyword search and every structural command work without it.
+Structural queries use [DataScript](https://github.com/tonsky/datascript) as a
+disposable in-memory Datalog view over Markdown. It needs no service, model, or
+committed database. Semantic search uses [QMD](https://github.com/tobi/qmd) and
+its recommended compact local EmbeddingGemma model. The first `oh index` or
+semantic `oh search` downloads the model (about 300 MB); keyword search and
+every structural command work without it.
 
 ## Start a vault
 
@@ -252,10 +324,15 @@ question deliberately.
 | `oh inspect <url>` | Run acquisition and extraction without writing a bundle. |
 | `oh pdf <file-or-url> [--slug <slug>]` | Convert a local or public remote PDF into Markdown while retaining the original bytes, extracted images, OCR-derived text, URL provenance, and page provenance. |
 | `oh refresh --root <directory>` | Rebuild the managed catalog atomically and report graph findings. |
-| `oh check --root <directory>` | Verify that the catalog is current and that graph policy passes without changing files. |
-| `oh graph --root <directory>` | Print the resolved contextual graph, broken or ambiguous links, orphans, and advisory mention candidates. |
-| `oh backlinks <note> --root <directory>` | Show incoming contextual links for a note resolved by path, title, or alias. |
-| `oh links <note> --root <directory>` | Traverse incoming, outgoing, or bidirectional contextual links with explicit depth and node limits. |
+| `oh check --root <directory>` | Verify that the catalog is current and graph policy passes without changing files. `--no-catalog` gates an edit lane without requiring the shared catalog refresh. |
+| `oh graph --root <directory>` | Print the resolved contextual and typed graph, broken or ambiguous targets, orphans, and advisory mention candidates. |
+| `oh backlinks <note> --root <directory>` | Show incoming contextual links and typed relationships for a note resolved by path, title, or alias. |
+| `oh links <note> --root <directory>` | Traverse incoming, outgoing, or bidirectional contextual links and typed relationships with explicit depth and node limits. |
+| `oh note create <id> --title <title> --root <directory>` | Atomically create one confined Markdown note; use `--type concept` for a reusable concept. |
+| `oh relation add\|remove <source> <predicate> <target>` | Idempotently edit one source note's typed outbound relationship using exact canonical note IDs. |
+| `oh relation list <note> --root <directory>` | List a note's authored outbound and derived inbound typed relationships. |
+| `oh datalog <query> --root <directory>` | Run a sorted, bounded Datalog query in a disposable one-shot subprocess over current Markdown; use `--query-file` and `--rules-file` for reviewed recursive programs, and `--timeout-ms` within the hard 5-second ceiling. |
+| `oh percolate [note] --root <directory>` | Report evidence-backed recurring-concept and missing-relationship candidates without writing notes. |
 | `oh list --root <directory>` | Filter typed, nested frontmatter and tags; sort by metadata, title, path, or graph counts. `oh notes` is an alias. |
 | `oh index --root <directory>` | Build or incrementally refresh the optional local QMD embedding index. |
 | `oh search <query> --root <directory>` | Search locally by semantic similarity, or use `--mode keyword` for full-text retrieval. |
@@ -298,7 +375,41 @@ The bundle includes byte-identical `source.pdf`, readable Markdown, `capture.jso
 
 ## Graph reference
 
-Vault-root wikilinks such as `[[notes/context-engineering|context engineering]]` are the graph's source of truth. `oh graph`, `oh backlinks`, and `oh links` derive relationships without injecting reciprocal links into authored notes. `oh refresh` owns only the marked catalog block in `index.md`; `oh check` verifies the same state without writing.
+Vault-root wikilinks such as
+`[[notes/context-engineering|context engineering]]` and source-owned typed
+frontmatter relationships are the graph's authored facts:
+
+```yaml
+type: concept
+relations:
+  supports:
+    - notes/durable-agent-memory
+```
+
+Predicates use lower-kebab-case and targets use exact vault-root IDs without
+`.md`. `oh graph`, `oh backlinks`, `oh links`, and `oh datalog` derive inverse
+edges and paths without injecting reciprocal or inferred facts into notes.
+`oh percolate` proposes reusable concepts and missing connections with explicit
+support; an agent reviews the cited prose before authoring anything.
+
+The DataScript projection is rebuilt from current Markdown for each query and
+consumed only by its disposable query subprocess. Oh never commits a graph database,
+generated facts file, or engine entity ID. Parallel agents therefore keep
+editing separate notes. Each lane can run `oh check --no-catalog`, and the
+integrator runs one final `oh refresh` for the only shared generated region in
+`index.md`.
+
+Datalog evaluation is asynchronous and isolated behind a 2-second default
+subprocess deadline, a hard 5-second ceiling, and bounded request and result
+transfers validated on both sides of IPC. Projection also spends its fact
+budget while traversing nested metadata.
+Programmatic callers can branch on owned `DatalogBudgetError` and
+`FactProjectionBudgetError` kinds instead of matching error text.
+
+Datalog queries use the fixed `:oh/*`, `:note/*`, `:metadata/*`, and `:edge/*`
+attribute vocabulary documented in [Design](docs/design.md). Edge endpoints are
+semantic references; join them through `:note/id` to return canonical Markdown
+IDs. Conventional EDN keyword spelling works at the CLI boundary.
 
 Frontmatter retains nested objects, arrays, finite numbers with safe integer precision, booleans, strings, and nulls. `oh list --where type=plan --tag ingestion --sort metadata.updated --order desc` answers exact questions from that authored data. Unquoted `true`, `false`, `null`, and numeric filter values are typed; keep the quotes inside the argument to match a string with the same spelling, for example `oh list --where 'external_id="9007199254740993"'`. QMD search is a discovery layer: each match is joined back to the live metadata and graph view, and similarity never becomes a link automatically.
 
@@ -318,8 +429,10 @@ their runtime to the vault.
 
 The package exports its full programmatic surface from `@hraness/oh`; focused
 entry points from `@hraness/oh/agent-context`,
-`@hraness/oh/agent-guide-audit`, `@hraness/oh/graph`, `@hraness/oh/navigation`,
-`@hraness/oh/query`, and `@hraness/oh/semantic`; web-capture orchestration and
+`@hraness/oh/agent-guide-audit`, `@hraness/oh/authoring`,
+`@hraness/oh/datalog`, `@hraness/oh/facts`, `@hraness/oh/graph`,
+`@hraness/oh/navigation`, `@hraness/oh/percolate`, `@hraness/oh/query`, and
+`@hraness/oh/semantic`; web-capture orchestration and
 diagnostics from
 `@hraness/oh/capture`; PDF ingestion from `@hraness/oh/pdf`; and reusable
 disposable-profile helpers from `@hraness/oh/browser-profiles`. Embedders that
@@ -330,12 +443,14 @@ capture-primitive subpaths listed in `package.json`, including
 
 ## Agent skills
 
-The repository and packed package ship five reusable Agent Skills under
+The repository and packed package ship six reusable Agent Skills under
 `skills/`: `save-url-oh` for auditable web ingestion, `save-pdf-oh` for
 local and public remote PDF conversion, `refresh-oh` for graph and
 agent-context validation, `query-oh` for loading repository-path context
-before bounded metadata, graph, keyword, or semantic retrieval, and `plan-oh`
-for creating and growing durable implementation plans. Copy or link a skill
+before bounded metadata, Datalog, graph, keyword, or semantic retrieval,
+`percolate-oh` for reviewing and promoting reusable concepts and typed
+relationships, and `plan-oh` for creating and growing durable implementation
+plans. Copy or link a skill
 directory into the location used by your agent runner. They invoke the installed
 `oh` command and do not depend on a repository checkout path.
 

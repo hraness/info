@@ -1,0 +1,4 @@
+interface:
+  display_name: "Percolate Oh"
+  short_description: "Promote concepts and relationships in an Oh vault"
+  default_prompt: "Review the changed Oh notes for evidence-backed concepts and typed relationships, apply only high-confidence graph edits, and validate without creating catalog merge conflicts."

@@ -1,10 +1,14 @@
 // @bun
 import {
+  MAX_ANALYZED_NOTES,
   analyzeVault,
+  isCanonicalNoteId,
+  lookupNote,
+  normalizeVaultPath,
   parseNote,
   renderCatalog,
   replaceCatalog
-} from "./index-rbfx133v.js";
+} from "./index-q2ks380z.js";
 
 // src/semantic.ts
 import { createHash } from "crypto";
@@ -18,13 +22,26 @@ import { constants } from "fs";
 import {
   lstat,
   open,
-  readFile,
   readdir,
   realpath,
   rename,
   rm
 } from "fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "path";
+var MAX_SCANNED_NOTES = MAX_ANALYZED_NOTES;
+var MAX_NOTE_UTF8_BYTES = 16 * 1024 * 1024;
+var MAX_VAULT_UTF8_BYTES = 256 * 1024 * 1024;
+
+class VaultScanBudgetError extends RangeError {
+  kind;
+  limit;
+  constructor(kind, limit, message) {
+    super(message);
+    this.name = "VaultScanBudgetError";
+    this.kind = kind;
+    this.limit = limit;
+  }
+}
 var defaultIgnoredDirectories = new Set([
   ".git",
   ".next",
@@ -53,11 +70,149 @@ async function markdownFiles(directory, ignoredDirectories = defaultIgnoredDirec
   }
   return files;
 }
-async function readVaultNotes(root, ignoredDirectories = defaultIgnoredDirectories) {
+function checkedScanLimit(value, hardMaximum, option) {
+  const limit = value ?? hardMaximum;
+  if (!Number.isSafeInteger(limit) || limit < 0 || limit > hardMaximum) {
+    throw new RangeError(`${option} must be a safe integer from 0 through ${hardMaximum}.`);
+  }
+  return limit;
+}
+function normalizedRawNoteId(rawId) {
+  return normalizeVaultPath(rawId).normalize("NFC");
+}
+function validateScannedNotePaths(root, paths) {
+  const files = paths.map((absolutePath) => {
+    const vaultPath = relative(root, absolutePath).split(sep).join("/");
+    return {
+      absolutePath,
+      vaultPath,
+      rawId: vaultPath.slice(0, -3)
+    };
+  });
+  const pathByNormalizedId = new Map;
+  for (const file of files) {
+    const normalizedId = normalizedRawNoteId(file.rawId);
+    const collision = pathByNormalizedId.get(normalizedId);
+    if (collision !== undefined && collision !== file.vaultPath) {
+      throw new Error(`Vault note paths ${JSON.stringify(collision)} and ` + `${JSON.stringify(file.vaultPath)} normalize to the same note ID ` + `${JSON.stringify(normalizedId)}.`);
+    }
+    pathByNormalizedId.set(normalizedId, file.vaultPath);
+  }
+  for (const file of files) {
+    if (isCanonicalNoteId(file.rawId))
+      continue;
+    if (file.rawId !== file.rawId.normalize("NFC")) {
+      throw new Error(`Vault note path ${JSON.stringify(file.vaultPath)} is not NFC; ` + `its extensionless note ID must be exactly ` + `${JSON.stringify(file.rawId.normalize("NFC"))}.`);
+    }
+    if (file.rawId.includes("\\")) {
+      throw new Error(`Vault note path ${JSON.stringify(file.vaultPath)} contains a backslash; ` + "note IDs must use exact vault-root directory separators.");
+    }
+    throw new Error(`Vault note path ${JSON.stringify(file.vaultPath)} must have an exact ` + "canonical extensionless vault-root note ID.");
+  }
+  return files;
+}
+function assertScannableNoteFile(vaultPath, metadata) {
+  if (metadata.isSymbolicLink()) {
+    throw new Error(`Vault note ${JSON.stringify(vaultPath)} must not be a symbolic link.`);
+  }
+  if (!metadata.isFile()) {
+    throw new Error(`Vault note ${JSON.stringify(vaultPath)} must be a regular file.`);
+  }
+  if (metadata.nlink !== 1n) {
+    throw new Error(`Vault note ${JSON.stringify(vaultPath)} must not be hard-linked.`);
+  }
+}
+function noteBytesError(vaultPath, limit) {
+  return new VaultScanBudgetError("note-bytes", limit, `Vault note ${JSON.stringify(vaultPath)} exceeds the ${limit}-byte UTF-8 limit.`);
+}
+function totalBytesError(limit) {
+  return new VaultScanBudgetError("total-bytes", limit, `Vault scan exceeds the ${limit}-byte cumulative UTF-8 limit.`);
+}
+async function readBoundedNote(handle, vaultPath, maxNoteBytes, remainingTotalBytes, maxTotalBytes) {
+  const chunks = [];
+  let bytes = 0;
+  for (;; ) {
+    const remaining = Math.min(maxNoteBytes - bytes, remainingTotalBytes - bytes);
+    const buffer = new Uint8Array(Math.min(64 * 1024, Math.max(1, remaining + 1)));
+    const result = await handle.read(buffer, 0, buffer.byteLength, null);
+    if (result.bytesRead === 0)
+      break;
+    bytes += result.bytesRead;
+    if (bytes > maxNoteBytes)
+      throw noteBytesError(vaultPath, maxNoteBytes);
+    if (bytes > remainingTotalBytes) {
+      throw totalBytesError(maxTotalBytes);
+    }
+    chunks.push(buffer.slice(0, result.bytesRead));
+  }
+  const joined = new Uint8Array(bytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return {
+      content: new TextDecoder("utf-8", { fatal: true }).decode(joined),
+      bytes
+    };
+  } catch (error) {
+    throw new Error(`Vault note ${JSON.stringify(vaultPath)} is not valid UTF-8.`, { cause: error });
+  }
+}
+async function readVaultNotes(root, ignoredDirectories = defaultIgnoredDirectories, limits = {}) {
+  const maxNotes = checkedScanLimit(limits.maxNotes, MAX_SCANNED_NOTES, "maxNotes");
+  const maxNoteBytes = checkedScanLimit(limits.maxNoteBytes, MAX_NOTE_UTF8_BYTES, "maxNoteBytes");
+  const maxTotalBytes = checkedScanLimit(limits.maxTotalBytes, MAX_VAULT_UTF8_BYTES, "maxTotalBytes");
+  const paths = await markdownFiles(root, ignoredDirectories);
+  if (paths.length > maxNotes) {
+    throw new VaultScanBudgetError("notes", maxNotes, `Vault scan exceeds the ${maxNotes} Markdown note limit.`);
+  }
+  const files = validateScannedNotePaths(root, paths);
+  let declaredTotal = 0n;
+  const preflight = [];
+  for (const file of files) {
+    const metadata = await lstat(file.absolutePath, { bigint: true });
+    assertScannableNoteFile(file.vaultPath, metadata);
+    if (metadata.size > BigInt(maxNoteBytes)) {
+      throw noteBytesError(file.vaultPath, maxNoteBytes);
+    }
+    declaredTotal += metadata.size;
+    if (declaredTotal > BigInt(maxTotalBytes)) {
+      throw totalBytesError(maxTotalBytes);
+    }
+    preflight.push({
+      ...file,
+      device: metadata.dev,
+      inode: metadata.ino
+    });
+  }
   const notes = [];
-  for (const path of await markdownFiles(root, ignoredDirectories)) {
-    const vaultPath = relative(root, path).split(sep).join("/");
-    notes.push(parseNote(vaultPath, await readFile(path, "utf8")));
+  let observedTotal = 0;
+  for (const file of preflight) {
+    const handle = await open(file.absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const beforeRead = await handle.stat({ bigint: true });
+      assertScannableNoteFile(file.vaultPath, beforeRead);
+      if (beforeRead.dev !== file.device || beforeRead.ino !== file.inode) {
+        throw new Error(`Vault note ${JSON.stringify(file.vaultPath)} changed during scan; retry.`);
+      }
+      if (beforeRead.size > BigInt(maxNoteBytes)) {
+        throw noteBytesError(file.vaultPath, maxNoteBytes);
+      }
+      if (BigInt(observedTotal) + beforeRead.size > BigInt(maxTotalBytes)) {
+        throw totalBytesError(maxTotalBytes);
+      }
+      const read = await readBoundedNote(handle, file.vaultPath, maxNoteBytes, maxTotalBytes - observedTotal, maxTotalBytes);
+      const afterRead = await handle.stat({ bigint: true });
+      if (afterRead.dev !== file.device || afterRead.ino !== file.inode || afterRead.size !== beforeRead.size || afterRead.size !== BigInt(read.bytes)) {
+        throw new Error(`Vault note ${JSON.stringify(file.vaultPath)} changed during scan; retry.`);
+      }
+      observedTotal += read.bytes;
+      notes.push(parseNote(file.vaultPath, read.content));
+    } finally {
+      await handle.close();
+    }
   }
   return notes;
 }
@@ -86,7 +241,7 @@ async function assertConfinedIndexParents(root, path) {
     throw new Error("The managed index parent resolves outside the vault root.");
   }
 }
-async function readIndexRevision(root, path) {
+async function readIndexRevision(root, path, maxNoteBytes = MAX_NOTE_UTF8_BYTES) {
   await assertConfinedIndexParents(root, path);
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
@@ -99,8 +254,17 @@ async function readIndexRevision(root, path) {
     if (!confined(root, canonicalPath)) {
       throw new Error("The managed index resolves outside the vault root.");
     }
+    const vaultPath = relative(root, path).split(sep).join("/");
+    if (metadata.size > BigInt(maxNoteBytes)) {
+      throw noteBytesError(vaultPath, maxNoteBytes);
+    }
+    const read = await readBoundedNote(handle, vaultPath, maxNoteBytes, maxNoteBytes, maxNoteBytes);
+    const afterRead = await handle.stat({ bigint: true });
+    if (afterRead.dev !== metadata.dev || afterRead.ino !== metadata.ino || afterRead.size !== metadata.size || afterRead.size !== BigInt(read.bytes)) {
+      throw new Error("The managed index changed during scan; retry.");
+    }
     return {
-      content: await handle.readFile({ encoding: "utf8" }),
+      content: read.content,
       device: metadata.dev,
       inode: metadata.ino,
       mode: Number(metadata.mode & 0o777n)
@@ -160,9 +324,13 @@ async function snapshot(rootInput, options, writeIndex) {
   }
   const vaultIndexPath = relativeIndex.split(sep).join("/");
   const catalogNoteId = vaultIndexPath.toLowerCase().endsWith(".md") ? vaultIndexPath.slice(0, -3) : vaultIndexPath;
-  const indexRevision = await readIndexRevision(root, indexPath);
+  const notes = await readVaultNotes(root, options.ignoredDirectories, {
+    ...options.maxNotes === undefined ? {} : { maxNotes: options.maxNotes },
+    ...options.maxNoteBytes === undefined ? {} : { maxNoteBytes: options.maxNoteBytes },
+    ...options.maxTotalBytes === undefined ? {} : { maxTotalBytes: options.maxTotalBytes }
+  });
+  const indexRevision = await readIndexRevision(root, indexPath, options.maxNoteBytes ?? MAX_NOTE_UTF8_BYTES);
   const currentIndex = indexRevision.content;
-  const notes = await readVaultNotes(root, options.ignoredDirectories);
   const expectedIndex = replaceCatalog(currentIndex, renderCatalog(notes, catalogNoteId));
   const stale = currentIndex !== expectedIndex;
   let index = stale ? "stale" : "current";
@@ -176,6 +344,18 @@ async function snapshot(rootInput, options, writeIndex) {
     else
       notes[noteIndex] = parsed;
   }
+  const mentionScope = options.mentionScope;
+  const mentionIds = new Set;
+  if (typeof mentionScope === "string") {
+    const lookup = lookupNote(notes, mentionScope);
+    if (lookup.kind === "found")
+      mentionIds.add(lookup.note.id);
+    else if (lookup.kind === "ambiguous") {
+      for (const note of lookup.candidates)
+        mentionIds.add(note.id);
+    }
+  }
+  const mentionScopePredicate = mentionScope === undefined ? undefined : (note) => mentionScope !== false && mentionIds.has(note.id);
   return {
     root,
     indexPath,
@@ -183,7 +363,12 @@ async function snapshot(rootInput, options, writeIndex) {
     notes,
     analysis: analyzeVault(notes, {
       catalogNoteId,
-      ...options.includeInSuggestions === undefined ? {} : { includeInSuggestions: options.includeInSuggestions }
+      ...options.includeInSuggestions === undefined ? {} : { includeInSuggestions: options.includeInSuggestions },
+      ...mentionScopePredicate === undefined ? {} : { mentionScope: mentionScopePredicate },
+      ...options.maxNotes === undefined ? {} : { maxNotes: options.maxNotes },
+      ...options.maxConnectionObservations === undefined ? {} : { maxConnectionObservations: options.maxConnectionObservations },
+      ...options.maxMentionPairs === undefined ? {} : { maxMentionPairs: options.maxMentionPairs },
+      ...options.maxMentions === undefined ? {} : { maxMentions: options.maxMentions }
     })
   };
 }
@@ -597,4 +782,4 @@ async function searchSemanticVault(options, dependencies = {}) {
   }
 }
 
-export { defaultIgnoredDirectories, markdownFiles, readVaultNotes, scanVault, refreshVault, recommendedEmbeddingModel, semanticDatabasePath, indexSemanticVault, searchSemanticVault };
+export { MAX_SCANNED_NOTES, MAX_NOTE_UTF8_BYTES, MAX_VAULT_UTF8_BYTES, VaultScanBudgetError, defaultIgnoredDirectories, markdownFiles, readVaultNotes, scanVault, refreshVault, recommendedEmbeddingModel, semanticDatabasePath, indexSemanticVault, searchSemanticVault };

@@ -1,9 +1,31 @@
 // @bun
 // src/graph.ts
 import { posix } from "path";
-import { parseDocument } from "yaml";
+import {
+  isMap,
+  isNode,
+  isScalar,
+  isSeq,
+  LineCounter,
+  parseDocument
+} from "yaml";
 var catalogStart = "<!-- oh:catalog:start -->";
 var catalogEnd = "<!-- oh:catalog:end -->";
+var MAX_ANALYZED_NOTES = 1e4;
+var MAX_CONNECTION_OBSERVATIONS = 250000;
+var MAX_MENTION_PAIRS = 1e6;
+var MAX_MENTIONS = 50000;
+
+class VaultAnalysisBudgetError extends RangeError {
+  kind;
+  limit;
+  constructor(kind, limit, message) {
+    super(message);
+    this.name = "VaultAnalysisBudgetError";
+    this.kind = kind;
+    this.limit = limit;
+  }
+}
 function isMetadataObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -78,24 +100,118 @@ function metadataObjectFromUnknown(value) {
 function emptyMetadata() {
   return Object.create(null);
 }
+var relationPredicatePattern = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+var maxNoteIdLength = 2048;
+function isCanonicalNoteId(value) {
+  if (value === "" || value.length > maxNoteIdLength || value !== value.trim() || value !== value.normalize("NFC") || value.includes("\\") || value.includes("\x00") || value.includes(`
+`) || value.includes("\r") || value.startsWith("/") || value.endsWith("/") || value.toLocaleLowerCase("en-US").endsWith(".md")) {
+    return false;
+  }
+  const segments = value.split("/");
+  return !segments.some((segment) => segment === "" || segment === "." || segment === ".." || segment.startsWith(".")) && posix.normalize(value) === value && posix.basename(`${value}.md`) !== "AGENTS.md";
+}
+function frontmatterSourceLine(lineCounter, node, fallback = 2) {
+  const offset = node?.range?.[0];
+  if (offset === undefined)
+    return fallback;
+  return lineCounter.linePos(offset).line + 1;
+}
+function malformedRelation(source, line, message, details = {}) {
+  return {
+    kind: "malformed",
+    source,
+    line,
+    ...details,
+    message
+  };
+}
+function relationTarget(node, predicate, source, lineCounter, fallbackLine) {
+  const line = frontmatterSourceLine(lineCounter, node, fallbackLine);
+  if (!isScalar(node) || typeof node.value !== "string") {
+    return malformedRelation(source, line, `Relation "${predicate}" targets must be non-empty strings.`, { predicate });
+  }
+  const target = node.value;
+  if (!isCanonicalNoteId(target)) {
+    return malformedRelation(source, line, `Relation "${predicate}" target ${JSON.stringify(target)} must be an exact ` + "extensionless vault-root note ID.", { predicate, target: node.value });
+  }
+  return { predicate, target, line };
+}
+function parsedRelations(contents, source, lineCounter) {
+  if (!isMap(contents))
+    return { relationDeclarations: [], relationIssues: [] };
+  const relationsPair = contents.items.find((pair) => isScalar(pair.key) && typeof pair.key.value === "string" && pair.key.value.toLocaleLowerCase("en-US") === "relations");
+  if (relationsPair === undefined) {
+    return { relationDeclarations: [], relationIssues: [] };
+  }
+  const relationsLine = frontmatterSourceLine(lineCounter, isScalar(relationsPair.key) ? relationsPair.key : null);
+  if (!isMap(relationsPair.value)) {
+    return {
+      relationDeclarations: [],
+      relationIssues: [
+        malformedRelation(source, relationsLine, "Relations must map strict lower-kebab predicates to a string or string list.")
+      ]
+    };
+  }
+  const relationDeclarations = [];
+  const relationIssues = [];
+  for (const pair of relationsPair.value.items) {
+    const predicateLine = frontmatterSourceLine(lineCounter, isNode(pair.key) ? pair.key : null, relationsLine);
+    if (!isScalar(pair.key) || typeof pair.key.value !== "string") {
+      relationIssues.push(malformedRelation(source, predicateLine, "Relation predicates must be strict lower kebab-case strings."));
+      continue;
+    }
+    const predicate = pair.key.value.normalize("NFC");
+    if (!relationPredicatePattern.test(predicate)) {
+      relationIssues.push(malformedRelation(source, predicateLine, `Invalid relation predicate "${predicate}"; use strict lower kebab-case.`, { predicate }));
+      continue;
+    }
+    const nodes = isSeq(pair.value) ? pair.value.items : [pair.value];
+    for (const node of nodes) {
+      const parsed = relationTarget(isNode(node) ? node : null, predicate, source, lineCounter, predicateLine);
+      if ("kind" in parsed)
+        relationIssues.push(parsed);
+      else
+        relationDeclarations.push(parsed);
+    }
+  }
+  return {
+    relationDeclarations: relationDeclarations.toSorted((left, right) => left.predicate.localeCompare(right.predicate) || left.target.localeCompare(right.target) || left.line - right.line),
+    relationIssues: relationIssues.toSorted((left, right) => left.line - right.line || (left.predicate ?? "").localeCompare(right.predicate ?? "") || (left.target ?? "").localeCompare(right.target ?? ""))
+  };
+}
 function parseMetadata(source, path) {
-  if (source.trim() === "")
-    return emptyMetadata();
+  if (source.trim() === "") {
+    return {
+      metadata: emptyMetadata(),
+      relationDeclarations: [],
+      relationIssues: []
+    };
+  }
   try {
+    const lineCounter = new LineCounter;
     const document = parseDocument(source, {
+      lineCounter,
       schema: "core",
       uniqueKeys: true
     });
     if (document.errors.length > 0) {
       throw new Error("the YAML parser reported an error");
     }
-    if (document.contents === null)
-      return emptyMetadata();
+    if (document.contents === null) {
+      return {
+        metadata: emptyMetadata(),
+        relationDeclarations: [],
+        relationIssues: []
+      };
+    }
     const parsed = document.toJS({ mapAsMap: false, maxAliasCount: 50 });
     const metadata = metadataObjectFromUnknown(parsed);
     if (metadata === null)
       throw new Error("the YAML document is not a JSON-like object");
-    return metadata;
+    return {
+      metadata,
+      ...parsedRelations(document.contents, path, lineCounter)
+    };
   } catch (error) {
     throw new Error(`Invalid YAML frontmatter in ${path}.`, { cause: error });
   }
@@ -148,15 +264,18 @@ function frontmatterOf(content, path) {
       values: new Map,
       aliases: [],
       tags: [],
-      metadata: emptyMetadata()
+      metadata: emptyMetadata(),
+      relationDeclarations: [],
+      relationIssues: []
     };
   }
   const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
   if (end === -1) {
     throw new Error(`Invalid YAML frontmatter in ${path}: missing closing delimiter.`);
   }
-  const metadata = parseMetadata(lines.slice(1, end).join(`
+  const parsed = parseMetadata(lines.slice(1, end).join(`
 `), path);
+  const metadata = parsed.metadata;
   const values = new Map;
   const seenKeys = new Set;
   for (const [authoredKey, typedValue] of Object.entries(metadata)) {
@@ -175,7 +294,9 @@ function frontmatterOf(content, path) {
     values,
     aliases: aliasesFromMetadata(metadata),
     tags: normalizedTags(metadata),
-    metadata
+    metadata,
+    relationDeclarations: parsed.relationDeclarations,
+    relationIssues: parsed.relationIssues
   };
 }
 function searchableMarkdown(content) {
@@ -404,7 +525,9 @@ function parseNote(path, content) {
     content,
     summary,
     searchableText: searchable,
-    links: wikiLinks(searchable)
+    links: wikiLinks(searchable),
+    relationDeclarations: metadata.relationDeclarations,
+    relationIssues: metadata.relationIssues
   };
 }
 function decoded(value) {
@@ -472,6 +595,14 @@ function resolveTarget(source, rawTarget, byId, byBasename) {
   return { kind: "broken" };
 }
 var pairKey = (left, right) => left.localeCompare(right) <= 0 ? `${left}\x00${right}` : `${right}\x00${left}`;
+function compareAuthoredRelations(left, right) {
+  return left.source.localeCompare(right.source) || left.predicate.localeCompare(right.predicate) || left.target.localeCompare(right.target) || left.provenance.line - right.provenance.line || left.provenance.authoredTarget.localeCompare(right.provenance.authoredTarget);
+}
+function compareRelationIssues(left, right) {
+  const predicateComparison = (left.predicate ?? "").localeCompare(right.predicate ?? "");
+  const targetComparison = (left.target ?? "").localeCompare(right.target ?? "");
+  return left.source.localeCompare(right.source) || left.line - right.line || left.kind.localeCompare(right.kind) || predicateComparison || targetComparison;
+}
 var wordCharacter = (value) => /[A-Za-z0-9]/.test(value);
 function phraseOffset(lowerHaystack, lowerPhrase) {
   let offset = lowerHaystack.indexOf(lowerPhrase);
@@ -519,7 +650,21 @@ function uniquePhrasesByTarget(notes) {
   }
   return phrasesByTarget;
 }
+function checkedAnalysisLimit(value, hardMaximum, option) {
+  const limit = value ?? hardMaximum;
+  if (!Number.isSafeInteger(limit) || limit < 0 || limit > hardMaximum) {
+    throw new RangeError(`${option} must be a safe integer from 0 through ${hardMaximum}.`);
+  }
+  return limit;
+}
 function analyzeVault(notes, options = {}) {
+  const maxNotes = checkedAnalysisLimit(options.maxNotes, MAX_ANALYZED_NOTES, "maxNotes");
+  const maxMentionPairs = checkedAnalysisLimit(options.maxMentionPairs, MAX_MENTION_PAIRS, "maxMentionPairs");
+  const maxMentions = checkedAnalysisLimit(options.maxMentions, MAX_MENTIONS, "maxMentions");
+  const maxConnectionObservations = checkedAnalysisLimit(options.maxConnectionObservations, MAX_CONNECTION_OBSERVATIONS, "maxConnectionObservations");
+  if (notes.length > maxNotes) {
+    throw new VaultAnalysisBudgetError("notes", maxNotes, `Vault analysis exceeds the ${maxNotes} note limit.`);
+  }
   const catalogNoteId = withoutMarkdownExtension(normalizeVaultPath(options.catalogNoteId ?? "index"));
   const byId = new Map(notes.map((note) => [note.id, note]));
   const byBasename = new Map;
@@ -529,11 +674,28 @@ function analyzeVault(notes, options = {}) {
     matches.push(note.id);
     byBasename.set(basename, matches);
   }
+  for (const matches of byBasename.values())
+    matches.sort();
+  let connectionObservations = 0;
+  const observeConnection = () => {
+    if (connectionObservations >= maxConnectionObservations) {
+      throw new VaultAnalysisBudgetError("connection-observations", maxConnectionObservations, `Vault analysis exceeds the ${maxConnectionObservations} ` + "connection-observation limit.");
+    }
+    connectionObservations += 1;
+  };
   const issues = [];
+  const relationIssues = [];
+  for (const note of notes) {
+    for (const issue of note.relationIssues ?? []) {
+      observeConnection();
+      relationIssues.push(issue);
+    }
+  }
   const contextualLinks = [];
   const edgeKeys = new Set;
   for (const source of notes) {
     for (const link of source.links) {
+      observeConnection();
       const resolution = resolveTarget(source, link.target, byId, byBasename);
       if (resolution.kind === "attachment")
         continue;
@@ -560,13 +722,69 @@ function analyzeVault(notes, options = {}) {
       contextualLinks.push({ source: source.path, target: `${resolution.id}.md`, line: link.line });
     }
   }
+  const authoredRelations = [];
+  const declarationKeys = new Set;
+  const relationEdgeKeys = new Set;
+  for (const source of notes) {
+    const declarations = [];
+    for (const declaration of source.relationDeclarations ?? []) {
+      observeConnection();
+      declarations.push(declaration);
+    }
+    declarations.sort((left, right) => left.line - right.line || left.predicate.localeCompare(right.predicate) || left.target.localeCompare(right.target));
+    for (const declaration of declarations) {
+      const declarationKey = `${source.id}\x00${declaration.predicate}\x00${declaration.target}`;
+      if (declarationKeys.has(declarationKey))
+        continue;
+      declarationKeys.add(declarationKey);
+      const exactTarget = byId.get(declaration.target);
+      if (exactTarget === undefined) {
+        const basenameMatches = declaration.target.includes("/") ? [] : (byBasename.get(declaration.target) ?? []).filter((candidate) => candidate !== declaration.target);
+        if (basenameMatches.length > 0) {
+          relationIssues.push(malformedRelation(source.path, declaration.line, `Relation "${declaration.predicate}" target ` + `${JSON.stringify(declaration.target)} is only a basename; ` + "store the exact vault-root note ID.", {
+            predicate: declaration.predicate,
+            target: declaration.target
+          }));
+          continue;
+        }
+        relationIssues.push({
+          kind: "broken",
+          source: source.path,
+          line: declaration.line,
+          predicate: declaration.predicate,
+          target: declaration.target
+        });
+        continue;
+      }
+      if (source.id === catalogNoteId || exactTarget.id === catalogNoteId)
+        continue;
+      const edgeKey = `${source.id}\x00${declaration.predicate}\x00${exactTarget.id}`;
+      if (relationEdgeKeys.has(edgeKey))
+        continue;
+      relationEdgeKeys.add(edgeKey);
+      authoredRelations.push({
+        source: source.id,
+        target: exactTarget.id,
+        predicate: declaration.predicate,
+        provenance: {
+          kind: "frontmatter",
+          source: source.path,
+          line: declaration.line,
+          authoredTarget: declaration.target
+        }
+      });
+    }
+  }
   const sortedContextualLinks = contextualLinks.toSorted((left, right) => left.source.localeCompare(right.source) || left.target.localeCompare(right.target) || left.line - right.line);
+  const sortedAuthoredRelations = authoredRelations.toSorted(compareAuthoredRelations);
   const backlinks = sortedContextualLinks.toSorted((left, right) => left.target.localeCompare(right.target) || left.source.localeCompare(right.source) || left.line - right.line);
   const contentNotes = notes.filter((note) => note.id !== catalogNoteId);
   const connected = new Set;
   const linkedPairs = new Set;
   const inboundById = new Map;
   const outboundById = new Map;
+  const inboundRelationsById = new Map;
+  const outboundRelationsById = new Map;
   for (const link of sortedContextualLinks) {
     const sourceId = withoutMarkdownExtension(link.source);
     const targetId = withoutMarkdownExtension(link.target);
@@ -578,19 +796,42 @@ function analyzeVault(notes, options = {}) {
     inboundById.set(targetId, inbound);
     outboundById.set(sourceId, (outboundById.get(sourceId) ?? 0) + 1);
   }
+  for (const relation of sortedAuthoredRelations) {
+    connected.add(relation.source);
+    connected.add(relation.target);
+    linkedPairs.add(pairKey(relation.source, relation.target));
+    const inbound = inboundRelationsById.get(relation.target) ?? [];
+    inbound.push(relation);
+    inboundRelationsById.set(relation.target, inbound);
+    outboundRelationsById.set(relation.source, (outboundRelationsById.get(relation.source) ?? 0) + 1);
+  }
   const includeInSuggestions = options.includeInSuggestions ?? (() => true);
   const suggestionNotes = contentNotes.filter(includeInSuggestions);
-  const phrasesByTarget = uniquePhrasesByTarget(suggestionNotes);
+  const scopedMentionNotes = options.mentionScope === undefined ? suggestionNotes : suggestionNotes.filter(options.mentionScope);
+  const scopedMentionIds = new Set(scopedMentionNotes.map((note) => note.id));
+  const phrasesByTarget = scopedMentionNotes.length === 0 ? new Map : uniquePhrasesByTarget(suggestionNotes);
   const mentions = [];
+  let mentionPairs = 0;
   for (const source of suggestionNotes) {
-    const lowerSearchableText = source.searchableText.toLocaleLowerCase("en-US");
-    for (const target of suggestionNotes) {
-      if (source.id === target.id || linkedPairs.has(pairKey(source.id, target.id)))
+    const targets = options.mentionScope === undefined || scopedMentionIds.has(source.id) ? suggestionNotes : scopedMentionNotes;
+    let lowerSearchableText;
+    for (const target of targets) {
+      if (source.id === target.id)
         continue;
+      if (mentionPairs >= maxMentionPairs) {
+        throw new VaultAnalysisBudgetError("mention-pairs", maxMentionPairs, `Vault analysis exceeds the ${maxMentionPairs} mention-pair limit.`);
+      }
+      mentionPairs += 1;
+      if (linkedPairs.has(pairKey(source.id, target.id)))
+        continue;
+      lowerSearchableText ??= source.searchableText.toLocaleLowerCase("en-US");
       for (const { phrase, lowerPhrase } of phrasesByTarget.get(target.id) ?? []) {
         const offset = phraseOffset(lowerSearchableText, lowerPhrase);
         if (offset === -1)
           continue;
+        if (mentions.length >= maxMentions) {
+          throw new VaultAnalysisBudgetError("mentions", maxMentions, `Vault analysis exceeds the ${maxMentions} mention limit.`);
+        }
         mentions.push({
           source: source.path,
           line: source.searchableText.slice(0, offset).split(`
@@ -606,14 +847,19 @@ function analyzeVault(notes, options = {}) {
     noteCount: contentNotes.length,
     contextualLinks: sortedContextualLinks,
     backlinks,
+    authoredRelations: sortedAuthoredRelations,
     noteConnections: contentNotes.map((note) => ({
       id: note.id,
       path: note.path,
       inboundContextualCount: inboundById.get(note.id)?.length ?? 0,
       outboundContextualCount: outboundById.get(note.id) ?? 0,
-      backlinks: inboundById.get(note.id) ?? []
+      backlinks: inboundById.get(note.id) ?? [],
+      inboundRelationCount: inboundRelationsById.get(note.id)?.length ?? 0,
+      outboundRelationCount: outboundRelationsById.get(note.id) ?? 0,
+      relationBacklinks: inboundRelationsById.get(note.id) ?? []
     })).toSorted((left, right) => left.path.localeCompare(right.path)),
     issues: issues.sort((left, right) => left.source.localeCompare(right.source) || left.line - right.line || left.target.localeCompare(right.target)),
+    relationIssues: relationIssues.toSorted(compareRelationIssues),
     orphans: suggestionNotes.filter((note) => !connected.has(note.id)).map((note) => note.path).sort(),
     mentions: mentions.sort((left, right) => left.source.localeCompare(right.source) || left.line - right.line || left.target.localeCompare(right.target))
   };
@@ -678,4 +924,4 @@ function replaceCatalog(indexContent, catalog) {
   return indexContent.slice(0, start) + catalog + indexContent.slice(end + catalogEnd.length);
 }
 
-export { catalogStart, catalogEnd, metadataValueFromUnknown, normalizeVaultPath, searchableMarkdown, wikiLinks, parseNote, lookupNote, analyzeVault, renderCatalog, replaceCatalog };
+export { catalogStart, catalogEnd, MAX_ANALYZED_NOTES, MAX_CONNECTION_OBSERVATIONS, MAX_MENTION_PAIRS, MAX_MENTIONS, VaultAnalysisBudgetError, metadataValueFromUnknown, isCanonicalNoteId, normalizeVaultPath, searchableMarkdown, wikiLinks, parseNote, lookupNote, analyzeVault, renderCatalog, replaceCatalog };

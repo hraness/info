@@ -12,7 +12,7 @@ import {
   inspectClipEnvironment,
   renderAdapterCapabilities,
   renderDoctorReport
-} from "./index-tncrkr9r.js";
+} from "./index-jafz1zqj.js";
 import {
   cloneBrowserProfile
 } from "./index-5n05se68.js";
@@ -23,7 +23,7 @@ import {
   acquireFile,
   acquireHttp,
   assertSafePersistentProfile
-} from "./index-edhk01zd.js";
+} from "./index-gdjwymq0.js";
 import {
   CONTENT_REWRITE_TRUNCATION_WARNING,
   buildClipMarkdown,
@@ -51,6 +51,9 @@ import {
   safeFetch
 } from "./index-b0b0vy11.js";
 import {
+  BoundedByteBuffer
+} from "./index-gh719d91.js";
+import {
   abortCaptureBundle,
   beginCaptureBundle,
   commitCaptureBundle,
@@ -68,9 +71,6 @@ import {
   parseArguments,
   usage
 } from "./index-p1vzcd6b.js";
-import {
-  BoundedByteBuffer
-} from "./index-gh719d91.js";
 
 // src/clip/capture.ts
 import {
