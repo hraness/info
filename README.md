@@ -101,7 +101,7 @@ Its guide at `packages/parser/AGENTS.md` carries the reciprocal marker before th
 
 ### Pull context, then check the mapping
 
-`kb context <path> --root kb --repo .` returns the inherited guide chain from the repository root to the target and identifies the valid hubs mapped to that chain. It does not load hub prose. The agent receives the normative rules first, then opens the nearest useful hub only when the task needs its explanation. Hraness School shows [how a coding-agent harness assembles instructions and context](<https://hraness.school/lessons/what-is-a-coding-agent#harness>) around the model before that more specialized repository-memory choice.
+`kb context <path> --root kb --repo .` returns the inherited guide chain from the repository root to the target and identifies the valid hubs mapped to that chain. It does not load hub prose. The agent receives the normative rules first, then opens the nearest useful hub only when the task needs its explanation.
 
 From that hub, the agent can expand a bounded neighborhood with `kb links`, inspect backlinks, filter exact metadata, or use semantic search when vocabulary differs. The command is a routing aid, not an instruction loader for the whole vault. A small guide that needs no explanatory neighborhood can remain unmapped.
 
