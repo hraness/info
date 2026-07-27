@@ -20,7 +20,7 @@ const future = 4_102_444_800;
 
 describe("strict browser-like cookie filtering", () => {
   test("patched Chromium provider treats an empty top-level site as unpartitioned", async () => {
-    const profile = mkdtempSync(join(tmpdir(), "hraness-oh-sweet-cookie-chromium-test-"));
+    const profile = mkdtempSync(join(tmpdir(), "hraness-kb-sweet-cookie-chromium-test-"));
     const cookieDatabase = join(profile, "Cookies");
     const database = new Database(cookieDatabase);
     try {
@@ -98,7 +98,7 @@ describe("strict browser-like cookie filtering", () => {
   });
 
   test("patched browser provider preserves host scope and excludes partitioned Firefox state", async () => {
-    const profile = mkdtempSync(join(tmpdir(), "hraness-oh-sweet-cookie-test-"));
+    const profile = mkdtempSync(join(tmpdir(), "hraness-kb-sweet-cookie-test-"));
     const database = new Database(join(profile, "cookies.sqlite"));
     try {
       database.exec(`
@@ -275,7 +275,7 @@ describe("explicit cookie payload formats", () => {
   });
 
   test("reads through one bounded no-follow descriptor even if the path is replaced", () => {
-    const directory = mkdtempSync(join(tmpdir(), "hraness-oh-cookie-file-test-"));
+    const directory = mkdtempSync(join(tmpdir(), "hraness-kb-cookie-file-test-"));
     chmodSync(directory, 0o700);
     try {
       const selected = join(directory, "selected.cookies");

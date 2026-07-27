@@ -2,14 +2,14 @@
 // @bun
 import {
   main as main2
-} from "./index-tjs05t45.js";
+} from "./index-7sjb8edf.js";
 import {
   initVault
-} from "./index-tr7a81e2.js";
+} from "./index-gdf1r973.js";
 import {
   queryDatalog
-} from "./index-w2b0xwx3.js";
-import"./index-9b89cmna.js";
+} from "./index-z3197chz.js";
+import"./index-gp8ppyv5.js";
 import {
   navigateLinks
 } from "./index-d13v9ckt.js";
@@ -19,7 +19,7 @@ import {
   MAX_PERCOLATION_NOTES,
   MAX_SCOPED_PERCOLATION_MENTION_PAIRS,
   percolateVault
-} from "./index-vm6zwjyn.js";
+} from "./index-egdc3x6v.js";
 import {
   queryVault
 } from "./index-m4bexhht.js";
@@ -28,10 +28,10 @@ import {
   refreshVault,
   scanVault,
   searchSemanticVault
-} from "./index-h04ktqdh.js";
+} from "./index-j9s77ka0.js";
 import {
   auditAgentGuideRepository
-} from "./index-wnymkm9j.js";
+} from "./index-07fsx8bp.js";
 import {
   agentContextGuidePath,
   agentContextMarkerForScope,
@@ -40,25 +40,25 @@ import {
   analyzeAgentContexts,
   inspectAgentContextRepository,
   normalizeRepositoryScope
-} from "./index-rhd7x0cs.js";
+} from "./index-5vwpzb5a.js";
 import {
   addNoteRelation,
   createNote,
   removeNoteRelation
-} from "./index-gjr3vwy3.js";
+} from "./index-2fr3hf9q.js";
 import {
   lookupNote
-} from "./index-q2ks380z.js";
+} from "./index-4962kvds.js";
 import {
   main
-} from "./index-dcvyywve.js";
+} from "./index-kqen840h.js";
 import"./index-sm1xsdta.js";
-import"./index-jafz1zqj.js";
+import"./index-sy5x05mn.js";
 import"./index-5n05se68.js";
-import"./index-gdjwymq0.js";
+import"./index-gd7ryv2f.js";
 import"./index-hgve9rh2.js";
-import"./index-1nmbpv8m.js";
-import"./index-09ave90x.js";
+import"./index-84x0vjjp.js";
+import"./index-7gjtf4z1.js";
 import"./index-b0b0vy11.js";
 import"./index-gh719d91.js";
 import {
@@ -68,7 +68,7 @@ import {
   sanitizeTerminalLine,
   sanitizeTerminalText
 } from "./index-1xxnjn0d.js";
-import"./index-p1vzcd6b.js";
+import"./index-6g2pv9d2.js";
 
 // src/cli.ts
 import { open } from "fs/promises";
@@ -100,36 +100,36 @@ async function readBoundedUtf8(path, maximumBytes, label) {
     await handle.close();
   }
 }
-var usage = `oh \u2014 auditable capture and derived links for Markdown vaults
+var usage = `kb \u2014 auditable capture and derived links for Markdown vaults
 
 Usage:
-  oh init [directory] [--json]
-  oh clip <url|current> [capture options]
-  oh inspect <url> [capture options]
-  oh pdf <file-or-url> [PDF options]
-  oh refresh [--root <directory>] [--index <path>] [--json]
-  oh check [--root <directory>] [--index <path>] [--no-catalog] [--json]
-  oh graph [--root <directory>] [--index <path>] [--json]
-  oh backlinks <note> [--root <directory>] [--index <path>] [--json]
-  oh links <note> [--root <directory>] [--direction <in|out|both>] [--depth <count>] [--limit <count>] [--json]
-  oh note create <id> --title <title> [--type <type>] [--tag <tag>] [--body <markdown> | --body-file <path>] [--root <directory>] [--json]
-  oh relation add <source> <predicate> <target> [--root <directory>] [--expected-revision <sha256:...>] [--json]
-  oh relation remove <source> <predicate> <target> [--root <directory>] [--expected-revision <sha256:...>] [--json]
-  oh relation list <note> [--root <directory>] [--json]
-  oh datalog <query> [--rules-file <path>] [--root <directory>] [--limit <count>] [--timeout-ms <milliseconds>] [--json]
-  oh datalog --query-file <path> [--rules-file <path>] [--root <directory>] [--limit <count>] [--timeout-ms <milliseconds>] [--json]
-  oh percolate [note] [--root <directory>] [--min-support <count>] [--limit <count>] [--json]
-  oh list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
-  oh index [--root <directory>] [--database <path>] [--force] [--json]
-  oh search <query> [--root <directory>] [--database <path>] [--mode <semantic|keyword>] [--limit <count>] [--min-score <score>] [--json]
-  oh context <repository-path> [--root <vault>] [--repo <repository>] [--kind <auto|file|directory>] [--json]
-  oh agents identity <repository-scope> [--json]
-  oh agents check [--root <vault>] [--repo <repository>] [--json]
-  oh agents audit [--root <vault>] [--repo <repository>] [--json]
-  oh doctor [--json]
-  oh adapters [--json]
+  kb init [directory] [--json]
+  kb clip <url|current> [capture options]
+  kb inspect <url> [capture options]
+  kb pdf <file-or-url> [PDF options]
+  kb refresh [--root <directory>] [--index <path>] [--json]
+  kb check [--root <directory>] [--index <path>] [--no-catalog] [--json]
+  kb graph [--root <directory>] [--index <path>] [--json]
+  kb backlinks <note> [--root <directory>] [--index <path>] [--json]
+  kb links <note> [--root <directory>] [--direction <in|out|both>] [--depth <count>] [--limit <count>] [--json]
+  kb note create <id> --title <title> [--type <type>] [--tag <tag>] [--body <markdown> | --body-file <path>] [--root <directory>] [--json]
+  kb relation add <source> <predicate> <target> [--root <directory>] [--expected-revision <sha256:...>] [--json]
+  kb relation remove <source> <predicate> <target> [--root <directory>] [--expected-revision <sha256:...>] [--json]
+  kb relation list <note> [--root <directory>] [--json]
+  kb datalog <query> [--rules-file <path>] [--root <directory>] [--limit <count>] [--timeout-ms <milliseconds>] [--json]
+  kb datalog --query-file <path> [--rules-file <path>] [--root <directory>] [--limit <count>] [--timeout-ms <milliseconds>] [--json]
+  kb percolate [note] [--root <directory>] [--min-support <count>] [--limit <count>] [--json]
+  kb list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
+  kb index [--root <directory>] [--database <path>] [--force] [--json]
+  kb search <query> [--root <directory>] [--database <path>] [--mode <semantic|keyword>] [--limit <count>] [--min-score <score>] [--json]
+  kb context <repository-path> [--root <vault>] [--repo <repository>] [--kind <auto|file|directory>] [--json]
+  kb agents identity <repository-scope> [--json]
+  kb agents check [--root <vault>] [--repo <repository>] [--json]
+  kb agents audit [--root <vault>] [--repo <repository>] [--json]
+  kb doctor [--json]
+  kb adapters [--json]
 
-Run \`oh clip --help\` for web capture options or \`oh pdf --help\` for PDF conversion options.
+Run \`kb clip --help\` for web capture options or \`kb pdf --help\` for PDF conversion options.
 `;
 function safe(value) {
   return sanitizeTerminalLine(redactSensitiveText(value));
@@ -840,7 +840,7 @@ function parseArguments(arguments_) {
     return { ok: true, value: { kind: "clip", arguments: arguments_ } };
   }
   if (command === "init") {
-    let directory = "oh";
+    let directory = "kb";
     let json = false;
     const positional = [];
     for (const argument of arguments_.slice(1)) {
@@ -1352,7 +1352,7 @@ function renderContext(inspection, snapshot) {
     const context = guide.marker.markers[0]?.noteId;
     lines.push(`  ${safe(guide.path)}${context === undefined ? "" : `  \u2192  ${safe(context)}`}`);
   }
-  lines.push("Oh hubs (nearest \u2192 root):");
+  lines.push("KB hubs (nearest \u2192 root):");
   if (inspection.matchingContexts.length === 0)
     lines.push("  None.");
   for (const context of inspection.matchingContexts) {
@@ -1364,7 +1364,7 @@ function renderContext(inspection, snapshot) {
   for (const issue of inspection.issues)
     lines.push(`error: ${safe(issue.message)}`);
   if (inspection.matchingContexts.length > 0) {
-    lines.push("Open a hub, then use `oh links <hub> --root <vault> --depth 1` for bounded neighboring context.");
+    lines.push("Open a hub, then use `kb links <hub> --root <vault> --depth 1` for bounded neighboring context.");
   }
   return `${lines.join(`
 `)}
@@ -1467,7 +1467,7 @@ function agentReportPayload(repositoryRoot, vaultRoot, audit, validContexts, err
 }
 function renderAgentReport(action, audit, validContexts, errors, discoveryIssues) {
   const lines = [
-    `${action === "check" ? "Checked" : "Audited"} ${audit.guideCount} agent guides; ${audit.mappedGuideCount} markers, ${validContexts} valid Oh hubs.`,
+    `${action === "check" ? "Checked" : "Audited"} ${audit.guideCount} agent guides; ${audit.mappedGuideCount} markers, ${validContexts} valid KB hubs.`,
     `Context: ${audit.words} words (${audit.contentsWords} Contents, ${audit.guidelineWords} Guidelines), ${audit.nonblankLines} nonblank lines.`
   ];
   if (errors.length === 0)

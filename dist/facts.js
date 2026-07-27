@@ -9,7 +9,7 @@ import {
   noteFactEntityId,
   projectVaultFacts,
   relationFactEntityId
-} from "./index-9b89cmna.js";
+} from "./index-gp8ppyv5.js";
 export {
   relationFactEntityId,
   projectVaultFacts,

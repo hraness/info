@@ -178,7 +178,7 @@ async function lockPathFor(
   const cacheHome = resolve(cacheHomeInput ?? defaultCacheHome());
   const requestedDirectory = join(
     cacheHome,
-    "hraness-oh",
+    "hraness-kb",
     "note-locks",
     sha256(vaultRoot),
   );

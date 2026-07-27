@@ -1,4 +1,0 @@
-interface:
-  display_name: "Save URL to Oh"
-  short_description: "Save URLs and signed-in pages to an Oh vault"
-  default_prompt: "Use $save-url-oh to save this URL or current signed-in page into the knowledge base and report completeness."

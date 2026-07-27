@@ -58,7 +58,7 @@ function cookieOptions(cookieFile: string): CaptureArguments {
     media: "none",
     evidence: "none",
     htmlFile: undefined,
-    outputBase: "oh/articles",
+    outputBase: "kb/articles",
     force: false,
     stdout: true,
     json: false,

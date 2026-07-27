@@ -182,7 +182,7 @@ export function formatAgentContextMarker(noteId: string): string {
   if (!isCanonicalContextId(noteId)) {
     throw new TypeError("An agent-context marker requires a canonical context note ID.");
   }
-  return `<!-- oh:context ${noteId} -->`;
+  return `<!-- kb:context ${noteId} -->`;
 }
 
 /** Return the reciprocal guide marker for one repository scope. */
@@ -219,7 +219,7 @@ function fenceDelimiter(line: string): { character: "`" | "~"; length: number } 
 }
 
 /**
- * Parse the reserved `oh:context` guide comment.
+ * Parse the reserved `kb:context` guide comment.
  *
  * Other HTML comments and marker examples inside fenced code are ignored.
  * Marker-like comments with non-exact syntax or placement are reported.
@@ -255,9 +255,9 @@ export function parseAgentContextMarker(source: string): AgentContextMarkerParse
     ) {
       firstHeadingLine = lineNumber;
     }
-    if (!/<!--[^>]*\boh:context\b/u.test(line)) continue;
+    if (!/<!--[^>]*\bkb:context\b/u.test(line)) continue;
 
-    const match = /^<!-- oh:context (scopes\/[a-z0-9]+(?:-[a-z0-9]+)*--[0-9a-f]{12}) -->$/u
+    const match = /^<!-- kb:context (scopes\/[a-z0-9]+(?:-[a-z0-9]+)*--[0-9a-f]{12}) -->$/u
       .exec(line);
     const noteId = match?.[1];
     if (noteId === undefined || !isCanonicalContextId(noteId)) {
@@ -668,7 +668,7 @@ export function analyzeAgentContexts(
         kind: "guide-marker-missing",
         guidePath: guide.path,
         scope: guide.scope,
-        message: `The mapped guide ${guide.path} is missing its oh:context marker.`,
+        message: `The mapped guide ${guide.path} is missing its kb:context marker.`,
       });
     }
     if (guide.marker.markers.length > 1) {
@@ -676,7 +676,7 @@ export function analyzeAgentContexts(
         kind: "guide-marker-multiple",
         guidePath: guide.path,
         lines: guide.marker.markers.map((marker) => marker.line),
-        message: `The guide ${guide.path} has more than one oh:context marker.`,
+        message: `The guide ${guide.path} has more than one kb:context marker.`,
       });
     }
     if (guide.marker.malformed.length > 0) {
@@ -684,7 +684,7 @@ export function analyzeAgentContexts(
         kind: "guide-marker-malformed",
         guidePath: guide.path,
         lines: guide.marker.malformed.map((marker) => marker.line),
-        message: `The guide ${guide.path} has a malformed oh:context marker.`,
+        message: `The guide ${guide.path} has a malformed kb:context marker.`,
       });
     }
 

@@ -140,7 +140,7 @@ test("never reflects signed image URLs from network failures", async () => {
   const directory = mkdtempSync(join(tmpdir(), "clip-assets-warning-"));
   temporaryDirectories.push(directory);
   const result = await localizeAssets(
-    "![private](https://cdn.example/i.jpg?oh=opaque987&oe=deadline)",
+    "![private](https://cdn.example/i.jpg?kb=opaque987&oe=deadline)",
     {
       assetsDirectory: directory,
       baseUrl: new URL("https://example.com/post"),
@@ -156,7 +156,7 @@ test("never reflects signed image URLs from network failures", async () => {
   expect(output).toContain("https://cdn.example/i.jpg");
   expect(output).toContain("image request failed");
   expect(output).not.toContain("opaque987");
-  expect(output).not.toContain("oh=");
+  expect(output).not.toContain("kb=");
   expect(output).not.toContain("oe=");
 });
 

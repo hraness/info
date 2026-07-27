@@ -1,4 +1,0 @@
-interface:
-  display_name: "Refresh Oh"
-  short_description: "Refresh the graph and validate scoped context"
-  default_prompt: "Use $refresh-oh to refresh this knowledge base, review graph findings, validate any changed scope mappings, and run the final checks."

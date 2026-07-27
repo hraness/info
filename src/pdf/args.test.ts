@@ -24,7 +24,7 @@ describe("PDF CLI argument parsing", () => {
       "300mb",
       "--force",
       "--json",
-    ], { OH_PDF_OUTPUT: "vault/articles" })).toEqual({
+    ], { KB_PDF_OUTPUT: "vault/articles" })).toEqual({
       ok: true,
       value: {
         command: "capture",
@@ -63,7 +63,7 @@ describe("PDF CLI argument parsing", () => {
   test("rejects ambiguous paths, missing option values, and unsafe bounds", () => {
     expect(parsePdfArguments(["one.pdf", "two.pdf"])).toEqual({
       ok: false,
-      message: "oh pdf requires exactly one PDF path or public URL",
+      message: "kb pdf requires exactly one PDF path or public URL",
     });
     expect(parsePdfArguments(["document.pdf", "--slug"])).toEqual({
       ok: false,
@@ -88,7 +88,7 @@ describe("PDF CLI argument parsing", () => {
       value: {
         command: "capture",
         input: "https://arxiv.org/pdf/2507.09369",
-        outputBase: "oh/articles",
+        outputBase: "kb/articles",
         force: false,
         json: false,
         quiet: false,

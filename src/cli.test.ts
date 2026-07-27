@@ -57,7 +57,7 @@ function arrayProperty(
   return value as readonly unknown[];
 }
 
-describe("oh argument parsing", () => {
+describe("kb argument parsing", () => {
   test("delegates capture commands and rejects secret-shaped unknown values without echoing them", () => {
     expect(parseArguments(["clip", "https://example.com"])).toEqual({
       ok: true,
@@ -420,9 +420,9 @@ describe("oh argument parsing", () => {
   test("parses repository context lookup and agent mapping commands", () => {
     expect(parseArguments([
       "context",
-      "packages/oh/src/cli.ts",
+      "packages/kb/src/cli.ts",
       "--root",
-      "oh",
+      "kb",
       "--repo",
       ".",
       "--kind",
@@ -432,9 +432,9 @@ describe("oh argument parsing", () => {
       ok: true,
       value: {
         kind: "context",
-        root: "oh",
+        root: "kb",
         repository: ".",
-        target: "packages/oh/src/cli.ts",
+        target: "packages/kb/src/cli.ts",
         targetKind: "file",
         json: true,
       },
@@ -443,7 +443,7 @@ describe("oh argument parsing", () => {
       "agents",
       "audit",
       "--root",
-      "oh",
+      "kb",
       "--repo",
       ".",
     ])).toEqual({
@@ -451,7 +451,7 @@ describe("oh argument parsing", () => {
       value: {
         kind: "agents",
         action: "audit",
-        root: "oh",
+        root: "kb",
         repository: ".",
         json: false,
       },
@@ -459,13 +459,13 @@ describe("oh argument parsing", () => {
     expect(parseArguments([
       "agents",
       "identity",
-      "packages/oh",
+      "packages/kb",
       "--json",
     ])).toEqual({
       ok: true,
       value: {
         kind: "agent-identity",
-        scope: "packages/oh",
+        scope: "packages/kb",
         json: true,
       },
     });
@@ -513,9 +513,9 @@ describe("oh argument parsing", () => {
   });
 });
 
-describe("oh vault commands", () => {
+describe("kb vault commands", () => {
   test("initializes, refreshes, checks, graphs, and derives backlinks without editing notes", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-oh-cli-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-"));
     const vault = join(temporary, "vault");
     try {
       const initOutput = captureOutput();
@@ -597,7 +597,7 @@ describe("oh vault commands", () => {
   });
 
   test("authors notes and typed relationships, queries Datalog, and percolates evidence end to end", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-oh-cli-graph-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-graph-"));
     const vault = join(temporary, "vault");
     try {
       expect(await main(["init", vault], captureOutput().output)).toBe(0);
@@ -879,7 +879,7 @@ describe("oh vault commands", () => {
   });
 
   test("fails checks on authored relationship issues even when the catalog is optional", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-oh-cli-relations-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-relations-"));
     try {
       await writeFile(join(temporary, "index.md"), "# Index\n", "utf8");
       await mkdir(join(temporary, "notes"), { recursive: true });
@@ -927,13 +927,13 @@ describe("oh vault commands", () => {
   });
 
   test("sanitizes foreign Datalog cells and secrets in JSON output", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-oh-cli-json-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-json-"));
     try {
       await writeFile(join(temporary, "index.md"), "# Index\n", "utf8");
       const output = captureOutput();
       expect(await main([
         "datalog",
-        '[:find ?value :where [?entity ":oh/id" ?value]]',
+        '[:find ?value :where [?entity ":kb/id" ?value]]',
         "--root",
         temporary,
         "--json",
@@ -958,7 +958,7 @@ describe("oh vault commands", () => {
   });
 
   test("explains collision-safe concept IDs in terminal percolation output", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-oh-cli-concept-collision-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-concept-collision-"));
     try {
       await writeFile(join(temporary, "index.md"), "# Index\n", "utf8");
       await mkdir(join(temporary, "notes"), { recursive: true });
@@ -993,7 +993,7 @@ describe("oh vault commands", () => {
   });
 
   test("uses structure-only scans for graph queries and endpoint-scoped scans for percolation", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-oh-cli-scan-mode-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-scan-mode-"));
     try {
       await writeFile(join(temporary, "index.md"), "# Index\n", "utf8");
       await mkdir(join(temporary, "notes"), { recursive: true });
@@ -1159,7 +1159,7 @@ describe("oh vault commands", () => {
   });
 
   test("reports broken links as check failures and sanitizes thrown terminal text", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-oh-cli-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-"));
     try {
       await writeFile(join(temporary, "index.md"), "# Index\n", "utf8");
       await writeFile(join(temporary, "note.md"), "# Note\n\n[[missing]]\n", "utf8");
@@ -1193,7 +1193,7 @@ describe("oh vault commands", () => {
   });
 });
 
-describe("oh agent context commands", () => {
+describe("kb agent context commands", () => {
   test("emits the canonical non-mutating identity for a repository scope", async () => {
     const jsonOutput = captureOutput();
     expect(await main([
@@ -1207,7 +1207,7 @@ describe("oh agent context commands", () => {
       noteId: "scopes/packages-parser--94a91e4eddfa",
       notePath: "scopes/packages-parser--94a91e4eddfa.md",
       guidePath: "packages/parser/AGENTS.md",
-      marker: "<!-- oh:context scopes/packages-parser--94a91e4eddfa -->",
+      marker: "<!-- kb:context scopes/packages-parser--94a91e4eddfa -->",
     });
 
     const rootOutput = captureOutput();
@@ -1229,9 +1229,9 @@ describe("oh agent context commands", () => {
   });
 
   test("resolves inherited guides and reciprocal hubs without loading hub prose", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-oh-context-cli-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-context-cli-"));
     const repository = join(temporary, "repository");
-    const vault = join(repository, "oh");
+    const vault = join(repository, "kb");
     try {
       await mkdir(join(repository, "src"), { recursive: true });
       await mkdir(join(repository, "other"), { recursive: true });
@@ -1260,10 +1260,10 @@ describe("oh agent context commands", () => {
         "",
       ].join("\n"));
       await writeFile(join(vault, "index.md"), [
-        "# Oh",
+        "# KB",
         "",
-        "<!-- oh:catalog:start -->",
-        "<!-- oh:catalog:end -->",
+        "<!-- kb:catalog:start -->",
+        "<!-- kb:catalog:end -->",
         "",
       ].join("\n"));
       for (const [scope, title] of [[".", "Repository context"], ["src", "Source context"]] as const) {
@@ -1368,7 +1368,7 @@ describe("oh agent context commands", () => {
         "--repo",
         repository,
       ], brokenOutput.output)).toBe(3);
-      expect(brokenOutput.stdout()).toContain("missing its oh:context marker");
+      expect(brokenOutput.stdout()).toContain("missing its kb:context marker");
     } finally {
       await rm(temporary, { recursive: true, force: true });
     }

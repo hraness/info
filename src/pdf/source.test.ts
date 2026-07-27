@@ -26,7 +26,7 @@ describe("PDF source preparation", () => {
   });
 
   test("downloads a public PDF into a disposable private file and records redirects", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "oh-pdf-source-test-"));
+    const directory = mkdtempSync(join(tmpdir(), "kb-pdf-source-test-"));
     roots.push(directory);
     const source = await preparePdfSource("https://example.com/paper?token=secret-value&view=full", {
       timeoutMs: 8_000,

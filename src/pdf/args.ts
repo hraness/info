@@ -1,11 +1,11 @@
-export const pdfUsage = `oh pdf — save a local or public remote PDF as an auditable Markdown bundle
+export const pdfUsage = `kb pdf — save a local or public remote PDF as an auditable Markdown bundle
 
 Usage:
-  oh pdf <file-or-url> [--output <directory>] [--slug <slug>] [--annotations <json>] [--force] [--json]
-  oh pdf save <file-or-url> [capture options]
+  kb pdf <file-or-url> [--output <directory>] [--slug <slug>] [--annotations <json>] [--force] [--json]
+  kb pdf save <file-or-url> [capture options]
 
 Capture options:
-  --output <directory>          Bundle parent (default: OH_PDF_OUTPUT or oh/articles)
+  --output <directory>          Bundle parent (default: KB_PDF_OUTPUT or kb/articles)
   --slug <slug>                 Override the title-derived bundle name
   --annotations <json>         Optional hash-bound image interpretations from an agent
   --timeout-ms <milliseconds>  Per-tool timeout
@@ -93,7 +93,7 @@ function byteSize(value: string, name: string, maximum: number): number | string
     : `${name} must be between 1 byte and ${maximum} bytes`;
 }
 
-/** Parse the delegated `oh pdf` surface without touching the filesystem. */
+/** Parse the delegated `kb pdf` surface without touching the filesystem. */
 export function parsePdfArguments(
   rawArguments: readonly string[],
   environment: Readonly<Record<string, string | undefined>> = {},
@@ -107,7 +107,7 @@ export function parsePdfArguments(
 
   let cursor = rawArguments[0] === "save" || rawArguments[0] === "capture" ? 1 : 0;
   const positional: string[] = [];
-  let outputBase = environment.OH_PDF_OUTPUT ?? "oh/articles";
+  let outputBase = environment.KB_PDF_OUTPUT ?? "kb/articles";
   let slug: string | undefined;
   let interpretationsPath: string | undefined;
   let force = false;
@@ -172,7 +172,7 @@ export function parsePdfArguments(
 
   const input = positional[0];
   if (input === undefined || positional.length !== 1) {
-    return { ok: false, message: "oh pdf requires exactly one PDF path or public URL" };
+    return { ok: false, message: "kb pdf requires exactly one PDF path or public URL" };
   }
   if (input.length > 64 * 1024) {
     return { ok: false, message: "PDF input exceeds the 65536 code-unit limit" };

@@ -9,8 +9,8 @@ import {
   type Node,
 } from "yaml";
 
-export const catalogStart = "<!-- oh:catalog:start -->";
-export const catalogEnd = "<!-- oh:catalog:end -->";
+export const catalogStart = "<!-- kb:catalog:start -->";
+export const catalogEnd = "<!-- kb:catalog:end -->";
 
 export const MAX_ANALYZED_NOTES = 10_000;
 export const MAX_CONNECTION_OBSERVATIONS = 250_000;
@@ -1418,11 +1418,11 @@ export function replaceCatalog(indexContent: string, catalog: string): string {
   const end = indexContent.indexOf(catalogEnd);
   if (start === -1 && end === -1) return indexContent.trimEnd() + "\n\n" + catalog + "\n";
   if (start === -1 || end === -1 || end < start) {
-    throw new Error("oh/index.md has a malformed managed catalog boundary");
+    throw new Error("kb/index.md has a malformed managed catalog boundary");
   }
   if (indexContent.indexOf(catalogStart, start + catalogStart.length) !== -1
     || indexContent.indexOf(catalogEnd, end + catalogEnd.length) !== -1) {
-    throw new Error("oh/index.md has duplicate managed catalog boundaries");
+    throw new Error("kb/index.md has duplicate managed catalog boundaries");
   }
   return indexContent.slice(0, start) + catalog + indexContent.slice(end + catalogEnd.length);
 }

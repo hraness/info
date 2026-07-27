@@ -14,7 +14,7 @@ afterEach(() => {
 
 describe("vault initialization", () => {
   test("creates an agent-ready empty vault that passes graph checks", async () => {
-    const parent = mkdtempSync(join(tmpdir(), "hraness-oh-init-test-"));
+    const parent = mkdtempSync(join(tmpdir(), "hraness-kb-init-test-"));
     roots.push(parent);
     const root = join(parent, "knowledge");
     const result = await initVault(root);
@@ -30,9 +30,9 @@ describe("vault initialization", () => {
     const planGuide = readFileSync(join(root, "plans/AGENTS.md"), "utf8");
     const scopeGuide = readFileSync(join(root, "scopes/AGENTS.md"), "utf8");
     expect(rootGuide).toContain("# Guidelines");
-    expect(rootGuide).toContain("oh search");
-    expect(rootGuide).toContain("oh datalog");
-    expect(rootGuide).toContain("oh percolate");
+    expect(rootGuide).toContain("kb search");
+    expect(rootGuide).toContain("kb datalog");
+    expect(rootGuide).toContain("kb percolate");
     expect(rootGuide).toContain("--no-catalog");
     expect(rootGuide).toContain("type: concept");
     expect(rootGuide).toContain("relations");
@@ -40,12 +40,12 @@ describe("vault initialization", () => {
     expect(planGuide).toContain("verification");
     expect(planGuide).toContain("same file");
     expect(scopeGuide).toContain("type: agent-context");
-    expect(scopeGuide).toContain("oh agents identity");
-    expect(scopeGuide).toContain("oh agents check");
+    expect(scopeGuide).toContain("kb agents identity");
+    expect(scopeGuide).toContain("kb agents check");
   });
 
   test("refuses to merge into an existing directory", async () => {
-    const parent = mkdtempSync(join(tmpdir(), "hraness-oh-init-existing-test-"));
+    const parent = mkdtempSync(join(tmpdir(), "hraness-kb-init-existing-test-"));
     roots.push(parent);
     const root = join(parent, "knowledge");
     await initVault(root);

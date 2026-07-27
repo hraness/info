@@ -1,4 +1,0 @@
-interface:
-  display_name: "Save PDF to Oh"
-  short_description: "Convert PDFs into auditable Oh Markdown"
-  default_prompt: "Use $save-pdf-oh to convert this PDF into a faithful Markdown bundle with structured text, OCR, local images, and provenance."

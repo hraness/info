@@ -37,7 +37,7 @@ describe("platform and canonical URL detection", () => {
     ["https://mobile.twitter.com/user/status/1", "x"],
     ["https://redd.it/abc123", "reddit"],
     ["https://fb.com/story.php?id=1", "facebook"],
-    ["https://github.com/hraness/oh/issues/42", "github"],
+    ["https://github.com/hraness/kb/issues/42", "github"],
     ["https://meta.discourse.org/t/a-topic/12345", "discourse"],
     ["https://example.com/article", "generic"],
   ];

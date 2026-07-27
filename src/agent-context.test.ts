@@ -79,7 +79,7 @@ function issueKinds(issues: readonly AgentContextIssue[]): string[] {
 }
 
 function temporaryRepository(): string {
-  const root = mkdtempSync(join(tmpdir(), "hraness-oh-agent-context-"));
+  const root = mkdtempSync(join(tmpdir(), "hraness-kb-agent-context-"));
   temporaryRoots.push(root);
   return root;
 }
@@ -88,8 +88,8 @@ describe("repository scope identity", () => {
   test("normalizes POSIX and backslash scopes to one NFC identity", () => {
     expect(normalizeRepositoryScope(".")).toBe(".");
     expect(normalizeRepositoryScope("./")).toBe(".");
-    expect(normalizeRepositoryScope("packages\\oh//src/.")).
-      toBe("packages/oh/src");
+    expect(normalizeRepositoryScope("packages\\kb//src/.")).
+      toBe("packages/kb/src");
     expect(normalizeRepositoryScope("caf\u0065\u0301/components")).
       toBe("café/components");
   });
@@ -122,13 +122,13 @@ describe("repository scope identity", () => {
     const invalid = [
       "",
       " ",
-      "/packages/oh",
+      "/packages/kb",
       "\\\\server\\share",
-      "C:\\packages\\oh",
+      "C:\\packages\\kb",
       "../packages",
-      "packages/../oh",
-      "packages/\u0000/oh",
-      "packages/**/oh",
+      "packages/../kb",
+      "packages/\u0000/kb",
+      "packages/**/kb",
     ];
     for (const input of invalid) {
       expect(() => normalizeRepositoryScope(input)).toThrow(RepositoryScopeError);
@@ -138,7 +138,7 @@ describe("repository scope identity", () => {
 
 describe("agent-context markers", () => {
   test("round-trips the exact marker before headings", () => {
-    const noteId = agentContextNoteId("packages/oh");
+    const noteId = agentContextNoteId("packages/kb");
     const marker = formatAgentContextMarker(noteId);
     const parsed = parseAgentContextMarker(`${marker}\n# Contents\n`);
 
@@ -170,7 +170,7 @@ describe("agent-context markers", () => {
   test("distinguishes malformed, misplaced, and multiple markers", () => {
     const marker = agentContextMarkerForScope(".");
     const malformed = parseAgentContextMarker(
-      "<!--oh:context scopes/not-canonical -->\n# Contents\n",
+      "<!--kb:context scopes/not-canonical -->\n# Contents\n",
     );
     const misplaced = parseAgentContextMarker(`# Contents\n${marker}\n`);
     const multiple = parseAgentContextMarker(`${marker}\n${marker}\n# Contents\n`);
@@ -187,10 +187,10 @@ describe("agent-context markers", () => {
 describe("agent-context analysis", () => {
   test("accepts a canonical reciprocal mapping and an unmapped guide", () => {
     const analysis = analyzeAgentContexts(
-      [contextNote("."), contextNote("packages/oh")],
+      [contextNote("."), contextNote("packages/kb")],
       [
         guide("."),
-        guide("packages/oh"),
+        guide("packages/kb"),
         {
           path: "packages/AGENTS.md",
           source: "# Contents\n\n# Guidelines\n",
@@ -202,25 +202,25 @@ describe("agent-context analysis", () => {
     expect(analysis.contexts.map((context) => [context.scope, context.valid])).
       toEqual([
         [".", true],
-        ["packages/oh", true],
+        ["packages/kb", true],
       ]);
   });
 
   test("reports malformed, misplaced, and noncanonical context notes", () => {
     const outside = note(
       "notes/context.md",
-      { type: "agent-context", scope: "packages/oh" },
+      { type: "agent-context", scope: "packages/kb" },
     );
     const nonContext = note(
       "scopes/ordinary.md",
-      { type: "plan", scope: "packages/oh" },
+      { type: "plan", scope: "packages/kb" },
     );
     const malformedScope = note(
       "scopes/malformed.md",
-      { type: "agent-context", scope: ["packages/oh"] },
+      { type: "agent-context", scope: ["packages/kb"] },
     );
-    const noncanonical = contextNote("packages/oh", {
-      path: "scopes/oh.md",
+    const noncanonical = contextNote("packages/kb", {
+      path: "scopes/kb.md",
     });
     const analysis = analyzeAgentContexts([
       outside,
@@ -244,12 +244,12 @@ describe("agent-context analysis", () => {
 
   test("distinguishes duplicate, case-fold, and NFC scope collisions", () => {
     const duplicate = analyzeAgentContexts([
-      contextNote("packages/oh"),
-      contextNote("packages/oh"),
+      contextNote("packages/kb"),
+      contextNote("packages/kb"),
     ]);
     const caseFold = analyzeAgentContexts([
-      contextNote("Packages/Oh"),
-      contextNote("packages/oh"),
+      contextNote("Packages/KB"),
+      contextNote("packages/kb"),
     ]);
     const nfc = analyzeAgentContexts([
       contextNote("café"),
@@ -287,7 +287,7 @@ describe("agent-context analysis", () => {
       [root],
       [{
         path: "AGENTS.md",
-        source: "<!-- oh:context scopes/not-canonical -->\n# Contents\n",
+        source: "<!-- kb:context scopes/not-canonical -->\n# Contents\n",
       }],
     );
     expect(issueKinds(malformed.issues)).toContain("guide-marker-malformed");
@@ -356,13 +356,13 @@ describe("repository inspection", () => {
 
   test("reports a missing derived guide without inventing a mapping", async () => {
     const root = temporaryRepository();
-    mkdirSync(join(root, "packages", "oh"), { recursive: true });
+    mkdirSync(join(root, "packages", "kb"), { recursive: true });
 
     const inspection = await inspectAgentContextRepository(
-      [contextNote("packages/oh")],
+      [contextNote("packages/kb")],
       {
         repositoryRoot: root,
-        target: "packages/oh",
+        target: "packages/kb",
         targetKind: "directory",
       },
     );

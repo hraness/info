@@ -477,7 +477,7 @@ export async function runCapture(
     captureVideoContext: dependencies.captureVideoContext ?? captureVideoContext,
     now: dependencies.now ?? (() => new Date()),
   };
-  const browserTemporaryDirectory = mkdtempSync(join(tmpdir(), "hraness-oh-browser-"));
+  const browserTemporaryDirectory = mkdtempSync(join(tmpdir(), "hraness-kb-browser-"));
   chmodSync(browserTemporaryDirectory, 0o700);
 
   try {

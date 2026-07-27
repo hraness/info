@@ -300,7 +300,7 @@ describe("Markdown rewriting", () => {
 
   test("strips opaque query credentials from failed remote image links", () => {
     const output = rewriteContent(
-      "![private](https://cdn.example/image.jpg?oh=OPAQUE_SECRET&oe=DEADLINE#fragment)",
+      "![private](https://cdn.example/image.jpg?kb=OPAQUE_SECRET&oe=DEADLINE#fragment)",
       new URL("https://example.com/post"),
       new Map(),
     );

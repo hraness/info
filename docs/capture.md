@@ -1,33 +1,33 @@
 # Capture web content
 
-`oh clip` saves public and signed-in web content as an auditable Markdown bundle. It combines bounded structured adapters, HTTP extraction, browser rendering, localized assets, and explicit completeness metadata.
+`kb clip` saves public and signed-in web content as an auditable Markdown bundle. It combines bounded structured adapters, HTTP extraction, browser rendering, localized assets, and explicit completeness metadata.
 
 ## Check local capabilities
 
 Run the diagnostics before using browser state, PDF ingestion, or video capture:
 
 ```sh
-oh doctor
-oh adapters
+kb doctor
+kb adapters
 ```
 
-`oh doctor --json` reports the installed runtime, extraction dependencies,
+`kb doctor --json` reports the installed runtime, extraction dependencies,
 browser support, profile display names, yt-dlp, ffmpeg, Poppler
 (`pdfinfo` and `pdftohtml`), and Tesseract. The Poppler pair is required by
-`oh pdf`; Tesseract adds local OCR for scans and screenshots.
-`oh adapters --json` returns the current platform capability matrix.
+`kb pdf`; Tesseract adds local OCR for scans and screenshots.
+`kb adapters --json` returns the current platform capability matrix.
 
 ## Capture or inspect a page
 
 ```sh
-oh clip https://example.com/article
-oh inspect https://example.com/article
-oh inspect https://example.com/article --json
+kb clip https://example.com/article
+kb inspect https://example.com/article
+kb inspect https://example.com/article --json
 ```
 
 The default route tries stable public structured data when available, bounded HTTP extraction, and a rendered browser when the platform or result requires one. Inspection returns the selected Markdown and capture report without writing artifacts.
 
-By default, a capture writes `oh/articles/<slug>/`:
+By default, a capture writes `kb/articles/<slug>/`:
 
 ```text
 <slug>/
@@ -39,23 +39,23 @@ By default, a capture writes `oh/articles/<slug>/`:
 
 The Markdown records source and capture metadata. `capture.json` records the acquisition attempts, selected extractor, scope, status, item counts, warnings, asset hashes, and requested artifact outcomes. Writes stage beside the target and install with an atomic rename. `--force` replaces only a compatible clip-owned bundle and restores the previous bundle if installation fails.
 
-Set `OH_CLIP_OUTPUT` to change the default output root, or pass `--output <directory>` for one command. Set `OH_CLIP_USER_AGENT` or pass `--user-agent <value>` to override the default request user agent.
+Set `KB_CLIP_OUTPUT` to change the default output root, or pass `--output <directory>` for one command. Set `KB_CLIP_USER_AGENT` or pass `--user-agent <value>` to override the default request user agent.
 
 ## Select acquisition and scope
 
 ```sh
-oh clip https://example.com/article --mode http
-oh clip https://example.com/application --mode browser
-oh clip https://example.com/post --scope page
-oh clip https://example.com/post --scope thread
-oh clip https://example.com/discussion --scope comments
+kb clip https://example.com/article --mode http
+kb clip https://example.com/application --mode browser
+kb clip https://example.com/post --scope page
+kb clip https://example.com/post --scope thread
+kb clip https://example.com/discussion --scope comments
 ```
 
 `auto` is the normal acquisition mode. `http` disables browser fallback. `browser` requires rendered state. Saved HTML can be imported without browser automation:
 
 ```sh
-oh clip https://example.com/article --html "$OH_SAVED_HTML"
-oh clip https://example.com/article --html - < page.html
+kb clip https://example.com/article --html "$KB_SAVED_HTML"
+kb clip https://example.com/article --html - < page.html
 ```
 
 Default resource bounds are 30 seconds per request, process, or extraction operation; 500 scoped items; depth 16; 25 MB of HTML; 100 MB per asset; and 500 MB across assets. Browser observation also has fixed DOM and scroll ceilings. Reaching a bound is recorded and can downgrade a result to `partial`.
@@ -63,12 +63,12 @@ Default resource bounds are 30 seconds per request, process, or extraction opera
 ## Capture images, media, and evidence
 
 ```sh
-oh clip https://example.com/article --media none
-oh clip https://example.com/article --media images
-oh clip https://example.com/video --media all
-oh clip https://example.com/article --evidence source
-oh clip https://example.com/article --evidence screenshot
-oh clip https://example.com/article --evidence all
+kb clip https://example.com/article --media none
+kb clip https://example.com/article --media images
+kb clip https://example.com/video --media all
+kb clip https://example.com/article --evidence source
+kb clip https://example.com/article --evidence screenshot
+kb clip https://example.com/article --evidence all
 ```
 
 Image downloads are signature-checked, content-addressed, byte-bounded, and
@@ -89,8 +89,8 @@ Source evidence is sanitized into inert HTML with credential-shaped values redac
 If the page is already open, read the current tab without navigating it:
 
 ```sh
-oh clip current --browser-live
-oh clip current --cdp 9222
+kb clip current --browser-live
+kb clip current --cdp 9222
 ```
 
 For `--browser-live`, first enable Chrome's local debugging connection at `chrome://inspect/#remote-debugging` (Chrome 144+). If Chrome was launched with an explicit loopback debugging port, pass that numeric port to `--cdp` instead.
@@ -98,14 +98,14 @@ For `--browser-live`, first enable Chrome's local debugging connection at `chrom
 To open a URL with existing browser state, select a profile name or path. Path-backed profiles run from a temporary copy, so the source profile is unchanged:
 
 ```sh
-oh clip https://example.com/member/article --browser-profile "$OH_CAPTURE_PROFILE"
+kb clip https://example.com/member/article --browser-profile "$KB_CAPTURE_PROFILE"
 ```
 
 Cookie-backed HTTP capture is useful when the page does not require local storage, IndexedDB, or other browser-only state:
 
 ```sh
-oh clip https://example.com/member/article --cookie-source chrome --cookie-profile "Default"
-oh clip https://example.com/member/article --cookies-file "$OH_COOKIES_FILE"
+kb clip https://example.com/member/article --cookie-source chrome --cookie-profile "Default"
+kb clip https://example.com/member/article --cookies-file "$KB_COOKIES_FILE"
 ```
 
 Choose at most one browser session and one cookie input. A browser session may use a separate cookie input for later asset or media downloads because attached browser state is not exported.
@@ -142,4 +142,4 @@ A `complete` or `partial` capture exits with status 0. Authentication, blocked, 
   applications use rendered or saved-HTML capture. They do not gain a
   trustworthy item tree without a dedicated adapter.
 
-Platform markup and endpoints change. Run `oh adapters` for the installed version's current claims.
+Platform markup and endpoints change. Run `kb adapters` for the installed version's current claims.

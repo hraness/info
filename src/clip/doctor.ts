@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 
 import { isolatedAgentBrowserEnvironment } from "./acquire.js";
 import { BoundedByteBuffer } from "./bounded-byte-buffer.js";
-import { findOhPackageRoot } from "./package-root.js";
+import { findKbPackageRoot } from "./package-root.js";
 import type { Platform } from "./platforms.js";
 
 export const expectedBunVersion = "1.3.14" as const;
@@ -337,7 +337,7 @@ async function inspectAgentBrowser(
   if (agentBrowserDirectory === null) return { deriveClient: false, profiles: [] };
   const executable = join(agentBrowserDirectory, "bin", "agent-browser.js");
   if (!exists(executable)) return { deriveClient: false, profiles: [] };
-  const directory = mkdtempSync(join(tmpdir(), "hraness-oh-doctor-"));
+  const directory = mkdtempSync(join(tmpdir(), "hraness-kb-doctor-"));
   const socketRoot = process.platform === "win32" ? tmpdir() : "/tmp";
   const socketDirectory = mkdtempSync(join(socketRoot, "jc-ab-doctor-"));
   chmodSync(directory, 0o700);
@@ -388,7 +388,7 @@ async function inspectAgentBrowser(
 
 /** Inspect local clipping capabilities without reading cookies, browser databases, or the system keychain. */
 export async function inspectClipEnvironment(options: DoctorOptions = {}): Promise<DoctorReport> {
-  const packageRoot = resolve(options.packageRoot ?? findOhPackageRoot());
+  const packageRoot = resolve(options.packageRoot ?? findKbPackageRoot());
   const homeDirectory = options.homeDirectory ?? homedir();
   const platform = options.platform ?? process.platform;
   const exists = options.exists ?? existsSync;
@@ -489,9 +489,9 @@ export async function inspectClipEnvironment(options: DoctorOptions = {}): Promi
   }
   for (const dependency of dependencies) {
     if (dependency.status === "unavailable") {
-      warnings.push(`${dependency.name} ${dependency.expectedVersion} is not installed; reinstall @hraness/oh with Bun.`);
+      warnings.push(`${dependency.name} ${dependency.expectedVersion} is not installed; reinstall @hraness/kb with Bun.`);
     } else if (dependency.status === "partial") {
-      warnings.push(`${dependency.name} must resolve to ${dependency.expectedVersion} for this oh release.`);
+      warnings.push(`${dependency.name} must resolve to ${dependency.expectedVersion} for this kb release.`);
     }
   }
   if (!agentBrowser.deriveClient) {
@@ -515,14 +515,14 @@ export async function inspectClipEnvironment(options: DoctorOptions = {}): Promi
       ...(pdfinfoPath === null ? ["pdfinfo"] : []),
       ...(pdftohtmlPath === null ? ["pdftohtml"] : []),
     ];
-    warnings.push(`Install Poppler's ${missing.join(" and ")} command${missing.length === 1 ? "" : "s"}; oh pdf requires both pdfinfo and pdftohtml.`);
+    warnings.push(`Install Poppler's ${missing.join(" and ")} command${missing.length === 1 ? "" : "s"}; kb pdf requires both pdfinfo and pdftohtml.`);
   } else if (pdfinfoVersion === null || pdftohtmlVersion === null) {
-    warnings.push("Poppler was found, but a PDF tool version could not be verified; oh pdf can attempt ingestion with a degraded tool report.");
+    warnings.push("Poppler was found, but a PDF tool version could not be verified; kb pdf can attempt ingestion with a degraded tool report.");
   }
   if (tesseractPath === null) {
-    warnings.push("Install Tesseract to transcribe text in scans and screenshots; oh pdf still preserves native text and images without OCR.");
+    warnings.push("Install Tesseract to transcribe text in scans and screenshots; kb pdf still preserves native text and images without OCR.");
   } else if (tesseractVersion === null) {
-    warnings.push("Tesseract was found, but its version could not be verified; oh pdf can attempt OCR with a degraded tool report.");
+    warnings.push("Tesseract was found, but its version could not be verified; kb pdf can attempt OCR with a degraded tool report.");
   }
 
   return {
@@ -553,7 +553,7 @@ function versionSummary(report: DependencyReport): string {
 /** Render a stable, secret-free report suitable for a terminal. */
 export function renderDoctorReport(report: DoctorReport): string {
   const lines = [
-    "Oh ingestion environment",
+    "KB ingestion environment",
     `Bun: ${report.bun.status} (${report.bun.currentVersion}; expected ${report.bun.expectedVersion})`,
     ...report.dependencies.map(versionSummary),
     `agent-browser derive-client: ${report.deriveClient.status}`,

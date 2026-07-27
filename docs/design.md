@@ -1,6 +1,6 @@
 # Design
 
-hraness/oh treats a knowledge base as durable Markdown plus replaceable views.
+hraness/kb treats a knowledge base as durable Markdown plus replaceable views.
 A vault must remain useful when the CLI is absent, and a capture must remain
 inspectable when the original page changes or disappears. Exact graph,
 metadata, and Datalog views are deterministic; semantic search is optional
@@ -10,7 +10,7 @@ derived state that can be deleted and rebuilt.
 
 The vault is an ordinary directory of Obsidian-compatible Markdown, suitable for a text editor, Git, and standard filesystem tools. Frontmatter, headings, prose, and wikilinks are owned content. Refresh, check, graph navigation, metadata queries, and capture require no hosted account or model. A local QMD index is an optional cache for semantic recall, never the authoritative copy of a note.
 
-`oh init` creates a small set of authority boundaries:
+`kb init` creates a small set of authority boundaries:
 
 - `articles/` contains captured sources and their local artifacts.
 - `notes/` contains maintained concepts, entities, comparisons, and syntheses.
@@ -58,7 +58,7 @@ directory changes its scope and therefore its hub identity.
 Derive the exact tuple without writing files:
 
 ```sh
-oh agents identity src --json
+kb agents identity src --json
 ```
 
 The command returns the normalized scope, extensionless note ID, Markdown path,
@@ -69,7 +69,7 @@ The guide points back to the extensionless note ID with one exact marker before
 its headings:
 
 ```md
-<!-- oh:context scopes/src--25a6634263c1 -->
+<!-- kb:context scopes/src--25a6634263c1 -->
 # Contents
 
 - ...
@@ -83,17 +83,17 @@ Mappings are reciprocal: a hub requires the marker in the `AGENTS.md` at its
 exact scope, and a marker requires that canonical hub. A guide without a marker
 is valid and remains fully normative.
 
-`oh context <repository-path> --root <vault> --repo <repository>` returns the
+`kb context <repository-path> --root <vault> --repo <repository>` returns the
 applicable guides from root to nearest and verified hubs from nearest to root.
 The text view includes hub summaries, not hub bodies. Open the useful hub, then
-use `oh links`, `oh backlinks`, `oh list`, or `oh search` for a bounded
+use `kb links`, `kb backlinks`, `kb list`, or `kb search` for a bounded
 expansion. `--kind auto` uses filesystem state and a conservative path hint;
 `--kind file` or `--kind directory` makes the target interpretation explicit.
 
-`oh agents check` verifies canonical IDs, `type` and `scope` metadata,
+`kb agents check` verifies canonical IDs, `type` and `scope` metadata,
 duplicate, case-fold, and Unicode-normalization collisions, repository
 confinement, real scope directories and regular guide files, exact reciprocal
-markers, and the required guide shape. `oh agents audit` runs the same gate
+markers, and the required guide shape. `kb agents audit` runs the same gate
 and adds deterministic measurements for every guide and section, inherited
 chains, long guideline bullets, and exact duplicate rules. Those measurements
 identify review candidates. Length is not a correctness test, and moving a
@@ -171,23 +171,23 @@ typed metadata-leaf entities with stable paths. DataScript's numeric entity IDs
 never appear in the public API or command output.
 
 The adapter queries an EAV relation with a fixed vocabulary. Every entity has
-`:oh/id` and `:oh/kind`; notes use `:note/*`, metadata leaves use
+`:kb/id` and `:kb/kind`; notes use `:note/*`, metadata leaves use
 `:metadata/*`, and edges use `:edge/*`. Conventional EDN attribute keywords are
 normalized only when they match that owned vocabulary, so quoted strings and
 foreign query inputs keep their literal meaning. Edge endpoints are semantic
 entity references; join them through `:note/id` to return canonical note IDs.
 
-`oh datalog` provides bounded joins, aggregates, and recursive rules over that
-projection. `oh percolate` runs named, read-only rules that surface repeated
+`kb datalog` provides bounded joins, aggregates, and recursive rules over that
+projection. `kb percolate` runs named, read-only rules that surface repeated
 tags without concept notes, unconnected shared-concept neighborhoods, exact
 unlinked mentions, and relationship-hygiene findings. The output cites the
 authored facts that caused each candidate. A person or agent decides whether to
-run `oh note create` or `oh relation add`.
+run `kb note create` or `kb relation add`.
 
 Projection spends its fact budget while it walks metadata, rather than
 materializing an unbounded nested tree and checking afterward. Query evaluation
 runs in a disposable one-shot subprocess with a 2-second default deadline and
-a 5-second absolute deadline. Before IPC, Oh caps the projection at 250,000
+a 5-second absolute deadline. Before IPC, KB caps the projection at 250,000
 facts and validates a 16 MiB snapshot, 100,000 input values, 64 KiB scalar
 values, and 4 MiB of extra inputs. The child and parent both enforce 10,000
 rows, 100,000 result values, 64 KiB scalar values, and a 4 MiB result transfer.
@@ -204,18 +204,18 @@ an explicit, bounded `--rules-file`. This keeps shell quoting small and makes
 the rule program independently reviewable. DataScript evaluates rules
 top-down, so a rule over graph edges that may cycle carries and decrements an
 explicit remaining-depth argument. An unbounded recursive rule over a cycle is
-contained by the subprocess deadline; the focused `oh links` command supplies
+contained by the subprocess deadline; the focused `kb links` command supplies
 cycle-safe bounded traversal without a custom rule.
 
-Commands that only need links and typed relationships (`oh datalog` and
-`oh relation list`) skip quadratic prose-mention discovery. A scoped
-`oh percolate <note>` considers only mention pairs touching the resolved note;
+Commands that only need links and typed relationships (`kb datalog` and
+`kb relation list`) skip quadratic prose-mention discovery. A scoped
+`kb percolate <note>` considers only mention pairs touching the resolved note;
 vault-wide percolation and ordinary graph maintenance use explicit pair and
 result budgets. Scans reject more than 10,000 notes before parsing, then bound
 each note at 16 MiB of valid UTF-8 and the vault at 256 MiB. These are package
 ceilings; callers may select lower operation-specific limits.
 
-Oh never commits a DataScript database, serialized snapshot, generated fact
+KB never commits a DataScript database, serialized snapshot, generated fact
 file, or event log. The JavaScript engine serializes a complete database rather
 than providing incremental durable storage, and a shared snapshot would become
 a repository-wide merge hotspot. Rebuilding from Markdown keeps the database
@@ -226,18 +226,18 @@ on any mismatch.
 
 ## Refresh owns one region
 
-`oh refresh` scans the vault, renders a sorted catalog, and atomically replaces only the region between the catalog markers in the configured index note (`index.md` by default). Text outside those markers belongs to the author. If markers are malformed or duplicated, refresh fails instead of guessing.
+`kb refresh` scans the vault, renders a sorted catalog, and atomically replaces only the region between the catalog markers in the configured index note (`index.md` by default). Text outside those markers belongs to the author. If markers are malformed or duplicated, refresh fails instead of guessing.
 
-`oh check` computes the expected catalog and graph policy without writing. It
+`kb check` computes the expected catalog and graph policy without writing. It
 fails when the managed region is stale or required graph invariants do not
-hold. `oh check --no-catalog` applies the graph gate without requiring the
+hold. `kb check --no-catalog` applies the graph gate without requiring the
 shared catalog to be current. Parallel edit lanes use that mode while touching
 their owned notes; the integrating agent performs one final refresh and normal
 check. This confines the only generated Markdown hotspot to integration.
 
-`oh graph` exposes the scan as a human-readable or structured report.
-`oh backlinks` and `oh relation list` use the same identities to retrieve
-incoming links and typed assertions. `oh links` traverses both kinds of authored
+`kb graph` exposes the scan as a human-readable or structured report.
+`kb backlinks` and `kb relation list` use the same identities to retrieve
+incoming links and typed assertions. `kb links` traverses both kinds of authored
 edge to a bounded depth and node count, reporting when a high-degree
 neighborhood reaches the cap. There is no second graph state to synchronize.
 
@@ -251,17 +251,17 @@ merge mechanism.
 
 Frontmatter is parsed as typed, nested data rather than flattened strings. Scalars retain their string, number, boolean, or null type; arrays and objects retain their structure. Tags from frontmatter are normalized for matching while the original metadata remains available in structured output.
 
-`oh list` filters that authored state by nested dotted paths, field existence, or tags, then sorts by title, path, graph counts, or nested metadata. Repeated filters are conjunctive. Missing sort values are placed last and ties are stable, so the same vault and query produce the same order.
+`kb list` filters that authored state by nested dotted paths, field existence, or tags, then sorts by title, path, graph counts, or nested metadata. Repeated filters are conjunctive. Missing sort values are placed last and ties are stable, so the same vault and query produce the same order.
 
 Metadata is useful for exact questions such as “which implementation plans are in progress?” It is not inferred from prose and the tool does not invent tags to improve retrieval. Authors and agents can evolve conventions in the vault's scoped `AGENTS.md` files without migrating to a package-owned schema.
 
 ## Semantic recall is optional derived state
 
-`oh search` uses [QMD](https://github.com/tobi/qmd) for local retrieval. Semantic mode is the default and uses QMD 2.5.3's recommended compact EmbeddingGemma model. Keyword mode uses QMD's local full-text index without embeddings. The first semantic index or query downloads the embedding model; later runs incrementally update only changed Markdown.
+`kb search` uses [QMD](https://github.com/tobi/qmd) for local retrieval. Semantic mode is the default and uses QMD 2.5.3's recommended compact EmbeddingGemma model. Keyword mode uses QMD's local full-text index without embeddings. The first semantic index or query downloads the embedding model; later runs incrementally update only changed Markdown.
 
-Each vault gets a path-derived SQLite cache under the user's cache directory unless `--database` selects another file. `index.md` and every `AGENTS.md` are excluded because they are navigation and always-loaded instructions rather than knowledge records. Scope hubs remain ordinary Markdown, so QMD indexes their rationale and evidence like any other note. The cache may be removed at any time and recreated with `oh index`.
+Each vault gets a path-derived SQLite cache under the user's cache directory unless `--database` selects another file. `index.md` and every `AGENTS.md` are excluded because they are navigation and always-loaded instructions rather than knowledge records. Scope hubs remain ordinary Markdown, so QMD indexes their rationale and evidence like any other note. The cache may be removed at any time and recreated with `kb index`.
 
-Search results are joined back to a live vault scan, so each hit carries current typed metadata, tags, contextual link counts, and backlinks. Files outside the requested vault and stale indexed identities are discarded. A similarity score is a discovery aid, not a graph edge, a citation, or evidence that the result is true. Use `oh list` for exact metadata, `oh links` for authored relationships, and `oh search` when the same concept may be expressed in different words.
+Search results are joined back to a live vault scan, so each hit carries current typed metadata, tags, contextual link counts, and backlinks. Files outside the requested vault and stale indexed identities are discarded. A similarity score is a discovery aid, not a graph edge, a citation, or evidence that the result is true. Use `kb list` for exact metadata, `kb links` for authored relationships, and `kb search` when the same concept may be expressed in different words.
 
 ## Capture preserves an audit trail
 
@@ -304,7 +304,7 @@ URLs, redirects, DNS answers, response bodies, browser pages, cookies, subproces
 - Active source evidence is converted to inert HTML with credential-shaped values redacted.
 - Bundle paths are owned, staged beside the target, and installed by atomic rename; forced replacement requires a compatible manifest and rollback.
 
-Live or CDP browser attachment keeps the browser's existing network stack and signed-in state. `oh clip current` reads the active tab without navigating or interacting with it and leaves the browser open. URL-based attached capture may navigate that tab and scroll within the configured bounds, taking bounded observations as content is rendered. Screenshots are also different from sanitized source evidence because private content can remain visible in pixels.
+Live or CDP browser attachment keeps the browser's existing network stack and signed-in state. `kb clip current` reads the active tab without navigating or interacting with it and leaves the browser open. URL-based attached capture may navigate that tab and scroll within the configured bounds, taking bounded observations as content is rendered. Screenshots are also different from sanitized source evidence because private content can remain visible in pixels.
 
 These boundaries are not entitlement mechanisms. Capture does not bypass authentication, access controls, paywalls, CAPTCHAs, rate limits, DRM, or platform policy.
 
@@ -320,7 +320,7 @@ initialize its native runtime or model.
 
 [Defuddle](https://github.com/kepano/defuddle) performs article extraction. [agent-browser](https://github.com/vercel-labs/agent-browser) provides optional rendered acquisition. The pinned [Sweet Cookie safety fork](https://github.com/hraness/sweet-cookie) supports explicit browser-cookie import while retaining host-only scope and rejecting partitioned or container-scoped state that the capture lanes cannot replay faithfully.
 
-[yt-dlp](https://github.com/yt-dlp/yt-dlp) and [FFmpeg](https://ffmpeg.org) remain optional because only full audio or video localization needs them. `oh doctor` reports what is installed without probing cookie stores, and `oh adapters` reports the installed platform claims. A missing optional capability narrows the available route; it does not change the storage or graph model.
+[yt-dlp](https://github.com/yt-dlp/yt-dlp) and [FFmpeg](https://ffmpeg.org) remain optional because only full audio or video localization needs them. `kb doctor` reports what is installed without probing cookie stores, and `kb adapters` reports the installed platform claims. A missing optional capability narrows the available route; it does not change the storage or graph model.
 
 ## Extension boundaries
 
@@ -329,5 +329,5 @@ New platform adapters should improve the strength of a capture claim, not merely
 New graph policy should remain a pure function of vault content and explicit configuration. Derived reports may guide an agent or person, but the tool should not silently mutate authored prose. This keeps automation reviewable and lets users replace any analysis layer without migrating their notes.
 
 Repository context follows the same separation. The CLI reads the repository
-and vault as development inputs, but no application needs to import Oh or
+and vault as development inputs, but no application needs to import KB or
 read a scope hub at runtime.

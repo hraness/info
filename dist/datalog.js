@@ -17,8 +17,8 @@ import {
   buildDatalogSnapshot,
   datalogWorkerUrl,
   queryDatalog
-} from "./index-w2b0xwx3.js";
-import"./index-9b89cmna.js";
+} from "./index-z3197chz.js";
+import"./index-gp8ppyv5.js";
 export {
   queryDatalog,
   datalogWorkerUrl,

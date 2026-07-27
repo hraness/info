@@ -1,0 +1,4 @@
+interface:
+  display_name: "Save URL to KB"
+  short_description: "Save URLs and signed-in pages to a KB vault"
+  default_prompt: "Use $save-url-kb to save this URL or current signed-in page into the knowledge base and report completeness."

@@ -47,7 +47,7 @@ async function fixture(): Promise<{
   readonly root: string;
   readonly cache: string;
 }> {
-  const base = await mkdtemp(join(tmpdir(), "oh-authoring-test-"));
+  const base = await mkdtemp(join(tmpdir(), "kb-authoring-test-"));
   fixtures.push(base);
   const root = join(base, "vault");
   const cache = join(base, "cache");
@@ -530,7 +530,7 @@ describe("single-note authoring", () => {
       .filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });
 
-  test("does not overwrite a non-Oh replacement after the final optimistic read", async () => {
+  test("does not overwrite a non-KB replacement after the final optimistic read", async () => {
     const { root, cache } = await fixture();
     const sourcePath = await writeNote(root, "notes/source");
     await writeNote(root, "notes/target");

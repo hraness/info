@@ -33,7 +33,7 @@ async function fixture(): Promise<{
   readonly vault: string;
   readonly cache: string;
 }> {
-  const base = await mkdtemp(join(tmpdir(), "oh-note-lock-test-"));
+  const base = await mkdtemp(join(tmpdir(), "kb-note-lock-test-"));
   fixtures.push(base);
   const vault = join(base, "vault");
   const cache = join(base, "cache");

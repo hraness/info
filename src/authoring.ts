@@ -257,7 +257,7 @@ function exactPredicate(value: string): string {
 
 function requireRevision(value: string): NoteRevision {
   if (!NOTE_REVISION_PATTERN.test(value)) {
-    throw new TypeError("expectedRevision is not an Oh note revision");
+    throw new TypeError("expectedRevision is not a KB note revision");
   }
   return value as NoteRevision;
 }

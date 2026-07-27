@@ -23,7 +23,7 @@ import {
 } from "./browser-profiles.js";
 
 test("clones a browser profile without caches, locks, or symbolic links", () => {
-  const directory = mkdtempSync(join(tmpdir(), "oh-profile-clone-"));
+  const directory = mkdtempSync(join(tmpdir(), "kb-profile-clone-"));
   chmodSync(directory, 0o700);
   try {
     const source = join(directory, "source");
@@ -49,7 +49,7 @@ test("clones a browser profile without caches, locks, or symbolic links", () => 
 });
 
 test("maps a selected Chromium profile into an isolated Default user-data copy", () => {
-  const directory = mkdtempSync(join(tmpdir(), "oh-chromium-profile-clone-"));
+  const directory = mkdtempSync(join(tmpdir(), "kb-chromium-profile-clone-"));
   chmodSync(directory, 0o700);
   try {
     const userData = join(directory, "Arc User Data");
@@ -88,7 +88,7 @@ test("maps a selected Chromium profile into an isolated Default user-data copy",
 });
 
 test("prefers a selected profile's parent Local State over nested user-data decoys", () => {
-  const directory = mkdtempSync(join(tmpdir(), "oh-chromium-selected-profile-clone-"));
+  const directory = mkdtempSync(join(tmpdir(), "kb-chromium-selected-profile-clone-"));
   chmodSync(directory, 0o700);
   try {
     const userData = join(directory, "Arc User Data");
@@ -126,7 +126,7 @@ test("prefers a selected profile's parent Local State over nested user-data deco
 });
 
 test("refuses a Chromium user-data root while its browser process lock is present", () => {
-  const directory = mkdtempSync(join(tmpdir(), "oh-chromium-active-profile-clone-"));
+  const directory = mkdtempSync(join(tmpdir(), "kb-chromium-active-profile-clone-"));
   chmodSync(directory, 0o700);
   try {
     const userData = join(directory, "Arc User Data");
@@ -148,7 +148,7 @@ test("refuses a Chromium user-data root while its browser process lock is presen
 });
 
 test("maps a Chromium user-data root to its isolated Default profile", () => {
-  const directory = mkdtempSync(join(tmpdir(), "oh-chromium-root-clone-"));
+  const directory = mkdtempSync(join(tmpdir(), "kb-chromium-root-clone-"));
   chmodSync(directory, 0o700);
   try {
     const userData = join(directory, "User Data");
@@ -175,7 +175,7 @@ test("maps a Chromium user-data root to its isolated Default profile", () => {
 });
 
 test("removes incomplete profile copies and rejects linked or oversized state", () => {
-  const directory = mkdtempSync(join(tmpdir(), "oh-profile-failure-"));
+  const directory = mkdtempSync(join(tmpdir(), "kb-profile-failure-"));
   chmodSync(directory, 0o700);
   try {
     const source = join(directory, "source");
@@ -202,7 +202,7 @@ test("removes incomplete profile copies and rejects linked or oversized state", 
 });
 
 test("distinguishes safe named profiles from path-backed profiles", () => {
-  const directory = mkdtempSync(join(tmpdir(), "oh-profile-path-"));
+  const directory = mkdtempSync(join(tmpdir(), "kb-profile-path-"));
   try {
     const source = join(directory, "Default");
     mkdirSync(source);

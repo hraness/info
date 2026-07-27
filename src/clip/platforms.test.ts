@@ -47,9 +47,9 @@ describe("platform URL classification", () => {
     ["https://web.whatsapp.com/", "whatsapp"],
     ["https://www.youtube.com/watch?v=abc123", "youtube"],
     ["https://youtu.be/abc123?t=10", "youtube"],
-    ["https://github.com/hraness/oh/issues/42#issuecomment-1", "github"],
-    ["https://github.com/hraness/oh/pull/43/files", "github"],
-    ["https://github.com/hraness/oh/discussions/44", "github"],
+    ["https://github.com/hraness/kb/issues/42#issuecomment-1", "github"],
+    ["https://github.com/hraness/kb/pull/43/files", "github"],
+    ["https://github.com/hraness/kb/discussions/44", "github"],
     ["https://meta.discourse.org/t/a-topic/12345/2", "discourse"],
     ["https://discuss.example.com/t/12345", "discourse"],
     ["https://example.com/t/a-product/12345", "generic"],
@@ -74,10 +74,10 @@ describe("platform URL classification", () => {
       platform: "threads",
       contentId: "ABC123",
     });
-    expect(classifyPlatformUrl("https://github.com/hraness/oh/pull/43/files")).toMatchObject({
+    expect(classifyPlatformUrl("https://github.com/hraness/kb/pull/43/files")).toMatchObject({
       platform: "github",
       owner: "hraness",
-      repository: "oh",
+      repository: "kb",
       contentKind: "pull-request",
       contentId: "43",
     });
@@ -86,7 +86,7 @@ describe("platform URL classification", () => {
       topicId: "12345",
     });
     expect(classifyPlatformUrl("https://x.com.evil.example/alice/status/123")?.platform).toBe("generic");
-    expect(classifyPlatformUrl("https://github.com.evil.example/hraness/oh/issues/42")?.platform).toBe("generic");
+    expect(classifyPlatformUrl("https://github.com.evil.example/hraness/kb/issues/42")?.platform).toBe("generic");
     expect(classifyPlatformUrl("https://example.com/t/a-topic/12345")?.platform).toBe("generic");
     expect(classifyPlatformUrl("https://example.com/topics/a-topic/12345")?.platform).toBe("generic");
     expect(classifyPlatformUrl("javascript:alert(1)")).toBeNull();

@@ -12,7 +12,7 @@ function isPackageManifest(value: unknown): value is PackageManifest {
 }
 
 /** Find this package in either its source tree or compiled `dist` layout. */
-export function findOhPackageRoot(
+export function findKbPackageRoot(
   startDirectory = import.meta.dir,
   dependencies: {
     readonly exists?: (path: string) => boolean;
@@ -30,7 +30,7 @@ export function findOhPackageRoot(
         if (
           isPackageManifest(parsed)
           && typeof parsed.name === "string"
-          && parsed.name.endsWith("/oh")
+          && parsed.name.endsWith("/kb")
           && typeof parsed.version === "string"
         ) return directory;
       } catch {
@@ -41,7 +41,7 @@ export function findOhPackageRoot(
     if (parent === directory) break;
     directory = parent;
   }
-  throw new Error("Could not locate the oh package root.");
+  throw new Error("Could not locate the kb package root.");
 }
 
 /** Resolve a declared runtime dependency without assuming node_modules layout. */

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Refresh KB"
+  short_description: "Refresh the graph and validate scoped context"
+  default_prompt: "Use $refresh-kb to refresh this knowledge base, review graph findings, validate any changed scope mappings, and run the final checks."

@@ -17,7 +17,7 @@ import {
   replaceCatalog,
   searchableMarkdown,
   wikiLinks
-} from "./index-q2ks380z.js";
+} from "./index-4962kvds.js";
 export {
   wikiLinks,
   searchableMarkdown,

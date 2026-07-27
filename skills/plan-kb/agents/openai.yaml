@@ -1,0 +1,4 @@
+interface:
+  display_name: "Plan in KB"
+  short_description: "Create and evolve durable KB plans"
+  default_prompt: "Use $plan-kb to create or update a durable implementation plan in the knowledge base."

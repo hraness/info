@@ -9,76 +9,76 @@
     "moduleResolution": "Bundler",
     "moduleDetection": "force",
     "paths": {
-      "@hraness/oh": [
+      "@hraness/kb": [
         "./src/index.ts"
       ],
-      "@hraness/oh/agent-context": [
+      "@hraness/kb/agent-context": [
         "./src/agent-context.ts"
       ],
-      "@hraness/oh/agent-guide-audit": [
+      "@hraness/kb/agent-guide-audit": [
         "./src/agent-guide-audit.ts"
       ],
-      "@hraness/oh/authoring": [
+      "@hraness/kb/authoring": [
         "./src/authoring.ts"
       ],
-      "@hraness/oh/browser-profiles": [
+      "@hraness/kb/browser-profiles": [
         "./src/clip/browser-profiles.ts"
       ],
-      "@hraness/oh/capture": [
+      "@hraness/kb/capture": [
         "./src/capture.ts"
       ],
-      "@hraness/oh/clip/acquire": [
+      "@hraness/kb/clip/acquire": [
         "./src/clip/acquire.ts"
       ],
-      "@hraness/oh/clip/args": [
+      "@hraness/kb/clip/args": [
         "./src/clip/args.ts"
       ],
-      "@hraness/oh/clip/bounded-byte-buffer": [
+      "@hraness/kb/clip/bounded-byte-buffer": [
         "./src/clip/bounded-byte-buffer.ts"
       ],
-      "@hraness/oh/clip/cli": [
+      "@hraness/kb/clip/cli": [
         "./src/clip/cli.ts"
       ],
-      "@hraness/oh/clip/cookies": [
+      "@hraness/kb/clip/cookies": [
         "./src/clip/cookies.ts"
       ],
-      "@hraness/oh/clip/doctor": [
+      "@hraness/kb/clip/doctor": [
         "./src/clip/doctor.ts"
       ],
-      "@hraness/oh/clip/network": [
+      "@hraness/kb/clip/network": [
         "./src/clip/network.ts"
       ],
-      "@hraness/oh/clip/network-proxy": [
+      "@hraness/kb/clip/network-proxy": [
         "./src/clip/network-proxy.ts"
       ],
-      "@hraness/oh/clip/persist": [
+      "@hraness/kb/clip/persist": [
         "./src/clip/persist.ts"
       ],
-      "@hraness/oh/clip/terminal": [
+      "@hraness/kb/clip/terminal": [
         "./src/clip/terminal.ts"
       ],
-      "@hraness/oh/datalog": [
+      "@hraness/kb/datalog": [
         "./src/datalog.ts"
       ],
-      "@hraness/oh/facts": [
+      "@hraness/kb/facts": [
         "./src/facts.ts"
       ],
-      "@hraness/oh/graph": [
+      "@hraness/kb/graph": [
         "./src/graph.ts"
       ],
-      "@hraness/oh/navigation": [
+      "@hraness/kb/navigation": [
         "./src/navigation.ts"
       ],
-      "@hraness/oh/pdf": [
+      "@hraness/kb/pdf": [
         "./src/pdf.ts"
       ],
-      "@hraness/oh/percolate": [
+      "@hraness/kb/percolate": [
         "./src/percolate.ts"
       ],
-      "@hraness/oh/query": [
+      "@hraness/kb/query": [
         "./src/query.ts"
       ],
-      "@hraness/oh/semantic": [
+      "@hraness/kb/semantic": [
         "./src/semantic.ts"
       ]
     },

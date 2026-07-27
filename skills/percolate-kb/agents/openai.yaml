@@ -1,0 +1,4 @@
+interface:
+  display_name: "Percolate KB"
+  short_description: "Promote concepts and relationships in a KB vault"
+  default_prompt: "Review the changed KB notes for evidence-backed concepts and typed relationships, apply only high-confidence graph edits, and validate without creating catalog merge conflicts."

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Plan in Oh"
-  short_description: "Create and evolve durable Oh plans"
-  default_prompt: "Use $plan-oh to create or update a durable implementation plan in the knowledge base."

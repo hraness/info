@@ -1,7 +1,7 @@
 // @bun
 import {
   initVault
-} from "./index-tr7a81e2.js";
+} from "./index-gdf1r973.js";
 import {
   DEFAULT_DATALOG_LIMIT,
   DEFAULT_DATALOG_TIMEOUT_MS,
@@ -20,7 +20,7 @@ import {
   buildDatalogSnapshot,
   datalogWorkerUrl,
   queryDatalog
-} from "./index-w2b0xwx3.js";
+} from "./index-z3197chz.js";
 import {
   FACT_ATTRIBUTES,
   FactProjectionBudgetError,
@@ -31,7 +31,7 @@ import {
   noteFactEntityId,
   projectVaultFacts,
   relationFactEntityId
-} from "./index-9b89cmna.js";
+} from "./index-gp8ppyv5.js";
 import {
   MAX_NAVIGATION_INDEXED_CONNECTIONS,
   MAX_NAVIGATION_RETURNED_CONNECTIONS,
@@ -48,7 +48,7 @@ import {
   MAX_PERCOLATION_NOTES,
   MAX_SCOPED_PERCOLATION_MENTION_PAIRS,
   percolateVault
-} from "./index-vm6zwjyn.js";
+} from "./index-egdc3x6v.js";
 import {
   metadataAtPath,
   queryVault
@@ -67,14 +67,14 @@ import {
   scanVault,
   searchSemanticVault,
   semanticDatabasePath
-} from "./index-h04ktqdh.js";
+} from "./index-j9s77ka0.js";
 import {
   auditAgentGuideRepository,
   auditAgentGuideSource,
   auditAgentGuides,
   defaultAgentGuideIgnoredDirectories,
   discoverAgentGuides
-} from "./index-wnymkm9j.js";
+} from "./index-07fsx8bp.js";
 import {
   AgentContextRepositoryPathError,
   RepositoryScopeError,
@@ -91,7 +91,7 @@ import {
   inspectAgentContextRepository,
   normalizeRepositoryScope,
   parseAgentContextMarker
-} from "./index-rhd7x0cs.js";
+} from "./index-5vwpzb5a.js";
 import {
   InvalidCanonicalNoteIdError,
   NoteAlreadyExistsError,
@@ -105,7 +105,7 @@ import {
   normalizeRelationPredicate,
   noteRevision,
   removeNoteRelation
-} from "./index-gjr3vwy3.js";
+} from "./index-2fr3hf9q.js";
 import {
   MAX_ANALYZED_NOTES,
   MAX_CONNECTION_OBSERVATIONS,
@@ -124,7 +124,7 @@ import {
   replaceCatalog,
   searchableMarkdown,
   wikiLinks
-} from "./index-q2ks380z.js";
+} from "./index-4962kvds.js";
 export {
   wikiLinks,
   semanticDatabasePath,

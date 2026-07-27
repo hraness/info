@@ -29,7 +29,7 @@ export type PdfSourceDependencies = {
   readonly removeDirectory?: (path: string) => void;
 };
 
-const remoteUserAgent = "hraness-oh/0.7 PDF capture";
+const remoteUserAgent = "hraness-kb/0.7 PDF capture";
 
 function parseRemoteUrl(input: string): URL | null {
   if (!/^https?:\/\//iu.test(input)) return null;
@@ -102,7 +102,7 @@ export async function preparePdfSource(
   assertPdfSignature(result.bytes);
 
   const makeTemporaryDirectory = dependencies.makeTemporaryDirectory
-    ?? (() => mkdtempSync(join(tmpdir(), "hraness-oh-pdf-source-")));
+    ?? (() => mkdtempSync(join(tmpdir(), "hraness-kb-pdf-source-")));
   const removeDirectory = dependencies.removeDirectory
     ?? ((path: string) => rmSync(path, { recursive: true, force: true }));
   const directory = makeTemporaryDirectory();

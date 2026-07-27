@@ -1,6 +1,6 @@
 # Contributing
 
-Issues and focused pull requests are welcome in the [hraness/oh repository](https://github.com/hraness/oh).
+Issues and focused pull requests are welcome in the [hraness/kb repository](https://github.com/hraness/kb).
 
 Open an issue before starting a broad command-surface, manifest-schema, adapter, or security-boundary change so compatibility and threat-model expectations can be agreed first.
 
@@ -24,7 +24,7 @@ Metadata parsing and queries must preserve YAML value types and nested structure
 QMD is a derived search capability, not the storage layer. Keep it dynamically loaded so graph, metadata, and capture commands do not initialize its native runtime. Unit tests must inject a fake store and cover update, embed, search, result confinement, and close-on-failure behavior without downloading a model or using the network. When changing the pinned QMD version or model, also run a real local index-and-query smoke test and document any new system requirement.
 
 Repository-context changes must preserve the authority boundary between
-`AGENTS.md` and Oh hubs. Guides own always-loaded ownership, prohibitions,
+`AGENTS.md` and KB hubs. Guides own always-loaded ownership, prohibitions,
 required commands, invariants, and gates. Optional `type: agent-context` hubs
 under `scopes/` may add pull-based rationale, history, examples, evidence, and
 links, but cannot override a guide or become the only home of a load-bearing
@@ -38,8 +38,8 @@ directories and guides without following symbolic-link directories during
 agent-guide discovery. Keep scope hubs available to ordinary graph and QMD
 indexing while `AGENTS.md` remains excluded.
 
-Run `oh agents check --root <vault> --repo <repository>` after changing a
-scope hub or reciprocal marker. Use `oh agents audit` to inspect deterministic
+Run `kb agents check --root <vault> --repo <repository>` after changing a
+scope hub or reciprocal marker. Use `kb agents audit` to inspect deterministic
 per-guide, section, inherited-chain, long-bullet, and exact-duplicate
 advisories; do not treat a length advisory as a correctness failure.
 

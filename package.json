@@ -1,6 +1,6 @@
 {
-  "name": "@hraness/oh",
-  "version": "0.8.0",
+  "name": "@hraness/kb",
+  "version": "0.9.0",
   "description": "A Markdown knowledge base that connects coding agents to notes tied to specific parts of a codebase, saves web pages and PDFs with their sources, searches locally by words or meaning, and supports Datalog queries over notes and relationships.",
   "license": "MIT",
   "type": "module",
@@ -8,11 +8,11 @@
   "packageManager": "bun@1.3.14",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/hraness/oh.git"
+    "url": "git+https://github.com/hraness/kb.git"
   },
-  "homepage": "https://oh.computer/",
+  "homepage": "https://hraness.com/kb",
   "bugs": {
-    "url": "https://github.com/hraness/oh/issues"
+    "url": "https://github.com/hraness/kb/issues"
   },
   "keywords": [
     "knowledge-base",
@@ -128,7 +128,7 @@
     }
   },
   "bin": {
-    "oh": "./dist/cli.js"
+    "kb": "./dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./src/index.ts",

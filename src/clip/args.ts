@@ -190,7 +190,7 @@ export function parseArguments(
   let mediaExplicit = false;
   let evidenceExplicit = false;
   let htmlFile: string | undefined;
-  let outputBase = environment.OH_CLIP_OUTPUT ?? "oh/articles";
+  let outputBase = environment.KB_CLIP_OUTPUT ?? "kb/articles";
   let force = false;
   let stdout = command === "inspect";
   let stdoutExplicit = false;
@@ -209,7 +209,7 @@ export function parseArguments(
   let maxAssetBytes: number = defaults.maxAssetBytes;
   let maxTotalAssetBytes: number = defaults.maxTotalAssetBytes;
   let allowPrivateNetwork = false;
-  let userAgent = environment.OH_CLIP_USER_AGENT ?? DEFAULT_USER_AGENT;
+  let userAgent = environment.KB_CLIP_USER_AGENT ?? DEFAULT_USER_AGENT;
 
   for (; cursor < rawArgs.length; cursor += 1) {
     const argument = rawArgs[cursor];
@@ -387,13 +387,13 @@ export function parseArguments(
 }
 
 export const usage = `Usage:
-  oh clip <url> [slug] [options]
-  oh clip current [slug] --browser-live [options]
-  oh clip current [slug] --cdp <loopback-port> [options]
-  oh clip capture <url> [slug] [options]
-  oh clip inspect <url> [options]
-  oh doctor [--json]
-  oh adapters [--json]
+  kb clip <url> [slug] [options]
+  kb clip current [slug] --browser-live [options]
+  kb clip current [slug] --cdp <loopback-port> [options]
+  kb clip capture <url> [slug] [options]
+  kb clip inspect <url> [options]
+  kb doctor [--json]
+  kb adapters [--json]
 
 Capture options:
   --mode auto|http|browser|file     Acquisition strategy (default: auto)
@@ -407,7 +407,7 @@ Capture options:
   --cookies-file <path>            Cookie-Editor JSON/base64, Netscape, Cookie header, or cURL input
   --media none|images|all          Localize images or all supported media
   --evidence none|source|screenshot|all
-  --output <directory>             Output base (default: oh/articles)
+  --output <directory>             Output base (default: kb/articles)
   --stdout                         Print Markdown without writing a clip
   --json                           Print a machine-readable result summary
   --force                          Atomically replace an existing clip

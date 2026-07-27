@@ -10,7 +10,7 @@ import { scanVault, type VaultSnapshot } from "./vault.js";
 export const recommendedEmbeddingModel =
   "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf";
 
-const collectionName = "oh";
+const collectionName = "kb";
 const markdownPattern = "**/*.md";
 // Keep this widened: a literal dynamic import makes TypeScript load QMD's public declarations.
 const qmdModuleSpecifier: string = "@tobilu/qmd";
@@ -157,7 +157,7 @@ function cacheHome(dependencies: SemanticDependencies): string {
 
 export function semanticDatabasePath(root: string, dependencies: SemanticDependencies = {}): string {
   const identity = createHash("sha256").update(resolve(root)).digest("hex").slice(0, 20);
-  return join(cacheHome(dependencies), "hraness-oh", "indexes", `${identity}.sqlite`);
+  return join(cacheHome(dependencies), "hraness-kb", "indexes", `${identity}.sqlite`);
 }
 
 async function resolvedDirectory(path: string): Promise<string> {

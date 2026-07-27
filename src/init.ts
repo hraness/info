@@ -15,12 +15,12 @@ title: Knowledge base
 
 This vault keeps captured sources separate from maintained notes. Catalog links are navigation; contextual links belong in prose when they help a reader follow a real relationship.
 
-<!-- oh:catalog:start -->
+<!-- kb:catalog:start -->
 ## Note catalog
 
 _No durable notes have been filed yet._
 
-<!-- oh:catalog:end -->
+<!-- kb:catalog:end -->
 `,
   "AGENTS.md": `# Contents
 
@@ -40,9 +40,9 @@ _No durable notes have been filed yet._
 - Never write reciprocal, transitive, similarity-derived, or otherwise inferred relationships into notes. DataScript, backlinks, and percolation candidates are disposable views.
 - Preserve source authority: article bodies are captures, riffs retain the speaker's claims, and maintained notes own later synthesis.
 - Keep \`AGENTS.md\` normative and concise without removing load-bearing rules. A scope hub may hold rationale, history, examples, and linked decisions, but never silently overrides a guide or becomes the only home of an edit-time rule.
-- Run \`oh percolate <changed-note> --root .\` after materially changing a note, review the cited evidence, then run \`oh refresh --root .\` and \`oh check --root .\`.
-- During parallel edits, each lane runs \`oh check --root . --no-catalog\`; the integrating agent performs one final refresh and normal check.
-- Use \`oh context <path> --root . --repo <repository>\` for scoped repository knowledge, \`oh list\` for exact metadata or tags, \`oh links\` for explicit relationships, \`oh datalog\` for joins or recursive paths, and \`oh search\` when the concept may use different words.
+- Run \`kb percolate <changed-note> --root .\` after materially changing a note, review the cited evidence, then run \`kb refresh --root .\` and \`kb check --root .\`.
+- During parallel edits, each lane runs \`kb check --root . --no-catalog\`; the integrating agent performs one final refresh and normal check.
+- Use \`kb context <path> --root . --repo <repository>\` for scoped repository knowledge, \`kb list\` for exact metadata or tags, \`kb links\` for explicit relationships, \`kb datalog\` for joins or recursive paths, and \`kb search\` when the concept may use different words.
 `,
   "articles/AGENTS.md": `# Contents
 
@@ -93,9 +93,9 @@ _No durable notes have been filed yet._
 # Guidelines
 
 - Keep one hub per exact repository-relative directory scope, with \`type: agent-context\` and \`scope\` in frontmatter.
-- Derive the canonical hub path and reciprocal marker with \`oh agents identity <scope>\`; do not reproduce the slug or hash logic by hand.
+- Derive the canonical hub path and reciprocal marker with \`kb agents identity <scope>\`; do not reproduce the slug or hash logic by hand.
 - Put rationale, history, examples, evidence, and links here. Keep ownership, prohibitions, required commands, and every rule needed before editing in the guide.
-- Use \`oh agents check --root <vault> --repo <repository>\` after changing a mapping; use \`oh agents audit\` to review guide and inherited-chain size without treating length as correctness.
+- Use \`kb agents check --root <vault> --repo <repository>\` after changing a mapping; use \`kb agents audit\` to review guide and inherited-chain size without treating length as correctness.
 `,
 } as const;
 

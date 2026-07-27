@@ -14,7 +14,7 @@ const options = (url: string, overrides: Partial<CaptureArguments> = {}): Captur
   media: "none",
   evidence: "none",
   htmlFile: undefined,
-  outputBase: "oh/articles",
+  outputBase: "kb/articles",
   force: false,
   stdout: true,
   json: false,

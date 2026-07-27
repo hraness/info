@@ -8,7 +8,7 @@ import {
   mediaModes,
   parseArguments,
   usage
-} from "../index-p1vzcd6b.js";
+} from "../index-6g2pv9d2.js";
 export {
   usage,
   parseArguments,

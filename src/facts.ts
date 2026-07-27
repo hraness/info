@@ -6,8 +6,8 @@ import {
 } from "./graph.js";
 
 export const FACT_ATTRIBUTES = {
-  entityId: ":oh/id",
-  entityKind: ":oh/kind",
+  entityId: ":kb/id",
+  entityKind: ":kb/kind",
   noteId: ":note/id",
   notePath: ":note/path",
   noteTitle: ":note/title",
