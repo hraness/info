@@ -6,10 +6,16 @@ import {
 // src/clip/network.ts
 import { lookup } from "dns/promises";
 import {
+  Agent as HttpAgent,
   request as requestHttp
 } from "http";
-import { request as requestHttps } from "https";
-import { isIP } from "net";
+import {
+  Agent as HttpsAgent,
+  request as requestHttps
+} from "https";
+import {
+  isIP
+} from "net";
 import { networkInterfaces } from "os";
 class FetchFailure extends Error {
   code;
@@ -273,13 +279,13 @@ function requestHeaders(headers) {
   });
   return result;
 }
-function requestPinnedNetworkAddress(request) {
+function preparePinnedNetworkRequest(request) {
   const hostname = normalizeHostname(request.url.hostname);
   if (request.url.protocol !== "http:" && request.url.protocol !== "https:") {
-    return Promise.reject(new Error(`unsupported pinned request protocol: ${request.url.protocol}`));
+    throw new Error(`unsupported pinned request protocol: ${request.url.protocol}`);
   }
   if (isIP(request.address.address) !== request.address.family) {
-    return Promise.reject(new Error("pinned request address does not match its declared family"));
+    throw new Error("pinned request address does not match its declared family");
   }
   const hostnameFamily = isIP(hostname);
   if (hostnameFamily !== 0) {
@@ -287,21 +293,25 @@ function requestPinnedNetworkAddress(request) {
     const pinnedKey = comparableAddressKeys(request.address.address)[0];
     const pinnedAddressHasScope = normalizeHostname(request.address.address) !== addressWithoutScope(request.address.address);
     if (hostnameFamily !== request.address.family || pinnedAddressHasScope || hostnameKey === undefined || hostnameKey !== pinnedKey) {
-      return Promise.reject(new Error("IP-literal request hostname does not match the pinned address"));
+      throw new Error("IP-literal request hostname does not match the pinned address");
     }
   }
-  const requestOptions = {
-    protocol: request.url.protocol,
+  return {
     hostname,
-    method: request.method,
-    path: `${request.url.pathname}${request.url.search}`,
-    headers: requestHeaders(request.headers),
-    lookup: createPinnedLookup(request.address),
-    family: request.address.family,
-    agent: false,
-    signal: request.signal,
-    ...request.url.port === "" ? {} : { port: request.url.port }
+    options: {
+      protocol: request.url.protocol,
+      hostname,
+      method: request.method,
+      path: `${request.url.pathname}${request.url.search}`,
+      headers: requestHeaders(request.headers),
+      lookup: createPinnedLookup(request.address),
+      family: request.address.family,
+      signal: request.signal,
+      ...request.url.port === "" ? {} : { port: request.url.port }
+    }
   };
+}
+function sendPreparedPinnedNetworkRequest(request, prepared, agent, activeRequests, activeSockets) {
   return new Promise((resolve, reject) => {
     const onResponse = (response) => {
       if (response.statusCode === undefined) {
@@ -316,12 +326,105 @@ function requestPinnedNetworkAddress(request) {
         cancel: () => response.destroy()
       });
     };
+    const requestOptions = {
+      ...prepared.options,
+      agent
+    };
     const clientRequest = request.url.protocol === "https:" ? requestHttps({
       ...requestOptions,
-      ...isIP(hostname) === 0 ? { servername: hostname } : {}
+      ...isIP(prepared.hostname) === 0 ? { servername: prepared.hostname } : {}
     }, onResponse) : requestHttp(requestOptions, onResponse);
-    clientRequest.once("error", reject);
+    activeRequests?.add(clientRequest);
+    clientRequest.once("close", () => activeRequests?.delete(clientRequest));
+    clientRequest.once("socket", (socket) => {
+      activeSockets?.add(socket);
+      socket.once("close", () => activeSockets?.delete(socket));
+    });
+    clientRequest.on("error", reject);
     clientRequest.end(request.body ?? undefined);
+  });
+}
+function requestPinnedNetworkAddress(request) {
+  try {
+    return sendPreparedPinnedNetworkRequest(request, preparePinnedNetworkRequest(request), false);
+  } catch (error) {
+    return Promise.reject(error instanceof Error ? error : new Error("pinned network request preparation failed", { cause: error }));
+  }
+}
+function createPinnedNetworkAgent(request, options) {
+  return request.url.protocol === "https:" ? new HttpsAgent({
+    keepAlive: true,
+    maxFreeSockets: 1,
+    maxSockets: 1,
+    ...options.certificateAuthorities === undefined ? {} : { ca: options.certificateAuthorities }
+  }) : new HttpAgent({ keepAlive: true, maxFreeSockets: 1, maxSockets: 1 });
+}
+function createPinnedNetworkConnectionPool(options = {}) {
+  const supportsIsolatedAgents = process.versions.bun === undefined;
+  const agents = new Map;
+  const activeRequests = new Set;
+  const activeSockets = new Set;
+  let closed = false;
+  const close = () => {
+    if (closed)
+      return;
+    closed = true;
+    for (const request of activeRequests) {
+      request.destroy();
+    }
+    activeRequests.clear();
+    for (const socket of activeSockets) {
+      socket.destroy();
+    }
+    activeSockets.clear();
+    for (const agent of agents.values()) {
+      agent.destroy();
+    }
+    agents.clear();
+  };
+  const pooledRequest = async (request) => {
+    if (closed) {
+      throw new Error("pinned network connection pool is closed");
+    }
+    const prepared = preparePinnedNetworkRequest(request);
+    const addressKey = comparableAddressKeys(request.address.address)[0];
+    if (addressKey === undefined) {
+      throw new Error("pinned request address is invalid");
+    }
+    const key = [
+      request.url.origin,
+      request.address.family,
+      addressKey
+    ].join("\x00");
+    if (closed)
+      throw new Error("pinned network connection pool is closed");
+    if (request.signal.aborted) {
+      const reason = request.signal.reason;
+      throw reason instanceof Error ? reason : new Error("pinned network request aborted");
+    }
+    if (!supportsIsolatedAgents) {
+      return await sendPreparedPinnedNetworkRequest(request, {
+        ...prepared,
+        options: {
+          ...prepared.options,
+          headers: {
+            ...requestHeaders(request.headers),
+            connection: "close"
+          },
+          ...options.certificateAuthorities === undefined ? {} : { ca: options.certificateAuthorities }
+        }
+      }, false, activeRequests, activeSockets);
+    }
+    let agent = agents.get(key);
+    if (agent === undefined) {
+      agent = createPinnedNetworkAgent(request, options);
+      agents.set(key, agent);
+    }
+    return await sendPreparedPinnedNetworkRequest(request, prepared, agent, activeRequests, activeSockets);
+  };
+  return Object.freeze({
+    request: pooledRequest,
+    close
   });
 }
 function retryDelay(response, attempt) {
@@ -509,4 +612,4 @@ function decodeBytes(bytes, contentType) {
   return new TextDecoder(supported, { fatal: false }).decode(bytes);
 }
 
-export { FetchFailure, isPrivateAddress, isPrivateHostname, resolveSafeNetworkTarget, assertSafeNetworkUrl, createPinnedLookup, requestPinnedNetworkAddress, createSafeFetch, safeFetch, decodeBytes };
+export { FetchFailure, isPrivateAddress, isPrivateHostname, resolveSafeNetworkTarget, assertSafeNetworkUrl, createPinnedLookup, requestPinnedNetworkAddress, createPinnedNetworkConnectionPool, createSafeFetch, safeFetch, decodeBytes };

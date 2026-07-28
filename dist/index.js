@@ -3,6 +3,21 @@ import {
   initVault
 } from "./index-gdf1r973.js";
 import {
+  MAX_NOTE_UTF8_BYTES,
+  MAX_SCANNED_NOTES,
+  MAX_VAULT_UTF8_BYTES,
+  VaultScanBudgetError,
+  defaultIgnoredDirectories,
+  indexSemanticVault,
+  markdownFiles,
+  readVaultNotes,
+  recommendedEmbeddingModel,
+  refreshVault,
+  scanVault,
+  searchSemanticVault,
+  semanticDatabasePath
+} from "./index-j9s77ka0.js";
+import {
   DEFAULT_DATALOG_LIMIT,
   DEFAULT_DATALOG_TIMEOUT_MS,
   DatalogBudgetError,
@@ -53,21 +68,6 @@ import {
   metadataAtPath,
   queryVault
 } from "./index-m4bexhht.js";
-import {
-  MAX_NOTE_UTF8_BYTES,
-  MAX_SCANNED_NOTES,
-  MAX_VAULT_UTF8_BYTES,
-  VaultScanBudgetError,
-  defaultIgnoredDirectories,
-  indexSemanticVault,
-  markdownFiles,
-  readVaultNotes,
-  recommendedEmbeddingModel,
-  refreshVault,
-  scanVault,
-  searchSemanticVault,
-  semanticDatabasePath
-} from "./index-j9s77ka0.js";
 import {
   auditAgentGuideRepository,
   auditAgentGuideSource,

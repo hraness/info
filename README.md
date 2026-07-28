@@ -14,7 +14,7 @@ temporary Datalog graph.
 bun add --global github:hraness/kb#v0.9.0
 ```
 
-[article](https://hraness.pub/articles/a-durable-knowledge-base-is-a-write-path)
+[article](https://crclte.com/articles/a-durable-knowledge-base-is-a-write-path)
 
 [website](https://hraness.com/kb)
 
@@ -24,7 +24,7 @@ not require a model, API key, database, or hosted service. search by similar
 meaning uses a replaceable local index; Markdown remains the source of truth.
 
 <!-- article:a-durable-knowledge-base-is-a-write-path:start -->
-## [A knowledge base for your coding agents](<https://hraness.pub/articles/a-durable-knowledge-base-is-a-write-path>)
+## [A knowledge base for your coding agents](<https://crclte.com/articles/a-durable-knowledge-base-is-a-write-path>)
 
 > Keep load-bearing rules in scoped AGENTS.md files, then let agents grow concepts and relationships in a plain-Markdown KB vault with disposable local Datalog and semantic views.
 
@@ -32,7 +32,7 @@ A coding agent needs two kinds of repository memory. It needs rules that govern 
 
 [hraness/kb](<https://hraness.com/kb>) is an open-source knowledge base for coding agents that keeps those jobs separate. A scoped `AGENTS.md` file is the automatically loaded normative control plane: ownership, must and never constraints, and required checks. KB is the optional, pull-based knowledge plane for rationale, history, examples, evidence, plans, and linked neighboring decisions. KB may explain an applicable `AGENTS.md` rule, but it never silently overrides one.
 
-![Four icon cards show sources flowing into durable memory, linked ideas, and search for reuse by future coding-agent sessions.](<https://hraness.pub/article-diagrams/a-durable-knowledge-base-is-a-write-path.light.webp>)
+![Four icon cards show sources flowing into durable memory, linked ideas, and search for reuse by future coding-agent sessions.](<https://crclte.com/article-diagrams/a-durable-knowledge-base-is-a-write-path.light.webp>)
 
 *hraness/kb turns source material into memory that agents can link and find again.*
 
@@ -65,7 +65,7 @@ Markdown is authoritative in this map. The catalog, backlink view, DataScript da
 
 ### Separate rules from explanations
 
-`AGENTS.md` belongs on the path to the code it governs. A root guide carries repository-wide policy; nested guides add the constraints owned by a package, product, or source boundary. Keep every load-bearing edit-time rule on that inherited path. If an edit would be wrong when the agent misses a sentence, that sentence does not belong only in KB. [Agent docs hygiene](<https://hraness.pub/articles/the-ai-codebase-agent-docs-hygiene>) explains how to keep that path scoped and checked.
+`AGENTS.md` belongs on the path to the code it governs. A root guide carries repository-wide policy; nested guides add the constraints owned by a package, product, or source boundary. Keep every load-bearing edit-time rule on that inherited path. If an edit would be wrong when the agent misses a sentence, that sentence does not belong only in KB. [Agent docs hygiene](<https://crclte.com/articles/the-ai-codebase-agent-docs-hygiene>) explains how to keep that path scoped and checked.
 
 KB holds material whose value depends on the question. A scope hub can explain why a parser rejects a tempting shortcut, link the plan that introduced the rule, preserve a source that supports it, and point to neighboring decisions. An agent pulls that prose when the task reaches the boundary. If a hub and an applicable guide disagree, the guide controls the edit and the hub needs repair.
 
@@ -440,7 +440,8 @@ diagnostics from
 disposable-profile helpers from `@hraness/kb/browser-profiles`. Embedders that
 need the CLI's lower-level ingestion machinery can use the explicit
 capture-primitive subpaths listed in `package.json`, including
-`@hraness/kb/clip/acquire`, `@hraness/kb/clip/args`, and
+`@hraness/kb/clip/acquire`, `@hraness/kb/clip/args`, the DNS-pinned request and
+connection-pool boundary at `@hraness/kb/clip/network`, and the browser proxy at
 `@hraness/kb/clip/network-proxy`.
 
 ## Agent skills

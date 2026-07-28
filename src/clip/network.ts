@@ -1,13 +1,23 @@
 import { lookup } from "node:dns/promises";
 import {
+  Agent as HttpAgent,
   request as requestHttp,
+  type ClientRequest,
   type IncomingHttpHeaders,
   type IncomingMessage,
   type RequestOptions,
 } from "node:http";
-import { request as requestHttps } from "node:https";
-import { isIP, type LookupFunction } from "node:net";
+import {
+  Agent as HttpsAgent,
+  request as requestHttps,
+} from "node:https";
+import {
+  isIP,
+  type LookupFunction,
+  type Socket,
+} from "node:net";
 import { networkInterfaces } from "node:os";
+import type { SecureContextOptions } from "node:tls";
 
 import { BoundedByteBuffer } from "./bounded-byte-buffer.js";
 
@@ -78,6 +88,20 @@ export type PinnedNetworkResponse = {
 };
 
 export type NetworkTransport = (request: PinnedNetworkRequest) => Promise<PinnedNetworkResponse>;
+
+export type PinnedNetworkConnectionPool = {
+  readonly request: NetworkTransport;
+  readonly close: () => void;
+};
+
+export type PinnedNetworkConnectionPoolOptions = {
+  /**
+   * Additional certificate authorities for an isolated caller scope.
+   * Production callers normally use the platform trust store; this seam keeps
+   * local TLS integration tests fully verified without disabling validation.
+   */
+  readonly certificateAuthorities?: SecureContextOptions["ca"];
+};
 
 export type SafeFetchDependencies = {
   readonly resolveHostname: NetworkResolver;
@@ -422,19 +446,20 @@ function requestHeaders(headers: Headers): Readonly<Record<string, string>> {
   return result;
 }
 
-/**
- * Send exactly one HTTP(S) request through one previously validated address.
- *
- * This is a raw transport boundary: it does not resolve DNS, follow redirects, retry failures,
- * interpret statuses, or accumulate the response body. Callers retain those higher-level policies.
- */
-export function requestPinnedNetworkAddress(request: PinnedNetworkRequest): Promise<PinnedNetworkResponse> {
+type PreparedPinnedNetworkRequest = {
+  readonly hostname: string;
+  readonly options: RequestOptions;
+};
+
+function preparePinnedNetworkRequest(
+  request: PinnedNetworkRequest,
+): PreparedPinnedNetworkRequest {
   const hostname = normalizeHostname(request.url.hostname);
   if (request.url.protocol !== "http:" && request.url.protocol !== "https:") {
-    return Promise.reject(new Error(`unsupported pinned request protocol: ${request.url.protocol}`));
+    throw new Error(`unsupported pinned request protocol: ${request.url.protocol}`);
   }
   if (isIP(request.address.address) !== request.address.family) {
-    return Promise.reject(new Error("pinned request address does not match its declared family"));
+    throw new Error("pinned request address does not match its declared family");
   }
   const hostnameFamily = isIP(hostname);
   if (hostnameFamily !== 0) {
@@ -449,24 +474,32 @@ export function requestPinnedNetworkAddress(request: PinnedNetworkRequest): Prom
       || hostnameKey === undefined
       || hostnameKey !== pinnedKey
     ) {
-      return Promise.reject(
-        new Error("IP-literal request hostname does not match the pinned address"),
-      );
+      throw new Error("IP-literal request hostname does not match the pinned address");
     }
   }
-  const requestOptions: RequestOptions = {
-    protocol: request.url.protocol,
+  return {
     hostname,
-    method: request.method,
-    path: `${request.url.pathname}${request.url.search}`,
-    headers: requestHeaders(request.headers),
-    lookup: createPinnedLookup(request.address),
-    family: request.address.family,
-    agent: false,
-    signal: request.signal,
-    ...(request.url.port === "" ? {} : { port: request.url.port }),
+    options: {
+      protocol: request.url.protocol,
+      hostname,
+      method: request.method,
+      path: `${request.url.pathname}${request.url.search}`,
+      headers: requestHeaders(request.headers),
+      lookup: createPinnedLookup(request.address),
+      family: request.address.family,
+      signal: request.signal,
+      ...(request.url.port === "" ? {} : { port: request.url.port }),
+    },
   };
+}
 
+function sendPreparedPinnedNetworkRequest(
+  request: PinnedNetworkRequest,
+  prepared: PreparedPinnedNetworkRequest,
+  agent: RequestOptions["agent"],
+  activeRequests?: Set<ClientRequest>,
+  activeSockets?: Set<Socket>,
+): Promise<PinnedNetworkResponse> {
   return new Promise((resolve, reject) => {
     const onResponse = (response: IncomingMessage): void => {
       if (response.statusCode === undefined) {
@@ -481,17 +514,168 @@ export function requestPinnedNetworkAddress(request: PinnedNetworkRequest): Prom
         cancel: () => response.destroy(),
       });
     };
+    const requestOptions: RequestOptions = {
+      ...prepared.options,
+      agent,
+    };
     const clientRequest = request.url.protocol === "https:"
       ? requestHttps(
           {
             ...requestOptions,
-            ...(isIP(hostname) === 0 ? { servername: hostname } : {}),
+            ...(isIP(prepared.hostname) === 0
+              ? { servername: prepared.hostname }
+              : {}),
           },
           onResponse,
         )
       : requestHttp(requestOptions, onResponse);
-    clientRequest.once("error", reject);
+    activeRequests?.add(clientRequest);
+    clientRequest.once("close", () => activeRequests?.delete(clientRequest));
+    clientRequest.once("socket", (socket) => {
+      activeSockets?.add(socket);
+      socket.once("close", () => activeSockets?.delete(socket));
+    });
+    // A pooled agent can report a terminal handshake error and then a socket
+    // teardown error. Retain the listener for the request lifetime so the
+    // second event cannot become an uncaught process error after the promise
+    // has already rejected.
+    clientRequest.on("error", reject);
     clientRequest.end(request.body ?? undefined);
+  });
+}
+
+/**
+ * Send exactly one HTTP(S) request through one previously validated address.
+ *
+ * This is a raw transport boundary: it does not resolve DNS, follow redirects, retry failures,
+ * interpret statuses, or accumulate the response body. Callers retain those higher-level policies.
+ */
+export function requestPinnedNetworkAddress(request: PinnedNetworkRequest): Promise<PinnedNetworkResponse> {
+  try {
+    return sendPreparedPinnedNetworkRequest(
+      request,
+      preparePinnedNetworkRequest(request),
+      false,
+    );
+  } catch (error) {
+    return Promise.reject(
+      error instanceof Error
+        ? error
+        : new Error("pinned network request preparation failed", { cause: error }),
+    );
+  }
+}
+
+function createPinnedNetworkAgent(
+  request: PinnedNetworkRequest,
+  options: PinnedNetworkConnectionPoolOptions,
+): HttpAgent | HttpsAgent {
+  return request.url.protocol === "https:"
+    ? new HttpsAgent({
+        keepAlive: true,
+        maxFreeSockets: 1,
+        maxSockets: 1,
+        ...(options.certificateAuthorities === undefined
+          ? {}
+          : { ca: options.certificateAuthorities }),
+      })
+    : new HttpAgent({ keepAlive: true, maxFreeSockets: 1, maxSockets: 1 });
+}
+
+/**
+ * Reuse pinned HTTP(S) connections within one explicitly closed lifetime.
+ *
+ * Agents are isolated by exact origin and validated IP address. Every connection
+ * still uses the prepared request's pinned lookup, so re-resolution may select a
+ * new address without letting an older keep-alive socket bypass the caller's pin.
+ */
+export function createPinnedNetworkConnectionPool(
+  options: PinnedNetworkConnectionPoolOptions = {},
+): PinnedNetworkConnectionPool {
+  // Bun 1.3.14's node:http compatibility layer pools outside the supplied
+  // Agent: distinct Agent instances can reuse one TCP socket and destroy()
+  // does not reliably close that shared idle socket. Fail closed to one
+  // connection per request there. Node uses genuinely isolated per-key agents.
+  const supportsIsolatedAgents = process.versions.bun === undefined;
+  const agents = new Map<string, HttpAgent | HttpsAgent>();
+  const activeRequests = new Set<ClientRequest>();
+  const activeSockets = new Set<Socket>();
+  let closed = false;
+
+  const close = (): void => {
+    if (closed) return;
+    closed = true;
+    for (const request of activeRequests) {
+      request.destroy();
+    }
+    activeRequests.clear();
+    for (const socket of activeSockets) {
+      socket.destroy();
+    }
+    activeSockets.clear();
+    for (const agent of agents.values()) {
+      agent.destroy();
+    }
+    agents.clear();
+  };
+
+  const pooledRequest: NetworkTransport = async (request) => {
+    if (closed) {
+      throw new Error("pinned network connection pool is closed");
+    }
+    const prepared = preparePinnedNetworkRequest(request);
+    const addressKey = comparableAddressKeys(request.address.address)[0];
+    if (addressKey === undefined) {
+      throw new Error("pinned request address is invalid");
+    }
+    const key = [
+      request.url.origin,
+      request.address.family,
+      addressKey,
+    ].join("\0");
+    if (closed) throw new Error("pinned network connection pool is closed");
+    if (request.signal.aborted) {
+      const reason: unknown = request.signal.reason;
+      throw reason instanceof Error ? reason : new Error("pinned network request aborted");
+    }
+    if (!supportsIsolatedAgents) {
+      return await sendPreparedPinnedNetworkRequest(
+        request,
+        {
+          ...prepared,
+          options: {
+            ...prepared.options,
+            headers: {
+              ...requestHeaders(request.headers),
+              connection: "close",
+            },
+            ...(options.certificateAuthorities === undefined
+              ? {}
+              : { ca: options.certificateAuthorities }),
+          },
+        },
+        false,
+        activeRequests,
+        activeSockets,
+      );
+    }
+    let agent = agents.get(key);
+    if (agent === undefined) {
+      agent = createPinnedNetworkAgent(request, options);
+      agents.set(key, agent);
+    }
+    return await sendPreparedPinnedNetworkRequest(
+      request,
+      prepared,
+      agent,
+      activeRequests,
+      activeSockets,
+    );
+  };
+
+  return Object.freeze({
+    request: pooledRequest,
+    close,
   });
 }
 

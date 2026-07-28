@@ -2,14 +2,14 @@
 import {
   countWords,
   sniffImage
-} from "./index-sm1xsdta.js";
+} from "./index-0y58zcp8.js";
 import {
   slugify,
   yamlString
 } from "./index-hgve9rh2.js";
 import {
   safeFetch
-} from "./index-b0b0vy11.js";
+} from "./index-4sh2hh3t.js";
 import {
   BoundedByteBuffer
 } from "./index-gh719d91.js";

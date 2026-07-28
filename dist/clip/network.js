@@ -3,6 +3,7 @@ import {
   FetchFailure,
   assertSafeNetworkUrl,
   createPinnedLookup,
+  createPinnedNetworkConnectionPool,
   createSafeFetch,
   decodeBytes,
   isPrivateAddress,
@@ -10,7 +11,7 @@ import {
   requestPinnedNetworkAddress,
   resolveSafeNetworkTarget,
   safeFetch
-} from "../index-b0b0vy11.js";
+} from "../index-4sh2hh3t.js";
 import"../index-gh719d91.js";
 export {
   safeFetch,
@@ -20,6 +21,7 @@ export {
   isPrivateAddress,
   decodeBytes,
   createSafeFetch,
+  createPinnedNetworkConnectionPool,
   createPinnedLookup,
   assertSafeNetworkUrl,
   FetchFailure

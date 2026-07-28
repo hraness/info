@@ -3,7 +3,7 @@ import {
   FetchFailure,
   createPinnedLookup,
   resolveSafeNetworkTarget
-} from "./index-b0b0vy11.js";
+} from "./index-4sh2hh3t.js";
 import {
   BoundedByteBuffer
 } from "./index-gh719d91.js";

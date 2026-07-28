@@ -27,6 +27,9 @@
       "@hraness/kb/capture": [
         "./src/capture.ts"
       ],
+      "@hraness/kb/cli": [
+        "./src/cli.ts"
+      ],
       "@hraness/kb/clip/acquire": [
         "./src/clip/acquire.ts"
       ],
