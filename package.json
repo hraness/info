@@ -186,7 +186,7 @@
     "prepack": "bun run check"
   },
   "dependencies": {
-    "@steipete/sweet-cookie": "git+https://github.com/hraness/sweet-cookie.git#81b63e11677bf73e2660493a48228d11812c5ee0",
+    "@steipete/sweet-cookie": "git+https://github.com/hraness/sweet-cookie.git#112dce1a3c3dd165310616ca63dd2f6cc652b212",
     "@tobilu/qmd": "2.5.3",
     "agent-browser": "0.32.3",
     "defuddle": "0.19.1",
