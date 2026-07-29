@@ -320,45 +320,10 @@ describe("kb argument parsing", () => {
     });
   });
 
-  test("parses Datalog, percolation, and lane-safe catalog checks with strict bounds", () => {
-    const query = '[:find ?id :where [?note ":note/id" ?id]]';
-    expect(parseArguments([
-      "datalog",
-      query,
-      "--root",
-      "vault",
-      "--limit",
-      "12",
-      "--timeout-ms",
-      "250",
-      "--json",
-    ])).toEqual({
-      ok: true,
-      value: {
-        kind: "datalog",
-        root: "vault",
-        query,
-        limit: 12,
-        timeoutMs: 250,
-        json: true,
-      },
-    });
-    expect(parseArguments([
-      "datalog",
-      "--query-file",
-      "query.edn",
-      "--rules-file",
-      "rules.edn",
-    ])).toEqual({
-      ok: true,
-      value: {
-        kind: "datalog",
-        root: ".",
-        queryFile: "query.edn",
-        rulesFile: "rules.edn",
-        limit: 100,
-        json: false,
-      },
+  test("parses percolation and lane-safe catalog checks with strict bounds", () => {
+    expect(parseArguments(["datalog"])).toEqual({
+      ok: false,
+      message: "unknown command",
     });
     expect(parseArguments([
       "percolate",
@@ -393,20 +358,6 @@ describe("kb argument parsing", () => {
         },
       });
 
-    expect(parseArguments(["datalog", query, "--query-file", "query.edn"]))
-      .toEqual({
-        ok: false,
-        message: "datalog requires exactly one query or --query-file",
-      });
-    expect(parseArguments(["datalog", query, "--limit", "1001"])).toEqual({
-      ok: false,
-      message: "--limit must be an integer from 1 through 1000",
-    });
-    expect(parseArguments(["datalog", query, "--timeout-ms", "5001"]))
-      .toEqual({
-        ok: false,
-        message: "--timeout-ms must be an integer from 1 through 5000",
-      });
     expect(parseArguments(["percolate", "--min-support", "1"])).toEqual({
       ok: false,
       message: "--min-support must be an integer from 2 through 1000",
@@ -596,7 +547,7 @@ describe("kb vault commands", () => {
     }
   });
 
-  test("authors notes and typed relationships, queries Datalog, and percolates evidence end to end", async () => {
+  test("authors notes and typed relationships, then percolates evidence end to end", async () => {
     const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-graph-"));
     const vault = join(temporary, "vault");
     try {
@@ -742,82 +693,6 @@ describe("kb vault commands", () => {
         }],
       });
 
-      const relationshipQuery = [
-        "[:find ?source-id ?predicate ?target-id",
-        " :where",
-        ' [?edge :edge/kind "relation"]',
-        " [?edge :edge/source ?source]",
-        " [?edge :edge/target ?target]",
-        " [?edge :edge/predicate ?predicate]",
-        " [?source :note/id ?source-id]",
-        " [?target :note/id ?target-id]]",
-      ].join("");
-      const datalogOutput = captureOutput();
-      expect(await main([
-        "datalog",
-        relationshipQuery,
-        "--root",
-        vault,
-        "--json",
-      ], datalogOutput.output)).toBe(0);
-      expect(JSON.parse(datalogOutput.stdout())).toMatchObject({
-        query: relationshipQuery,
-        columns: ["?source-id", "?predicate", "?target-id"],
-        rows: [["notes/alpha", "supports", "notes/beta"]],
-        truncated: false,
-      });
-
-      const rulesFile = join(temporary, "relationship-rules.edn");
-      await writeFile(rulesFile, [
-        "[",
-        " [(direct-support ?source ?target)",
-        '  [?edge :edge/predicate "supports"]',
-        "  [?edge :edge/source ?source]",
-        "  [?edge :edge/target ?target]]",
-        " [(supports-path ?source ?target)",
-        "  (direct-support ?source ?target)]",
-        " [(supports-path ?source ?target)",
-        "  (direct-support ?source ?middle)",
-        "  (supports-path ?middle ?target)]",
-        "]",
-      ].join(""), "utf8");
-      const recursiveOutput = captureOutput();
-      expect(await main([
-        "datalog",
-        "[:find ?source-id ?target-id :in $ % :where (supports-path ?source ?target) [?source :note/id ?source-id] [?target :note/id ?target-id]]",
-        "--rules-file",
-        rulesFile,
-        "--root",
-        vault,
-        "--json",
-      ], recursiveOutput.output)).toBe(0);
-      expect(JSON.parse(recursiveOutput.stdout())).toMatchObject({
-        rows: [["notes/alpha", "notes/beta"]],
-      });
-
-      const queryFile = join(temporary, "tag-query.edn");
-      await writeFile(
-        queryFile,
-        '[:find ?id :where [?note ":note/id" ?id] [?note ":note/tag" "agent-memory"]]',
-        "utf8",
-      );
-      const fileQueryOutput = captureOutput();
-      expect(await main([
-        "datalog",
-        "--query-file",
-        queryFile,
-        "--root",
-        vault,
-        "--limit",
-        "2",
-        "--json",
-      ], fileQueryOutput.output)).toBe(0);
-      expect(JSON.parse(fileQueryOutput.stdout())).toMatchObject({
-        columns: ["?id"],
-        rows: [["notes/alpha"], ["notes/beta"]],
-        truncated: true,
-      });
-
       const percolationOutput = captureOutput();
       expect(await main([
         "percolate",
@@ -926,37 +801,6 @@ describe("kb vault commands", () => {
     }
   });
 
-  test("sanitizes foreign Datalog cells and secrets in JSON output", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-json-"));
-    try {
-      await writeFile(join(temporary, "index.md"), "# Index\n", "utf8");
-      const output = captureOutput();
-      expect(await main([
-        "datalog",
-        '[:find ?value :where [?entity ":kb/id" ?value]]',
-        "--root",
-        temporary,
-        "--json",
-      ], output.output, {
-        queryDatalog: () => Promise.resolve({
-          columns: ["?value"],
-          rows: [[
-            "bad\u001b]8;;https://evil.example\u0007path\u001b]8;;\u0007 Authorization: Bearer runtime-secret",
-          ]],
-          truncated: false,
-          factCount: 1,
-        }),
-      })).toBe(0);
-      expect(output.stdout()).not.toContain("\u001b");
-      expect(output.stdout()).not.toContain("runtime-secret");
-      expect(arrayProperty(parseJsonObject(output.stdout()), "rows")).toEqual([[
-        "badpath Authorization: [REDACTED]",
-      ]]);
-    } finally {
-      await rm(temporary, { recursive: true, force: true });
-    }
-  });
-
   test("explains collision-safe concept IDs in terminal percolation output", async () => {
     const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-concept-collision-"));
     try {
@@ -1027,13 +871,6 @@ describe("kb vault commands", () => {
         "--json",
       ], captureOutput().output, dependencies)).toBe(0);
       expect(await main([
-        "datalog",
-        "[:find ?id :where [?note :note/id ?id]]",
-        "--root",
-        temporary,
-        "--json",
-      ], captureOutput().output, dependencies)).toBe(0);
-      expect(await main([
         "percolate",
         "Alpha concept",
         "--root",
@@ -1048,7 +885,6 @@ describe("kb vault commands", () => {
       ], captureOutput().output, dependencies)).toBe(0);
 
       expect(scans).toEqual([
-        { mentionScope: false },
         { mentionScope: false },
         {
           maxNotes: 10_000,

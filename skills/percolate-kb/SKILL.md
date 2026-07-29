@@ -6,8 +6,9 @@ description: Review a hraness/kb Markdown vault for recurring ideas and missing 
 # Percolate concepts and relationships
 
 Keep the graph authored, local, and reviewable. `kb percolate` proposes
-candidates from deterministic evidence; it never changes a note. DataScript and
-QMD are derived query views, while Markdown remains the authority.
+candidates from deterministic evidence; it never changes a note. Backlinks,
+graph reports, and QMD results are derived views, while Markdown remains the
+authority.
 
 ## Locate the vault
 
@@ -113,12 +114,13 @@ Use exact structure to verify that the promoted graph says what the prose says:
 
 ```sh
 kb links notes/write-path --root "$KB_ROOT" --direction both --depth 2 --json
-kb datalog '[:find ?target :where [?edge :edge/predicate "supports"] [?edge :edge/target ?target-ref] [?target-ref :note/id ?target]]' \
-  --root "$KB_ROOT" --json
+kb relation list notes/write-path --root "$KB_ROOT" --json
+kb graph --root "$KB_ROOT" --json
 ```
 
-Keep raw Datalog queries bounded. Confirm returned IDs against their Markdown
-notes before reporting a conclusion.
+Prefer the note-scoped commands first. Use the whole-vault graph only when the
+question spans several neighborhoods, and confirm returned IDs against their
+Markdown notes before reporting a conclusion.
 
 ## Finish without creating a merge hotspot
 

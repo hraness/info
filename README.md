@@ -7,11 +7,11 @@ ordinary Markdown files you can open in Obsidian and track with Git. it saves
 public or signed-in web pages and PDFs with their sources, connects selected
 `AGENTS.md` guides to notes for that part of a codebase, follows links and typed
 relationships between notes, helps agents surface reusable concepts, searches
-locally by exact words or similar meaning, and can query the live Markdown as a
-temporary Datalog graph.
+locally by exact words or similar meaning, and derives focused graph views from
+the live Markdown.
 
 ```sh
-bun add --global github:hraness/kb#v0.9.0
+bun add --global github:hraness/kb#v0.10.0
 ```
 
 [article](https://crclte.com/articles/a-durable-knowledge-base-is-a-write-path)
@@ -26,7 +26,7 @@ meaning uses a replaceable local index; Markdown remains the source of truth.
 <!-- article:a-durable-knowledge-base-is-a-write-path:start -->
 ## [A knowledge base for your coding agents](<https://crclte.com/articles/a-durable-knowledge-base-is-a-write-path>)
 
-> Keep load-bearing rules in scoped AGENTS.md files, then let agents grow concepts and relationships in a plain-Markdown KB vault with disposable local Datalog and semantic views.
+> Keep load-bearing rules in scoped AGENTS.md files, then let agents grow concepts and relationships in a plain-Markdown vault with focused graph tools and local search.
 
 A coding agent needs two kinds of repository memory. It needs rules that govern the edit now, and it needs explanations and evidence that may help it reason. Mixing both into one automatically loaded prompt makes every task pay for history it may not need. Putting hard rules only in an optional knowledge base lets an agent miss them.
 
@@ -57,11 +57,11 @@ repository/
 
 authored Markdown + frontmatter + wikilinks
               ├── kb list / kb links
-              ├── kb datalog / percolate  # in-memory DataScript view
+              ├── kb graph / percolate    # derived exact graph views
               └── kb search               # derived local QMD index
 ```
 
-Markdown is authoritative in this map. The catalog, backlink view, DataScript database, and semantic index can be deleted and rebuilt. Obsidian can browse the same files, but it is a compatible editor rather than a runtime dependency. Git supplies review, history, and recovery for both rules and knowledge.
+Markdown is authoritative in this map. The catalog, backlink and graph reports, and semantic index can be deleted and rebuilt. Obsidian can browse the same files, but it is a compatible editor rather than a runtime dependency. Git supplies review, history, and recovery for both rules and knowledge.
 
 ### Separate rules from explanations
 
@@ -187,47 +187,29 @@ kb relation add notes/write-path supports notes/durable-agent-memory \
   --root kb
 ```
 
-### Project Markdown into Datalog
+### Prefer focused graph operations
 
-KB projects the current notes into an immutable in-memory [DataScript](<https://github.com/tonsky/datascript>) database for each structural query. Notes, tags, typed metadata leaves, wikilinks, and relationship edges receive stable semantic string identities. DataScript's numeric entity IDs never appear in the public result. `kb datalog` can then express joins, aggregates, predicates, and recursive paths that would be awkward as a collection of bespoke commands:
+A general graph query language can express joins, aggregates, and custom recursive rules. It also gives every agent another syntax to learn, another execution boundary to contain, and another abstraction to debug. That cost is justified only when recurring questions cannot be answered cleanly by smaller operations.
 
-The engine choice is intentionally narrow. [Datalevin getting-started guide](<https://datalevin.org/docs/02-getting-started>) and [CozoDB documentation](<https://docs.cozodb.org/en/latest/>) are compelling when the graph database itself owns durable state. KB already has a durable, mergeable source of truth in Git, so adding native storage, a JVM, migrations, or a second synchronization protocol would solve the wrong problem. DataScript supplies recursive Datalog over a temporary relation and then gets out of the way.
+KB keeps the current surface specific: `kb graph` reports the resolved whole-vault structure, `kb backlinks` reverses authored edges, `kb relation list` separates authored outbound assertions from derived inbound ones, and `kb links` performs cycle-safe traversal with explicit depth and result limits. These commands rebuild their views from Markdown and return canonical note identities; no graph database or generated fact file becomes shared state.
 
-Raw queries run in a disposable one-shot subprocess with a 2-second default deadline, a 5-second ceiling, and bounded inputs and results. Fact projection spends its limit while it walks nested metadata, and the parent validates the result again before returning it to the CLI. An accidental Cartesian product therefore ends as a typed budget error or a terminated child process instead of occupying the agent indefinitely.
-
-DataScript 1.7.8 evaluates recursive rules top-down. A rule that walks relationships which may cycle must carry an explicit remaining-depth argument and decrement it on every recursive hop; an unbounded recursive rule over a cycle is contained by the subprocess deadline. For ordinary path questions, `kb links` already provides bounded traversal and cycle handling.
-
-**A bounded Datalog relationship query**
-
-```shell
-kb datalog '[
-  :find ?source ?target
-  :where
-  [?edge :edge/predicate "supports"]
-  [?edge :edge/source ?source-ref]
-  [?source-ref :note/id ?source]
-  [?edge :edge/target ?target-ref]
-  [?target-ref :note/id ?target]
-]' --root kb --limit 50 --json
-```
-
-The database is never committed, shared, or treated as storage. DataScript's JavaScript persistence serializes a complete database; using that snapshot as a repository artifact would create the central merge hotspot this design is meant to avoid. Rebuilding from Markdown keeps facts readable, diffs local to the note that owns them, and the query engine replaceable. During parallel work, each lane can run `kb check --no-catalog` without rewriting `index.md`; the integrating agent performs one final refresh.
+A one-off whole-vault question can inspect the bounded JSON graph in the agent or a task-local script. If the same question keeps returning, it can become a named command with an explicit output contract and regression tests. This keeps the interface driven by demonstrated retrieval needs rather than a speculative general-purpose layer. During parallel work, each lane can run `kb check --no-catalog` without rewriting `index.md`; the integrating agent performs one final refresh.
 
 Exact structure cannot find a note whose author used unexpected language. For that lane, hraness/kb embeds [QMD, a local search engine for Markdown](<https://github.com/tobi/qmd>). `kb index` builds or refreshes a derived database in a local cache outside the vault. `kb search` checks for changed Markdown, then returns semantic candidates joined to authored metadata, tags, backlinks, and edge counts. Keyword BM25 search remains available with `--mode keyword` when exact terms fit better.
 
-A vector score means two passages occupy a nearby region in an embedding model's representation. It does not mean the passage is current, correct, or supported by its sources. Use semantic results to find candidates, metadata and Datalog to narrow them, links and typed edges to inspect stated relationships, and the Markdown plus cited captures to verify the answer. QMD remains optional and local; deleting its index does not delete knowledge.
+A vector score means two passages occupy a nearby region in an embedding model's representation. It does not mean the passage is current, correct, or supported by its sources. Use semantic results to find candidates, metadata to narrow them, links and typed edges to inspect stated relationships, and the Markdown plus cited captures to verify the answer. QMD remains optional and local; deleting its index does not delete knowledge.
 
 ### Keep plans durable and promote rules to AGENTS.md
 
 A plan shown only in chat has the same session boundary as the reasoning that produced it. The `plan-kb` skill writes a normal Markdown file with an outcome, status, area, assumptions, dependencies, decisions, and verification method. During execution, the same plan accumulates deviations, review findings, command evidence, and the final result. Completed plans remain as history. A finding that becomes a load-bearing edit rule moves into the applicable `AGENTS.md`; its rationale and evidence may stay linked from the scope hub.
 
-hraness/kb also ships six Agent Skills that preserve the same file contract. `save-url-kb` selects a URL acquisition route and records completeness; `save-pdf-kb` preserves a PDF's text, images, bytes, and provenance; `query-kb` chooses exact metadata, Datalog, graph, or semantic retrieval; `percolate-kb` reviews changed notes for reusable concepts and evidence-backed relationships; `refresh-kb` regenerates the catalog and reviews graph diagnostics; and `plan-kb` keeps execution knowledge durable. The [agent workflow documentation](<https://github.com/hraness/kb/blob/main/docs/agent-workflow.md>) defines how these skills meet the CLI contracts across agent runners. Skills guide writes and retrieval; they do not make application code depend on KB.
+hraness/kb also ships six Agent Skills that preserve the same file contract. `save-url-kb` selects a URL acquisition route and records completeness; `save-pdf-kb` preserves a PDF's text, images, bytes, and provenance; `query-kb` chooses exact metadata, graph, or semantic retrieval; `percolate-kb` reviews changed notes for reusable concepts and evidence-backed relationships; `refresh-kb` regenerates the catalog and reviews graph diagnostics; and `plan-kb` keeps execution knowledge durable. The [agent workflow documentation](<https://github.com/hraness/kb/blob/main/docs/agent-workflow.md>) defines how these skills meet the CLI contracts across agent runners. Skills guide writes and retrieval; they do not make application code depend on KB.
 
 ### Adopt the smallest useful split
 
-Start with a short inherited `AGENTS.md` path for rules whose omission would make an edit wrong. Add a scope hub only when its rationale, evidence, plans, or linked decisions deserve pull-based retrieval. A small KB vault may need only Markdown, Git, an index, and ordinary file search. Add typed relationships, Datalog, metadata queries, graph traversal, QMD, browser capture, or PDF ingestion only when the simpler layer stops answering the repository's questions.
+Start with a short inherited `AGENTS.md` path for rules whose omission would make an edit wrong. Add a scope hub only when its rationale, evidence, plans, or linked decisions deserve pull-based retrieval. A small KB vault may need only Markdown, Git, an index, and ordinary file search. Add typed relationships, metadata queries, graph traversal, QMD, browser capture, or PDF ingestion only when the simpler layer stops answering the repository's questions.
 
-This is a file-backed control plane paired with an optional knowledge plane, not autonomous memory. Checks validate structure, not truth. Capture preserves a selected surface, not the source's trustworthiness. A typed edge records an authored assertion, not proof; Datalog derives answers, not facts; and semantic similarity supplies candidates, not conclusions. The design works only while people and agents keep hard rules in scope and revise the concepts, evidence, and explanations those rules point to.
+This is a file-backed control plane paired with an optional knowledge plane, not autonomous memory. Checks validate structure, not truth. Capture preserves a selected surface, not the source's trustworthiness. A typed edge records an authored assertion, graph traversal derives paths rather than facts, and semantic similarity supplies candidates rather than conclusions. The design works only while people and agents keep hard rules in scope and revise the concepts, evidence, and explanations those rules point to.
 <!-- article:a-durable-knowledge-base-is-a-write-path:end -->
 
 ## Install
@@ -240,7 +222,7 @@ Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
 Install hraness/kb and its bundled Agent Skills from
-https://github.com/hraness/kb at the immutable v0.9.0 tag. Follow the repository
+https://github.com/hraness/kb at the immutable v0.10.0 tag. Follow the repository
 README, install the `kb` CLI, copy or link the skills I need into this agent
 runner's configured skills directory, and verify the installation with
 `kb doctor` and `kb --help`. Do not initialize or modify a vault until I ask.
@@ -250,10 +232,10 @@ The repository and packed package carry the same skill directories, so an agent
 can inspect the tagged instructions before placing them in its runner-specific
 discovery path.
 
-Install the CLI from the immutable `v0.9.0` tag:
+Install the CLI from the immutable `v0.10.0` tag:
 
 ```sh
-bun add --global github:hraness/kb#v0.9.0
+bun add --global github:hraness/kb#v0.10.0
 kb --help
 ```
 
@@ -262,7 +244,7 @@ For programmatic use, declare the same pinned source in a project:
 ```json
 {
   "dependencies": {
-    "@hraness/kb": "github:hraness/kb#v0.9.0"
+    "@hraness/kb": "github:hraness/kb#v0.10.0"
   }
 }
 ```
@@ -279,12 +261,12 @@ kb --help
 
 HTTP capture works with the installed JavaScript dependencies. Rendered capture additionally needs a local Chromium-compatible browser. [yt-dlp](https://github.com/yt-dlp/yt-dlp) adds YouTube metadata, thumbnails, and transcripts; full audio or video localization is opt-in and some formats also need [FFmpeg](https://ffmpeg.org). PDF ingestion uses the open-source Poppler tools `pdfinfo` and `pdftohtml`; [Tesseract](https://github.com/tesseract-ocr/tesseract) adds local OCR for scans and screenshots.
 
-Structural queries use [DataScript](https://github.com/tonsky/datascript) as a
-disposable in-memory Datalog view over Markdown. It needs no service, model, or
-committed database. Semantic search uses [QMD](https://github.com/tobi/qmd) and
-its recommended compact local EmbeddingGemma model. The first `kb index` or
-semantic `kb search` downloads the model (about 300 MB); keyword search and
-every structural command work without it.
+Structural commands read the current Markdown directly and need no service,
+model, or graph database. Semantic search uses
+[QMD](https://github.com/tobi/qmd) and its recommended compact local
+EmbeddingGemma model. The first `kb index` or semantic `kb search` downloads
+the model (about 300 MB); keyword search and every structural command work
+without it.
 
 ## Start a vault
 
@@ -333,7 +315,6 @@ question deliberately.
 | `kb note create <id> --title <title> --root <directory>` | Atomically create one confined Markdown note; use `--type concept` for a reusable concept. |
 | `kb relation add\|remove <source> <predicate> <target>` | Idempotently edit one source note's typed outbound relationship using exact canonical note IDs. |
 | `kb relation list <note> --root <directory>` | List a note's authored outbound and derived inbound typed relationships. |
-| `kb datalog <query> --root <directory>` | Run a sorted, bounded Datalog query in a disposable one-shot subprocess over current Markdown; use `--query-file` and `--rules-file` for reviewed recursive programs, and `--timeout-ms` within the hard 5-second ceiling. |
 | `kb percolate [note] --root <directory>` | Report evidence-backed recurring-concept and missing-relationship candidates without writing notes. |
 | `kb list --root <directory>` | Filter typed, nested frontmatter and tags; sort by metadata, title, path, or graph counts. `kb notes` is an alias. |
 | `kb index --root <directory>` | Build or incrementally refresh the optional local QMD embedding index. |
@@ -389,29 +370,18 @@ relations:
 ```
 
 Predicates use lower-kebab-case and targets use exact vault-root IDs without
-`.md`. `kb graph`, `kb backlinks`, `kb links`, and `kb datalog` derive inverse
-edges and paths without injecting reciprocal or inferred facts into notes.
+`.md`. `kb graph`, `kb backlinks`, `kb relation list`, and `kb links` derive
+inverse edges and bounded paths without injecting reciprocal or inferred facts into notes.
 `kb percolate` proposes reusable concepts and missing connections with explicit
 support; an agent reviews the cited prose before authoring anything.
 
-The DataScript projection is rebuilt from current Markdown for each query and
-consumed only by its disposable query subprocess. KB never commits a graph database,
-generated facts file, or engine entity ID. Parallel agents therefore keep
-editing separate notes. Each lane can run `kb check --no-catalog`, and the
+These focused views are rebuilt from current Markdown. KB never commits a graph
+database, generated fact file, or engine entity ID. Parallel agents therefore
+keep editing separate notes. Each lane can run `kb check --no-catalog`, and the
 integrator runs one final `kb refresh` for the only shared generated region in
-`index.md`.
-
-Datalog evaluation is asynchronous and isolated behind a 2-second default
-subprocess deadline, a hard 5-second ceiling, and bounded request and result
-transfers validated on both sides of IPC. Projection also spends its fact
-budget while traversing nested metadata.
-Programmatic callers can branch on owned `DatalogBudgetError` and
-`FactProjectionBudgetError` kinds instead of matching error text.
-
-Datalog queries use the fixed `:kb/*`, `:note/*`, `:metadata/*`, and `:edge/*`
-attribute vocabulary documented in [Design](docs/design.md). Edge endpoints are
-semantic references; join them through `:note/id` to return canonical Markdown
-IDs. Conventional EDN keyword spelling works at the CLI boundary.
+`index.md`. Use `kb graph --json` for a whole-vault structural question; when a
+question recurs, prefer adding a focused command with a bounded output contract
+over introducing a parallel query store.
 
 Frontmatter retains nested objects, arrays, finite numbers with safe integer precision, booleans, strings, and nulls. `kb list --where type=plan --tag ingestion --sort metadata.updated --order desc` answers exact questions from that authored data. Unquoted `true`, `false`, `null`, and numeric filter values are typed; keep the quotes inside the argument to match a string with the same spelling, for example `kb list --where 'external_id="9007199254740993"'`. QMD search is a discovery layer: each match is joined back to the live metadata and graph view, and similarity never becomes a link automatically.
 
@@ -432,9 +402,8 @@ their runtime to the vault.
 The package exports its full programmatic surface from `@hraness/kb`; focused
 entry points from `@hraness/kb/agent-context`,
 `@hraness/kb/agent-guide-audit`, `@hraness/kb/authoring`,
-`@hraness/kb/datalog`, `@hraness/kb/facts`, `@hraness/kb/graph`,
-`@hraness/kb/navigation`, `@hraness/kb/percolate`, `@hraness/kb/query`, and
-`@hraness/kb/semantic`; web-capture orchestration and
+`@hraness/kb/graph`, `@hraness/kb/navigation`, `@hraness/kb/percolate`,
+`@hraness/kb/query`, and `@hraness/kb/semantic`; web-capture orchestration and
 diagnostics from
 `@hraness/kb/capture`; PDF ingestion from `@hraness/kb/pdf`; and reusable
 disposable-profile helpers from `@hraness/kb/browser-profiles`. Embedders that
@@ -450,7 +419,7 @@ The repository and packed package ship six reusable Agent Skills under
 `skills/`: `save-url-kb` for auditable web ingestion, `save-pdf-kb` for
 local and public remote PDF conversion, `refresh-kb` for graph and
 agent-context validation, `query-kb` for loading repository-path context
-before bounded metadata, Datalog, graph, keyword, or semantic retrieval,
+before bounded metadata, graph, keyword, or semantic retrieval,
 `percolate-kb` for reviewing and promoting reusable concepts and typed
 relationships, and `plan-kb` for creating and growing durable implementation
 plans. Copy or link a skill

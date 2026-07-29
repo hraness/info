@@ -5,17 +5,7 @@ import {
 } from "./index-vrtztn7t.js";
 import {
   initVault
-} from "./index-gdf1r973.js";
-import {
-  indexSemanticVault,
-  refreshVault,
-  scanVault,
-  searchSemanticVault
-} from "./index-j9s77ka0.js";
-import {
-  queryDatalog
-} from "./index-z3197chz.js";
-import"./index-gp8ppyv5.js";
+} from "./index-awz7cev4.js";
 import {
   navigateLinks
 } from "./index-d13v9ckt.js";
@@ -29,6 +19,12 @@ import {
 import {
   queryVault
 } from "./index-m4bexhht.js";
+import {
+  indexSemanticVault,
+  refreshVault,
+  scanVault,
+  searchSemanticVault
+} from "./index-j9s77ka0.js";
 import {
   auditAgentGuideRepository
 } from "./index-07fsx8bp.js";
@@ -116,8 +112,6 @@ Usage:
   kb relation add <source> <predicate> <target> [--root <directory>] [--expected-revision <sha256:...>] [--json]
   kb relation remove <source> <predicate> <target> [--root <directory>] [--expected-revision <sha256:...>] [--json]
   kb relation list <note> [--root <directory>] [--json]
-  kb datalog <query> [--rules-file <path>] [--root <directory>] [--limit <count>] [--timeout-ms <milliseconds>] [--json]
-  kb datalog --query-file <path> [--rules-file <path>] [--root <directory>] [--limit <count>] [--timeout-ms <milliseconds>] [--json]
   kb percolate [note] [--root <directory>] [--min-support <count>] [--limit <count>] [--json]
   kb list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
   kb index [--root <directory>] [--database <path>] [--force] [--json]
@@ -702,72 +696,6 @@ function parseRelationCommand(arguments_) {
     }
   };
 }
-function parseDatalogCommand(arguments_) {
-  let root = ".";
-  let queryFile;
-  let rulesFile;
-  let limit = 100;
-  let timeoutMs;
-  let json = false;
-  const positional = [];
-  for (let cursor = 0;cursor < arguments_.length; cursor += 1) {
-    const argument = arguments_[cursor];
-    if (argument === undefined)
-      continue;
-    if (argument === "--json") {
-      json = true;
-      continue;
-    }
-    if (argument === "--root" || argument === "--query-file" || argument === "--rules-file" || argument === "--limit" || argument === "--timeout-ms") {
-      const value = readValue(arguments_, cursor);
-      if (value === null)
-        return { ok: false, message: `${argument} requires a value` };
-      if (argument === "--root")
-        root = value;
-      else if (argument === "--query-file")
-        queryFile = value;
-      else if (argument === "--rules-file")
-        rulesFile = value;
-      else if (argument === "--limit") {
-        const parsed = boundedInteger(value, "--limit", 1, 1000);
-        if (typeof parsed !== "number")
-          return parsed;
-        limit = parsed;
-      } else {
-        const parsed = boundedInteger(value, "--timeout-ms", 1, 5000);
-        if (typeof parsed !== "number")
-          return parsed;
-        timeoutMs = parsed;
-      }
-      cursor += 1;
-      continue;
-    }
-    if (argument.startsWith("--")) {
-      return { ok: false, message: "unknown datalog option" };
-    }
-    positional.push(argument);
-  }
-  const query = positional.join(" ").trim();
-  if (query === "" === (queryFile === undefined)) {
-    return {
-      ok: false,
-      message: "datalog requires exactly one query or --query-file"
-    };
-  }
-  return {
-    ok: true,
-    value: {
-      kind: "datalog",
-      root,
-      ...query === "" ? {} : { query },
-      ...queryFile === undefined ? {} : { queryFile },
-      ...rulesFile === undefined ? {} : { rulesFile },
-      limit,
-      ...timeoutMs === undefined ? {} : { timeoutMs },
-      json
-    }
-  };
-}
 function parsePercolateCommand(arguments_) {
   let root = ".";
   let minSupport = 2;
@@ -873,8 +801,6 @@ function parseArguments(arguments_) {
     return parseNoteCommand(arguments_.slice(1));
   if (command === "relation")
     return parseRelationCommand(arguments_.slice(1));
-  if (command === "datalog")
-    return parseDatalogCommand(arguments_.slice(1));
   if (command === "percolate")
     return parsePercolateCommand(arguments_.slice(1));
   return { ok: false, message: "unknown command" };
@@ -1181,45 +1107,6 @@ async function runRelation(command, output, dependencies) {
   const options = command.expectedRevision === undefined ? {} : { expectedRevision: command.expectedRevision };
   const result = command.action === "add" ? await (dependencies.addNoteRelation ?? addNoteRelation)(command.root, command.source, predicate, target, options) : await (dependencies.removeNoteRelation ?? removeNoteRelation)(command.root, command.source, predicate, target, options);
   output.stdout(command.json ? terminalSafeJson(result) : sanitizeTerminalText(renderAuthoringResult("Updated", result)));
-  return 0;
-}
-function datalogCell(value) {
-  return value === null ? "null" : safe(typeof value === "string" ? value : String(value));
-}
-function renderDatalog(result) {
-  const lines = [
-    `Datalog: ${result.rows.length} row${result.rows.length === 1 ? "" : "s"} from ${result.factCount} facts${result.truncated ? " (truncated)" : ""}.`,
-    `  ${result.columns.map(safe).join("  |  ")}`
-  ];
-  for (const row of result.rows) {
-    lines.push(`  ${row.map(datalogCell).join("  |  ")}`);
-  }
-  if (result.rows.length === 0)
-    lines.push("  None.");
-  return `${lines.join(`
-`)}
-`;
-}
-async function runDatalog(command, output, dependencies) {
-  const query = command.query ?? (command.queryFile === undefined ? undefined : await readBoundedUtf8(command.queryFile, 65536, "Datalog query"));
-  if (query === undefined)
-    throw new Error("datalog command parser lost its query");
-  const rules = command.rulesFile === undefined ? undefined : await readBoundedUtf8(command.rulesFile, 65536, "Datalog rules");
-  const snapshot = await (dependencies.scanVault ?? scanVault)(command.root, { mentionScope: false });
-  const options = {
-    notes: snapshot.notes,
-    analysis: snapshot.analysis,
-    query,
-    ...rules === undefined ? {} : { rules },
-    limit: command.limit,
-    ...command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }
-  };
-  const result = await (dependencies.queryDatalog ?? queryDatalog)(options);
-  output.stdout(command.json ? terminalSafeJson({
-    root: snapshot.root,
-    query,
-    ...result
-  }) : sanitizeTerminalText(renderDatalog(result)));
   return 0;
 }
 function renderPercolation(result, note) {
@@ -1597,8 +1484,6 @@ ${sanitizeTerminalText(usage)}`);
       return await runNoteCreate(command, output, dependencies);
     if (command.kind === "relation")
       return await runRelation(command, output, dependencies);
-    if (command.kind === "datalog")
-      return await runDatalog(command, output, dependencies);
     if (command.kind === "percolate")
       return await runPercolate(command, output, dependencies);
     if (command.kind === "list")

@@ -2,7 +2,7 @@
 
 This guide gives coding agents a conservative workflow for reading and
 maintaining a vault. Markdown is the durable record. Tool output, catalogs,
-DataScript databases, backlinks, inferred paths, and percolation candidates are
+backlinks, traversed paths, semantic indexes, and percolation candidates are
 views over that record.
 
 ## Orient before editing
@@ -15,7 +15,7 @@ views over that record.
 4. Use the narrowest view that answers the question:
    - `kb list` for exact frontmatter or tag filters.
    - `kb links <note>`, `kb backlinks <note>`, or `kb relation list <note>` for authored relationships.
-   - `kb datalog` for joins, aggregates, predicates, or recursive paths.
+   - `kb graph` for a whole-vault structural report.
    - `kb search` when the same idea may be expressed in different words.
    - `kb graph` for whole-vault diagnostics.
 
@@ -74,31 +74,20 @@ combined-connection cap truncates a high-degree neighborhood. Lower the limit
 for agent context discipline; raise it deliberately when the structural
 question requires a wider view.
 
-Use Datalog only when the question needs a structural operation that the
-focused commands cannot express:
+Use the whole-vault graph only when the question spans several note
+neighborhoods:
 
 ```sh
-kb datalog '[:find ?source ?target :where [?edge :edge/predicate "supports"] [?edge :edge/source ?source-ref] [?source-ref :note/id ?source] [?edge :edge/target ?target-ref] [?target-ref :note/id ?target]]' --limit 50 --json
+kb graph --root . --json
 ```
 
-Each call rebuilds a disposable DataScript projection from current Markdown.
-Results use canonical string IDs, are sorted and bounded, and remain derived
-answers. Open the returned notes and inspect edge provenance before treating a
-relationship as supported. Evaluation runs in an isolated one-shot subprocess
-with a 2-second deadline by default and a hard 5-second ceiling; use
-`--timeout-ms <milliseconds>` within that range when a reviewed recursive
-program has a known cost. Counts and UTF-8 bytes are bounded before IPC, and
-the child and parent both validate bounded results. A deadline, value, byte,
-or row-budget error is a signal to narrow the query, not to persist a shared
-database.
-
-For recursive paths, put the query and EDN rule vector in separate reviewed
-files, declare `:in $ %`, and pass `--query-file` with `--rules-file`.
-DataScript evaluates rules top-down: when the authored graph may cycle, carry a
-numeric remaining-depth argument and decrement it on every recursive branch.
-Invoke the rule with a fixed bound in the query. An unbounded recursive rule
-over cyclic edges reaches the subprocess deadline; use `kb links` for the common
-cycle-safe traversal case.
+The report is rebuilt from current Markdown and returns canonical note IDs,
+resolved wikilinks, typed relationships, and diagnostics. Prefer `kb links`,
+`kb backlinks`, or `kb relation list` when a known note provides a narrower
+starting point. Open returned notes and inspect edge provenance before treating
+a relationship as supported. If a recurring structural question is awkward to
+answer from the JSON report, add a focused command with a bounded contract
+rather than a second graph store.
 
 Use semantic search for recall rather than exact selection:
 
@@ -220,8 +209,8 @@ kb check --root . --no-catalog
 ```
 
 The integrating agent runs one final refresh and normal check after the lanes
-join. This avoids repeated merge conflicts in `index.md`; no DataScript file or
-generated fact log exists to contend on.
+join. This avoids repeated merge conflicts in `index.md`; no shared graph
+database or generated fact log exists to contend on.
 
 If the change adds, removes, renames, or moves a scope hub, changes its
 `type` or `scope`, or edits an `kb:context` marker, also run:

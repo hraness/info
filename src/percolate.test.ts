@@ -15,27 +15,27 @@ import {
 
 function discoveryFixture(): readonly Note[] {
   return [
-    parseNote("concepts/datalog.md", [
+    parseNote("concepts/retrieval.md", [
       "---",
       "type: concept",
       "---",
-      "# Datalog",
+      "# Retrieval",
     ].join("\n")),
     parseNote("notes/a.md", [
       "---",
-      "tags: [datalog, local-first, shared]",
+      "tags: [retrieval, local-first, shared]",
       "relations:",
       "  about:",
-      "    - concepts/datalog",
+      "    - concepts/retrieval",
       "---",
       "# Alpha",
     ].join("\n")),
     parseNote("notes/b.md", [
       "---",
-      "tags: [datalog, local-first, shared]",
+      "tags: [retrieval, local-first, shared]",
       "relations:",
       "  about:",
-      "    - concepts/datalog",
+      "    - concepts/retrieval",
       "---",
       "# Beta",
     ].join("\n")),
@@ -88,7 +88,7 @@ describe("read-only graph percolation", () => {
       support: 2,
       evidenceTruncated: false,
     });
-    expect(concepts.some((candidate) => candidate.tag === "datalog")).toBe(false);
+    expect(concepts.some((candidate) => candidate.tag === "retrieval")).toBe(false);
 
     const shared = result.candidates.find(
       (candidate): candidate is MissingRelationCandidate =>

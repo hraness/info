@@ -2,9 +2,9 @@
 
 hraness/kb treats a knowledge base as durable Markdown plus replaceable views.
 A vault must remain useful when the CLI is absent, and a capture must remain
-inspectable when the original page changes or disappears. Exact graph,
-metadata, and Datalog views are deterministic; semantic search is optional
-derived state that can be deleted and rebuilt.
+inspectable when the original page changes or disappears. Exact graph and
+metadata views are deterministic; semantic search is optional derived state
+that can be deleted and rebuilt.
 
 ## Storage is the interface
 
@@ -161,68 +161,41 @@ Fenced code, inline code, frontmatter, and HTML comments are excluded from
 mention analysis. Line breaks are preserved during masking so diagnostics
 continue to point at the authored source.
 
-## Datalog is a disposable projection
+## Focused graph views are rebuilt from Markdown
 
-Each Datalog command projects the current notes into an immutable in-memory
-[DataScript](https://github.com/tonsky/datascript) database. Note entities carry
-stable string IDs, titles, aliases, tags, and types. Edge entities retain their
-source, target, predicate, kind, and provenance. Nested frontmatter becomes
-typed metadata-leaf entities with stable paths. DataScript's numeric entity IDs
-never appear in the public API or command output.
+Every structural command scans the current notes and resolves canonical note
+identities, contextual wikilinks, and source-owned typed relationships. The
+package does not maintain a second graph database or generated fact file.
+`kb graph` returns the whole resolved graph and its diagnostics;
+`kb backlinks` and `kb relation list` answer focused inbound or typed-edge
+questions; and `kb links` performs cycle-safe traversal with explicit depth and
+result limits.
 
-The adapter queries an EAV relation with a fixed vocabulary. Every entity has
-`:kb/id` and `:kb/kind`; notes use `:note/*`, metadata leaves use
-`:metadata/*`, and edges use `:edge/*`. Conventional EDN attribute keywords are
-normalized only when they match that owned vocabulary, so quoted strings and
-foreign query inputs keep their literal meaning. Edge endpoints are semantic
-entity references; join them through `:note/id` to return canonical note IDs.
-
-`kb datalog` provides bounded joins, aggregates, and recursive rules over that
-projection. `kb percolate` runs named, read-only rules that surface repeated
-tags without concept notes, unconnected shared-concept neighborhoods, exact
+`kb percolate` runs named, read-only analyses that surface repeated tags
+without concept notes, unconnected shared-concept neighborhoods, exact
 unlinked mentions, and relationship-hygiene findings. The output cites the
-authored facts that caused each candidate. A person or agent decides whether to
-run `kb note create` or `kb relation add`.
+authored evidence that caused each candidate. A person or agent decides whether
+to run `kb note create` or `kb relation add`.
 
-Projection spends its fact budget while it walks metadata, rather than
-materializing an unbounded nested tree and checking afterward. Query evaluation
-runs in a disposable one-shot subprocess with a 2-second default deadline and
-a 5-second absolute deadline. Before IPC, KB caps the projection at 250,000
-facts and validates a 16 MiB snapshot, 100,000 input values, 64 KiB scalar
-values, and 4 MiB of extra inputs. The child and parent both enforce 10,000
-rows, 100,000 result values, 64 KiB scalar values, and a 4 MiB result transfer.
-`--timeout-ms` may lower or raise the deadline within the hard range. Node 24
-children also receive a 256 MiB V8 old-space ceiling; Bun 1.3 children use its
-lower-memory `--smol` mode, which is not presented as a hard heap limit. The
-programmatic `queryDatalog` API is asynchronous, and budget failures expose
-owned `DatalogBudgetError` or `FactProjectionBudgetError` kinds so callers can
-distinguish a timeout, result growth, transfer growth, and projection growth
-without parsing an engine error string.
+This named-command surface is deliberate. Common graph questions receive a
+small typed contract, deterministic ordering, and an operation-specific bound
+instead of requiring every agent to construct an ad hoc query program. A
+one-off whole-vault question can inspect `kb graph --json`; a recurring question
+earns a focused command and regression tests when real use demonstrates the
+need.
 
-Recursive CLI queries declare `:in $ %` and receive their EDN rule vector from
-an explicit, bounded `--rules-file`. This keeps shell quoting small and makes
-the rule program independently reviewable. DataScript evaluates rules
-top-down, so a rule over graph edges that may cycle carries and decrements an
-explicit remaining-depth argument. An unbounded recursive rule over a cycle is
-contained by the subprocess deadline; the focused `kb links` command supplies
-cycle-safe bounded traversal without a custom rule.
+Commands that only need links and typed relationships skip quadratic
+prose-mention discovery. A scoped `kb percolate <note>` considers only mention
+pairs touching the resolved note; vault-wide percolation and ordinary graph
+maintenance use explicit pair and result budgets. Scans reject more than 10,000
+notes before parsing, then bound each note at 16 MiB of valid UTF-8 and the
+vault at 256 MiB. These are package ceilings; callers may select lower
+operation-specific limits.
 
-Commands that only need links and typed relationships (`kb datalog` and
-`kb relation list`) skip quadratic prose-mention discovery. A scoped
-`kb percolate <note>` considers only mention pairs touching the resolved note;
-vault-wide percolation and ordinary graph maintenance use explicit pair and
-result budgets. Scans reject more than 10,000 notes before parsing, then bound
-each note at 16 MiB of valid UTF-8 and the vault at 256 MiB. These are package
-ceilings; callers may select lower operation-specific limits.
-
-KB never commits a DataScript database, serialized snapshot, generated fact
-file, or event log. The JavaScript engine serializes a complete database rather
-than providing incremental durable storage, and a shared snapshot would become
-a repository-wide merge hotspot. Rebuilding from Markdown keeps the database
-replaceable and keeps Git history on the assertions humans can read. A future
-cache may live outside the vault only if measurements justify it; it must be
-content-addressed by source, projection schema, and engine version and rebuild
-on any mismatch.
+Rebuilding views from Markdown keeps Git history on assertions people can read
+and avoids a repository-wide merge hotspot. A future cache may live outside the
+vault only if measurements justify it; it must be content-addressed by source
+and analysis version and rebuild on any mismatch.
 
 ## Refresh owns one region
 
@@ -312,11 +285,10 @@ These boundaries are not entitlement mechanisms. Capture does not bypass authent
 
 [Bun](https://bun.sh) is the required runtime.
 [YAML](https://eemeli.org/yaml/) parses typed frontmatter,
-[DataScript](https://github.com/tonsky/datascript) supplies the disposable
-in-memory Datalog view, and [QMD](https://github.com/tobi/qmd) supplies the
-optional local keyword and embedding index. QMD is loaded only by index and
-search commands, so deterministic graph, Datalog, and metadata commands do not
-initialize its native runtime or model.
+and [QMD](https://github.com/tobi/qmd) supplies the optional local keyword and
+embedding index. QMD is loaded only by index and search commands, so
+deterministic graph and metadata commands do not initialize its native runtime
+or model.
 
 [Defuddle](https://github.com/kepano/defuddle) performs article extraction. [agent-browser](https://github.com/vercel-labs/agent-browser) provides optional rendered acquisition. The pinned [Sweet Cookie safety fork](https://github.com/hraness/sweet-cookie) supports explicit browser-cookie import while retaining host-only scope and rejecting partitioned or container-scoped state that the capture lanes cannot replay faithfully.
 

@@ -1,6 +1,6 @@
 ---
 name: refresh-kb
-description: Refresh and validate a hraness/kb Markdown and Datalog knowledge graph after notes, concepts, typed relationships, or repository-context mappings change. Use when an agent needs to update the managed catalog, inspect graph and percolation findings, validate scope hubs and reciprocal guide markers, or complete a vault health check.
+description: Refresh and validate a hraness/kb Markdown knowledge graph after notes, concepts, typed relationships, or repository-context mappings change. Use when an agent needs to update the managed catalog, inspect graph and percolation findings, validate scope hubs and reciprocal guide markers, or complete a vault health check.
 ---
 
 # Refresh a knowledge base

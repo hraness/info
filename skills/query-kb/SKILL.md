@@ -1,6 +1,6 @@
 ---
 name: query-kb
-description: Load scoped repository context, then search and navigate a hraness/kb Markdown vault with exact metadata, bounded links and typed relationships, Datalog, backlinks, keyword search, or local semantic retrieval. Use when an agent needs the applicable repository instructions, rationale, prior knowledge, plans, captures, decisions, concepts, relationships, or evidence before answering, planning, or changing code.
+description: Load scoped repository context, then search and navigate a hraness/kb Markdown vault with exact metadata, bounded links and typed relationships, backlinks, whole-vault graph reports, keyword search, or local semantic retrieval. Use when an agent needs the applicable repository instructions, rationale, prior knowledge, plans, captures, decisions, concepts, relationships, or evidence before answering, planning, or changing code.
 ---
 
 # Query the knowledge base
@@ -27,8 +27,8 @@ authority; search scores, metadata rows, and graph results are derived views.
 - Known frontmatter field or tag such as type, status, or area: use `kb list`.
 - Known note title, path, or alias: use `kb links` or `kb backlinks`, which
   resolve note identities before returning authored relationships.
-- A join, recursive path, aggregate, concept neighborhood, or relationship
-  predicate: use `kb datalog` against the disposable local graph projection.
+- A whole-vault structural question or relationship audit: use `kb graph --json`,
+  then inspect the smallest relevant portion of its canonical output.
 - Concept expressed with different vocabulary: use `kb search`.
 - Broad orientation: read `index.md`, then follow the smallest useful link trail.
 
@@ -39,7 +39,7 @@ kb list --root "$KB_ROOT" --tag retrieval --sort title --json
 kb backlinks "Plan title or path" --root "$KB_ROOT" --json
 kb links "Plan title or path" --root "$KB_ROOT" --direction both --depth 1 --limit 25 --json
 kb relation list "Plan title or path" --root "$KB_ROOT" --json
-kb datalog '[:find ?source ?target :where [?edge :edge/predicate "supports"] [?edge :edge/source ?source-ref] [?source-ref :note/id ?source] [?edge :edge/target ?target-ref] [?target-ref :note/id ?target]]' --root "$KB_ROOT" --limit 50 --json
+kb graph --root "$KB_ROOT" --json
 kb search "why browser capture uses the current tab" --root "$KB_ROOT" --json
 ```
 
@@ -73,47 +73,24 @@ model. Treat semantic rank as a lead, not a fact. Open the returned Markdown,
 read enough surrounding context, and confirm claims against linked sources or
 capture manifests.
 
-## Use Datalog for relationships
+## Use focused structural views
 
-`kb datalog` rebuilds an immutable DataScript view from current Markdown, then
-evaluates the query in a disposable one-shot subprocess. It can join notes, tags, typed
-metadata leaves, wikilinks, and authored relationships or apply recursive
-rules. Results expose canonical string IDs rather than engine entity numbers
-and are sorted and bounded.
+`kb graph --json` returns the current resolved wikilinks, typed relationships,
+diagnostics, and note-level connection counts without creating a second graph
+store. Use it when a question spans the vault. Prefer `kb relation list`,
+`kb backlinks`, or `kb links` when a known note gives you a narrower starting
+point.
 
-Queries run against EAV tuples. Every entity has `:kb/id` and `:kb/kind`.
-Notes expose `:note/id`, `:note/path`, `:note/title`, `:note/summary`,
-`:note/alias`, `:note/tag`, `:note/type`, and `:note/concept`. Metadata-leaf
-entities expose `:metadata/note`, `:metadata/path`, `:metadata/value`, and
-`:metadata/value-type`. Edges expose `:edge/kind`, `:edge/source`,
-`:edge/target`, `:edge/predicate`, `:edge/line`, `:edge/provenance`, and
-`:edge/authored-target`. Edge references are stable semantic entity IDs; join
-them through `:note/id` when the answer should contain canonical note IDs.
-Use these fixed attributes with conventional EDN keyword spelling; KB maps that
-vocabulary to the underlying JavaScript relation without changing quoted
-strings. For recursive paths, put an EDN rule vector in a bounded file, declare
-`:in $ %` in the query, and pass it explicitly:
+`kb links` is cycle-safe and requires an explicit traversal depth and result
+limit. `kb relation list` separates authored outbound assertions from derived
+inbound relationships while retaining canonical note IDs and source
+provenance. Open the returned Markdown before treating an edge as correct: a
+typed relationship records an authored assertion, not proof.
 
-```sh
-kb datalog --query-file reachability-query.edn \
-  --rules-file reachability-rules.edn \
-  --root "$KB_ROOT" --limit 50 --timeout-ms 2000 --json
-```
-
-DataScript evaluates recursive rules top-down. If relationship edges may form
-a cycle, give the rule a numeric remaining-depth argument, require it to stay
-positive, and decrement it on every recursive hop; invoke it with a fixed
-bound from the query. Never use an unbounded recursive rule on cyclic graph
-data. The subprocess deadline contains a mistaken program, while `kb links`
-provides the simpler cycle-safe path traversal for ordinary neighborhood work.
-
-Keep queries narrow and use `--limit`. Evaluation defaults to a 2-second
-deadline and cannot exceed 5 seconds; input and result counts and bytes are
-also bounded on both sides of the process boundary. A timeout, row, value, or
-byte-budget error means the query should be narrowed. A Datalog result is a derived answer over authored
-facts. Open the returned notes and inspect provenance before claiming that the
-relationship is correct. The database is never authored, committed, or shared
-between agents.
+If a structural question is not covered by a named command, inspect the
+bounded JSON graph in the agent or a short task-local script. Do not create or
+commit a parallel graph database merely to answer one query. A recurring query
+is evidence for a focused, tested command with an explicit output contract.
 
 ## Combine meaning with structure
 
@@ -127,8 +104,8 @@ between agents.
    first neighborhood is insufficient. Traversal defaults to 50 notes and
    reports truncation; lower `--limit` for tighter agent context or raise it
    deliberately when a high-degree hub is genuinely relevant.
-5. Use Datalog only when the question needs a join, aggregate, predicate, or
-   recursive path that bounded navigation cannot express.
+5. Use `kb graph --json` only when the question genuinely spans multiple
+   neighborhoods; keep one-off processing task-local.
 6. Read the authoritative notes and cited captures before synthesizing.
 
 A title match may identify a prerequisite, prior version, or supporting note

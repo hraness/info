@@ -70,11 +70,6 @@ import {
   type ScanVaultOptions,
   type VaultSnapshot,
 } from "./vault.js";
-import {
-  queryDatalog,
-  type DatalogQueryOptions,
-  type DatalogQueryResult,
-} from "./datalog.js";
 
 type Output = {
   readonly stdout: (value: string) => void;
@@ -134,8 +129,6 @@ Usage:
   kb relation add <source> <predicate> <target> [--root <directory>] [--expected-revision <sha256:...>] [--json]
   kb relation remove <source> <predicate> <target> [--root <directory>] [--expected-revision <sha256:...>] [--json]
   kb relation list <note> [--root <directory>] [--json]
-  kb datalog <query> [--rules-file <path>] [--root <directory>] [--limit <count>] [--timeout-ms <milliseconds>] [--json]
-  kb datalog --query-file <path> [--rules-file <path>] [--root <directory>] [--limit <count>] [--timeout-ms <milliseconds>] [--json]
   kb percolate [note] [--root <directory>] [--min-support <count>] [--limit <count>] [--json]
   kb list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
   kb index [--root <directory>] [--database <path>] [--force] [--json]
@@ -235,16 +228,6 @@ type ParsedCommand =
       readonly json: boolean;
     }
   | {
-      readonly kind: "datalog";
-      readonly root: string;
-      readonly query?: string;
-      readonly queryFile?: string;
-      readonly rulesFile?: string;
-      readonly limit: number;
-      readonly timeoutMs?: number;
-      readonly json: boolean;
-    }
-  | {
       readonly kind: "percolate";
       readonly root: string;
       readonly note?: string;
@@ -268,7 +251,6 @@ type CliDependencies = {
   readonly createNote?: typeof createNote;
   readonly addNoteRelation?: typeof addNoteRelation;
   readonly removeNoteRelation?: typeof removeNoteRelation;
-  readonly queryDatalog?: typeof queryDatalog;
   readonly percolateVault?: typeof percolateVault;
   readonly inspectAgentContextRepository?: typeof inspectAgentContextRepository;
   readonly auditAgentGuideRepository?: typeof auditAgentGuideRepository;
@@ -859,72 +841,6 @@ function parseRelationCommand(arguments_: readonly string[]): ParseResult {
   };
 }
 
-function parseDatalogCommand(arguments_: readonly string[]): ParseResult {
-  let root = ".";
-  let queryFile: string | undefined;
-  let rulesFile: string | undefined;
-  let limit = 100;
-  let timeoutMs: number | undefined;
-  let json = false;
-  const positional: string[] = [];
-  for (let cursor = 0; cursor < arguments_.length; cursor += 1) {
-    const argument = arguments_[cursor];
-    if (argument === undefined) continue;
-    if (argument === "--json") {
-      json = true;
-      continue;
-    }
-    if (
-      argument === "--root"
-      || argument === "--query-file"
-      || argument === "--rules-file"
-      || argument === "--limit"
-      || argument === "--timeout-ms"
-    ) {
-      const value = readValue(arguments_, cursor);
-      if (value === null) return { ok: false, message: `${argument} requires a value` };
-      if (argument === "--root") root = value;
-      else if (argument === "--query-file") queryFile = value;
-      else if (argument === "--rules-file") rulesFile = value;
-      else if (argument === "--limit") {
-        const parsed = boundedInteger(value, "--limit", 1, 1_000);
-        if (typeof parsed !== "number") return parsed;
-        limit = parsed;
-      } else {
-        const parsed = boundedInteger(value, "--timeout-ms", 1, 5_000);
-        if (typeof parsed !== "number") return parsed;
-        timeoutMs = parsed;
-      }
-      cursor += 1;
-      continue;
-    }
-    if (argument.startsWith("--")) {
-      return { ok: false, message: "unknown datalog option" };
-    }
-    positional.push(argument);
-  }
-  const query = positional.join(" ").trim();
-  if ((query === "") === (queryFile === undefined)) {
-    return {
-      ok: false,
-      message: "datalog requires exactly one query or --query-file",
-    };
-  }
-  return {
-    ok: true,
-    value: {
-      kind: "datalog",
-      root,
-      ...(query === "" ? {} : { query }),
-      ...(queryFile === undefined ? {} : { queryFile }),
-      ...(rulesFile === undefined ? {} : { rulesFile }),
-      limit,
-      ...(timeoutMs === undefined ? {} : { timeoutMs }),
-      json,
-    },
-  };
-}
-
 function parsePercolateCommand(arguments_: readonly string[]): ParseResult {
   let root = ".";
   let minSupport = 2;
@@ -1021,7 +937,6 @@ export function parseArguments(arguments_: readonly string[]): ParseResult {
   if (command === "agents") return parseAgentsCommand(arguments_.slice(1));
   if (command === "note") return parseNoteCommand(arguments_.slice(1));
   if (command === "relation") return parseRelationCommand(arguments_.slice(1));
-  if (command === "datalog") return parseDatalogCommand(arguments_.slice(1));
   if (command === "percolate") return parsePercolateCommand(arguments_.slice(1));
   return { ok: false, message: "unknown command" };
 }
@@ -1406,63 +1321,6 @@ async function runRelation(
         "Updated",
         result,
       )));
-  return 0;
-}
-
-function datalogCell(value: string | number | boolean | null): string {
-  return value === null ? "null" : safe(
-    typeof value === "string" ? value : String(value),
-  );
-}
-
-function renderDatalog(result: DatalogQueryResult): string {
-  const lines = [
-    `Datalog: ${result.rows.length} row${result.rows.length === 1 ? "" : "s"} from ${result.factCount} facts${result.truncated ? " (truncated)" : ""}.`,
-    `  ${result.columns.map(safe).join("  |  ")}`,
-  ];
-  for (const row of result.rows) {
-    lines.push(`  ${row.map(datalogCell).join("  |  ")}`);
-  }
-  if (result.rows.length === 0) lines.push("  None.");
-  return `${lines.join("\n")}\n`;
-}
-
-async function runDatalog(
-  command: Extract<ParsedCommand, { readonly kind: "datalog" }>,
-  output: Output,
-  dependencies: CliDependencies,
-): Promise<number> {
-  const query = command.query ?? (
-    command.queryFile === undefined
-      ? undefined
-      : await readBoundedUtf8(command.queryFile, 65_536, "Datalog query")
-  );
-  if (query === undefined) throw new Error("datalog command parser lost its query");
-  const rules = command.rulesFile === undefined
-    ? undefined
-    : await readBoundedUtf8(command.rulesFile, 65_536, "Datalog rules");
-  const snapshot = await (dependencies.scanVault ?? scanVault)(
-    command.root,
-    { mentionScope: false },
-  );
-  const options: DatalogQueryOptions = {
-    notes: snapshot.notes,
-    analysis: snapshot.analysis,
-    query,
-    ...(rules === undefined ? {} : { rules }),
-    limit: command.limit,
-    ...(command.timeoutMs === undefined
-      ? {}
-      : { timeoutMs: command.timeoutMs }),
-  };
-  const result = await (dependencies.queryDatalog ?? queryDatalog)(options);
-  output.stdout(command.json
-    ? terminalSafeJson({
-        root: snapshot.root,
-        query,
-        ...result,
-      })
-    : sanitizeTerminalText(renderDatalog(result)));
   return 0;
 }
 
@@ -1984,7 +1842,6 @@ export async function main(
     if (command.kind === "agents") return await runAgents(command, output, dependencies);
     if (command.kind === "note-create") return await runNoteCreate(command, output, dependencies);
     if (command.kind === "relation") return await runRelation(command, output, dependencies);
-    if (command.kind === "datalog") return await runDatalog(command, output, dependencies);
     if (command.kind === "percolate") return await runPercolate(command, output, dependencies);
     if (command.kind === "list") return await runList(command, output, dependencies);
     return await runVault(command, output, dependencies);

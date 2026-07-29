@@ -1,7 +1,7 @@
 # Contents
 
-- `src/` – deterministic Markdown and Datalog graph projection, typed metadata queries, safe single-note authoring, percolation, scoped repository-context routing and audits, structural navigation, optional local semantic search, initialization, CLI, capture, and diagnostic code with colocated tests.
-- `dist/` – committed Bun-targeted ESM entrypoints plus the compiled Defuddle worker and one-shot Datalog query subprocess.
+- `src/` – deterministic Markdown graph analysis, typed metadata queries, safe single-note authoring, percolation, scoped repository-context routing and audits, structural navigation, optional local semantic search, initialization, CLI, capture, and diagnostic code with colocated tests.
+- `dist/` – committed Bun-targeted ESM entrypoints plus the compiled Defuddle worker.
 - `skills/save-url-kb/` – reusable agent workflow for bounded, auditable source capture.
 - `skills/save-pdf-kb/` – reusable agent workflow for converting local PDFs into auditable Markdown bundles.
 - `skills/refresh-kb/` – reusable agent workflow for refreshing the catalog, reviewing graph findings, and validating changed scope mappings.
@@ -17,8 +17,7 @@
 
 - Use Bun 1.3.14 for repository commands and keep the authored Markdown compatible with Obsidian and ordinary text tooling.
 - Treat this repository as the complete project. Files and Git prose may use only its public names, paths, commands, and examples; do not refer to or infer a non-public source repository.
-- Keep Markdown authoritative and graph maintenance deterministic and local-first. For Datalog queries, project neutral facts into a disposable in-memory DataScript database; never commit or share a serialized database, numeric entity identity, event log, or generated fact file.
-- Keep Datalog input counts and bytes bounded before subprocess transfer, and revalidate bounded results on both sides of IPC. Recursive rules over edges that may cycle must carry and decrement an explicit depth bound; a subprocess deadline contains mistakes but does not make an unbounded rule valid.
+- Keep Markdown authoritative and graph maintenance deterministic and local-first. Derive focused metadata, backlink, traversal, and percolation views directly from the current files; never commit a second graph database, event log, or generated fact file.
 - Keep concepts as ordinary `type: concept` notes and source-owned typed relationships as compact frontmatter. Never write reciprocal, inferred, transitive, or similarity-derived edges into notes.
 - Keep QMD semantic state optional, local, dynamically loaded, and rebuildable from Markdown. Treat matches as discovery aids and join them to current authored metadata and graph state.
 - Keep `AGENTS.md` normative and always loaded for ownership, prohibitions, required commands, invariants, and gates. Optional `type: agent-context` hubs under `scopes/` are pull-based rationale, history, examples, evidence, and links; they cannot override a guide or become the sole home of a load-bearing edit rule.

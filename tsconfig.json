@@ -60,12 +60,6 @@
       "@hraness/kb/clip/terminal": [
         "./src/clip/terminal.ts"
       ],
-      "@hraness/kb/datalog": [
-        "./src/datalog.ts"
-      ],
-      "@hraness/kb/facts": [
-        "./src/facts.ts"
-      ],
       "@hraness/kb/graph": [
         "./src/graph.ts"
       ],

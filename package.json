@@ -1,7 +1,7 @@
 {
   "name": "@hraness/kb",
-  "version": "0.9.0",
-  "description": "A Markdown knowledge base that connects coding agents to notes tied to specific parts of a codebase, saves web pages and PDFs with their sources, searches locally by words or meaning, and supports Datalog queries over notes and relationships.",
+  "version": "0.10.0",
+  "description": "A Markdown knowledge base that connects coding agents to repository context, captures web pages and PDFs with their sources, and retrieves knowledge locally by metadata, links, words, or meaning.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -20,8 +20,6 @@
     "obsidian",
     "web-clipper",
     "backlinks",
-    "datalog",
-    "datascript",
     "knowledge-graph",
     "semantic-search",
     "agent-memory",
@@ -98,14 +96,6 @@
       "types": "./src/clip/terminal.ts",
       "import": "./dist/clip/terminal.js"
     },
-    "./datalog": {
-      "types": "./src/datalog.ts",
-      "import": "./dist/datalog.js"
-    },
-    "./facts": {
-      "types": "./src/facts.ts",
-      "import": "./dist/facts.js"
-    },
     "./graph": {
       "types": "./src/graph.ts",
       "import": "./dist/graph.js"
@@ -162,10 +152,6 @@
     "src/clip/platforms.ts",
     "src/clip/structured.ts",
     "src/clip/terminal.ts",
-    "src/datalog-worker.ts",
-    "src/datalog.ts",
-    "src/datascript.d.ts",
-    "src/facts.ts",
     "src/graph.ts",
     "src/index.ts",
     "src/init.ts",
@@ -192,7 +178,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun -e 'await (await import(\"node:fs/promises\")).rm(\"./dist\", { recursive: true, force: true })' && bun build ./src/index.ts ./src/agent-context.ts ./src/agent-guide-audit.ts ./src/authoring.ts ./src/clip/browser-profiles.ts ./src/capture.ts ./src/cli.ts ./src/clip/acquire.ts ./src/clip/args.ts ./src/clip/bounded-byte-buffer.ts ./src/clip/cli.ts ./src/clip/cookies.ts ./src/clip/doctor.ts ./src/clip/network.ts ./src/clip/network-proxy.ts ./src/clip/persist.ts ./src/clip/terminal.ts ./src/datalog.ts ./src/facts.ts ./src/graph.ts ./src/navigation.ts ./src/pdf.ts ./src/percolate.ts ./src/query.ts ./src/semantic.ts ./src/clip/defuddle-worker.ts ./src/datalog-worker.ts --outdir ./dist --root ./src --target bun --format esm --splitting --packages external",
+    "build": "bun -e 'await (await import(\"node:fs/promises\")).rm(\"./dist\", { recursive: true, force: true })' && bun build ./src/index.ts ./src/agent-context.ts ./src/agent-guide-audit.ts ./src/authoring.ts ./src/clip/browser-profiles.ts ./src/capture.ts ./src/cli.ts ./src/clip/acquire.ts ./src/clip/args.ts ./src/clip/bounded-byte-buffer.ts ./src/clip/cli.ts ./src/clip/cookies.ts ./src/clip/doctor.ts ./src/clip/network.ts ./src/clip/network-proxy.ts ./src/clip/persist.ts ./src/clip/terminal.ts ./src/graph.ts ./src/navigation.ts ./src/pdf.ts ./src/percolate.ts ./src/query.ts ./src/semantic.ts ./src/clip/defuddle-worker.ts --outdir ./dist --root ./src --target bun --format esm --splitting --packages external",
     "typecheck": "tsc --noEmit",
     "test": "bun test ./src",
     "test:package": "bun run ./scripts/package-smoke.ts",
@@ -203,7 +189,6 @@
     "@steipete/sweet-cookie": "git+https://github.com/hraness/sweet-cookie.git#81b63e11677bf73e2660493a48228d11812c5ee0",
     "@tobilu/qmd": "2.5.3",
     "agent-browser": "0.32.3",
-    "datascript": "1.7.8",
     "defuddle": "0.19.1",
     "yaml": "^2.9.0"
   },
