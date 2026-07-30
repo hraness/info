@@ -3,6 +3,9 @@ import {
   classifyPlatformUrl
 } from "./index-hgve9rh2.js";
 import {
+  sanitizeArtifactUrl
+} from "./index-ey9rycsn.js";
+import {
   captureUrl
 } from "./index-6g2pv9d2.js";
 import {
@@ -21,9 +24,6 @@ import {
 import {
   readBoundedByteStream
 } from "./index-gh719d91.js";
-import {
-  sanitizeArtifactUrl
-} from "./index-ey9rycsn.js";
 
 // src/clip/acquire.ts
 import {

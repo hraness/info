@@ -59,11 +59,14 @@ import {
 } from "./query.js";
 import {
   indexSemanticVault,
-  searchSemanticVault,
   type SemanticIndexResult,
-  type SemanticSearchMode,
-  type SemanticSearchResult,
 } from "./semantic.js";
+import {
+  openKnowledgeBase,
+  type KnowledgeBaseGraphOptions,
+  type KnowledgeBaseSearchMode,
+  type KnowledgeBaseSearchResult,
+} from "./sdk.js";
 import {
   refreshVault,
   scanVault,
@@ -132,7 +135,7 @@ Usage:
   kb percolate [note] [--root <directory>] [--min-support <count>] [--limit <count>] [--json]
   kb list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
   kb index [--root <directory>] [--database <path>] [--force] [--json]
-  kb search <query> [--root <directory>] [--database <path>] [--mode <semantic|keyword>] [--limit <count>] [--min-score <score>] [--json]
+  kb search <query> [--root <directory>] [--repo <repository>] [--database <path>] [--mode <hybrid|exact|keyword|semantic>] [--where <path=value>] [--has <path>] [--tag <tag>] [--related <note>] [--graph-depth <1|2>] [--no-graph] [--no-history | --require-history] [--limit <count>] [--candidate-limit <count>] [--min-score <score>] [--json]
   kb context <repository-path> [--root <vault>] [--repo <repository>] [--kind <auto|file|directory>] [--json]
   kb agents identity <repository-scope> [--json]
   kb agents check [--root <vault>] [--repo <repository>] [--json]
@@ -180,9 +183,15 @@ type ParsedCommand =
   | {
       readonly kind: "search";
       readonly root: string;
+      readonly repository: string;
       readonly database?: string;
-      readonly mode: SemanticSearchMode;
+      readonly mode: KnowledgeBaseSearchMode;
+      readonly filters: readonly MetadataFilter[];
+      readonly tags: readonly string[];
+      readonly graph: false | KnowledgeBaseGraphOptions;
+      readonly history: false | "auto" | "required";
       readonly limit?: number;
+      readonly candidateLimit?: number;
       readonly minScore?: number;
       readonly query: string;
       readonly json: boolean;
@@ -247,7 +256,7 @@ type CliDependencies = {
   readonly scanVault?: typeof scanVault;
   readonly refreshVault?: typeof refreshVault;
   readonly indexSemanticVault?: typeof indexSemanticVault;
-  readonly searchSemanticVault?: typeof searchSemanticVault;
+  readonly openKnowledgeBase?: typeof openKnowledgeBase;
   readonly createNote?: typeof createNote;
   readonly addNoteRelation?: typeof addNoteRelation;
   readonly removeNoteRelation?: typeof removeNoteRelation;
@@ -495,19 +504,23 @@ function parseListCommand(arguments_: readonly string[]): ParseResult {
   };
 }
 
-function finiteNumber(raw: string, option: string): ParseResult | number {
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : { ok: false, message: `${option} requires a number` };
-}
-
 function parseSemanticCommand(command: "index" | "search", arguments_: readonly string[]): ParseResult {
   let root = ".";
+  let repository = ".";
   let database: string | undefined;
   let force = false;
   let json = false;
-  let mode: SemanticSearchMode = "semantic";
+  let mode: KnowledgeBaseSearchMode = "hybrid";
   let limit: number | undefined;
+  let candidateLimit: number | undefined;
   let minScore: number | undefined;
+  let graphDepth: number | undefined;
+  let noGraph = false;
+  let noHistory = false;
+  let requireHistory = false;
+  const filters: MetadataFilter[] = [];
+  const tags: string[] = [];
+  const related: string[] = [];
   const positional: string[] = [];
 
   for (let cursor = 0; cursor < arguments_.length; cursor += 1) {
@@ -521,27 +534,74 @@ function parseSemanticCommand(command: "index" | "search", arguments_: readonly 
       force = true;
       continue;
     }
-    if (argument === "--root" || argument === "--database") {
+    if (argument === "--no-graph" && command === "search") {
+      noGraph = true;
+      continue;
+    }
+    if (argument === "--no-history" && command === "search") {
+      noHistory = true;
+      continue;
+    }
+    if (argument === "--require-history" && command === "search") {
+      requireHistory = true;
+      continue;
+    }
+    if (argument === "--root" || argument === "--database" || (command === "search" && argument === "--repo")) {
       const value = readValue(arguments_, cursor);
       if (value === null) return { ok: false, message: `${argument} requires a value` };
       if (argument === "--root") root = value;
+      else if (argument === "--repo") repository = value;
       else database = value;
       cursor += 1;
       continue;
     }
-    if (command === "search" && (argument === "--mode" || argument === "--limit" || argument === "--min-score")) {
+    if (command === "search" && (
+      argument === "--mode"
+      || argument === "--limit"
+      || argument === "--candidate-limit"
+      || argument === "--min-score"
+      || argument === "--where"
+      || argument === "--has"
+      || argument === "--tag"
+      || argument === "--related"
+      || argument === "--graph-depth"
+    )) {
       const value = readValue(arguments_, cursor);
       if (value === null) return { ok: false, message: `${argument} requires a value` };
       if (argument === "--mode") {
-        if (value !== "semantic" && value !== "keyword") {
-          return { ok: false, message: "--mode must be semantic or keyword" };
+        if (value !== "hybrid" && value !== "exact" && value !== "semantic" && value !== "keyword") {
+          return { ok: false, message: "--mode must be hybrid, exact, keyword, or semantic" };
         }
         mode = value;
+      } else if (argument === "--where") {
+        const equals = value.indexOf("=");
+        const path = equals === -1 ? "" : value.slice(0, equals).trim();
+        if (path === "") return { ok: false, message: "--where requires path=value" };
+        const scalar = metadataScalar(value.slice(equals + 1));
+        if (!scalar.ok) return scalar;
+        filters.push({ kind: "equals", path, value: scalar.value });
+      } else if (argument === "--has") {
+        if (value.trim() === "") return { ok: false, message: "--has requires a metadata path" };
+        filters.push({ kind: "exists", path: value });
+      } else if (argument === "--tag") {
+        tags.push(value);
+      } else if (argument === "--related") {
+        related.push(value);
+      } else if (argument === "--min-score") {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+          return { ok: false, message: "--min-score must be a number from 0 through 1" };
+        }
+        minScore = parsed;
       } else {
-        const parsed = finiteNumber(value, argument);
-        if (typeof parsed !== "number") return parsed;
+        const parsed = Number(value);
+        if (!Number.isSafeInteger(parsed) || parsed < 1) {
+          return { ok: false, message: `${argument} must be a positive integer` };
+        }
         if (argument === "--limit") limit = parsed;
-        else minScore = parsed;
+        else if (argument === "--candidate-limit") candidateLimit = parsed;
+        else if (parsed <= 2) graphDepth = parsed;
+        else return { ok: false, message: "--graph-depth must be 1 or 2" };
       }
       cursor += 1;
       continue;
@@ -557,6 +617,12 @@ function parseSemanticCommand(command: "index" | "search", arguments_: readonly 
       value: { kind: "index", root, ...(database === undefined ? {} : { database }), force, json },
     };
   }
+  if (noHistory && requireHistory) {
+    return {
+      ok: false,
+      message: "--no-history and --require-history cannot be used together",
+    };
+  }
   const query = positional.join(" ").trim();
   if (query === "") return { ok: false, message: "search requires a query" };
   return {
@@ -564,9 +630,20 @@ function parseSemanticCommand(command: "index" | "search", arguments_: readonly 
     value: {
       kind: "search",
       root,
+      repository,
       ...(database === undefined ? {} : { database }),
       mode,
+      filters,
+      tags,
+      graph: noGraph
+        ? false
+        : {
+            ...(related.length === 0 ? {} : { related }),
+            ...(graphDepth === undefined ? {} : { depth: graphDepth }),
+          },
+      history: noHistory ? false : requireHistory ? "required" : "auto",
       ...(limit === undefined ? {} : { limit }),
+      ...(candidateLimit === undefined ? {} : { candidateLimit }),
       ...(minScore === undefined ? {} : { minScore }),
       query,
       json,
@@ -941,7 +1018,7 @@ export function parseArguments(arguments_: readonly string[]): ParseResult {
   return { ok: false, message: "unknown command" };
 }
 
-function embeddingCount(result: SemanticIndexResult | SemanticSearchResult): number {
+function embeddingCount(result: SemanticIndexResult): number {
   return result.embedding?.chunksEmbedded ?? 0;
 }
 
@@ -956,15 +1033,22 @@ function renderSemanticIndex(result: SemanticIndexResult): string {
   ].join("\n");
 }
 
-function renderSemanticSearch(result: SemanticSearchResult): string {
+function renderKnowledgeBaseSearch(result: KnowledgeBaseSearchResult): string {
   const lines = [
-    `${result.mode === "semantic" ? "Semantic" : "Keyword"} results for “${safe(result.query)}” (${result.results.length})`,
+    `${result.mode[0]?.toLocaleUpperCase("en-US") ?? ""}${result.mode.slice(1)} results for “${safe(result.query)}” (${result.results.length})${result.partial ? " [partial]" : ""}`,
   ];
   if (result.results.length === 0) lines.push("  None.");
   for (const hit of result.results) {
     const location = `${safe(hit.path)}${hit.line === undefined ? "" : `:${hit.line}`}`;
-    lines.push(`  ${hit.score.toFixed(3)}  ${location} — ${safe(hit.title)}`);
+    const evidence = hit.evidence.map((item) => `${item.kind}#${item.rank}`).join(", ");
+    lines.push(`  ${hit.rank}. ${hit.score.toFixed(3)}  ${location} — ${safe(hit.title)} [${safe(evidence)}]`);
     if (hit.snippet !== "") lines.push(`    ${safe(hit.snippet)}`);
+  }
+  if ((result.graph?.related.length ?? 0) > 0) {
+    lines.push(`  Related graph context: ${result.graph?.related.length ?? 0}`);
+  }
+  if (result.history?.status === "ready") {
+    lines.push(`  Git provenance: ${result.history.notes.length} notes at ${safe(result.history.head.slice(0, 12))}`);
   }
   return `${lines.join("\n")}\n`;
 }
@@ -983,16 +1067,32 @@ async function runSemantic(
     output.stdout(command.json ? terminalSafeJson(result) : sanitizeTerminalText(renderSemanticIndex(result)));
     return 0;
   }
-  const result = await (dependencies.searchSemanticVault ?? searchSemanticVault)({
+  const kb = await (dependencies.openKnowledgeBase ?? openKnowledgeBase)({
     root: command.root,
-    query: command.query,
-    mode: command.mode,
+    repository: command.repository,
     ...(command.database === undefined ? {} : { database: command.database }),
-    ...(command.limit === undefined ? {} : { limit: command.limit }),
-    ...(command.minScore === undefined ? {} : { minScore: command.minScore }),
   });
-  output.stdout(command.json ? terminalSafeJson(result) : sanitizeTerminalText(renderSemanticSearch(result)));
-  return 0;
+  try {
+    const result = await kb.search({
+      query: command.query,
+      mode: command.mode,
+      filters: command.filters,
+      tags: command.tags,
+      graph: command.graph,
+      history: command.history,
+      ...(command.limit === undefined ? {} : { limit: command.limit }),
+      ...(command.candidateLimit === undefined
+        ? {}
+        : { candidateLimit: command.candidateLimit }),
+      ...(command.minScore === undefined ? {} : { minScore: command.minScore }),
+    });
+    output.stdout(command.json
+      ? terminalSafeJson(result)
+      : sanitizeTerminalText(renderKnowledgeBaseSearch(result)));
+    return 0;
+  } finally {
+    await kb.close();
+  }
 }
 
 function issueJson(issue: LinkIssue): Record<string, unknown> {

@@ -228,13 +228,112 @@ Frontmatter is parsed as typed, nested data rather than flattened strings. Scala
 
 Metadata is useful for exact questions such as “which implementation plans are in progress?” It is not inferred from prose and the tool does not invent tags to improve retrieval. Authors and agents can evolve conventions in the vault's scoped `AGENTS.md` files without migrating to a package-owned schema.
 
-## Semantic recall is optional derived state
+## Hybrid retrieval keeps its evidence visible
 
-`kb search` uses [QMD](https://github.com/tobi/qmd) for local retrieval. Semantic mode is the default and uses QMD 2.5.3's recommended compact EmbeddingGemma model. Keyword mode uses QMD's local full-text index without embeddings. The first semantic index or query downloads the embedding model; later runs incrementally update only changed Markdown.
+`kb search` starts with the current Markdown. Its exact lane scans note identity,
+title, aliases, path, tags, typed metadata, and prose. Exact title and alias
+identities remain visible in the result evidence and stay ahead of broader
+matches.
+
+Hybrid mode is the default. It runs the exact lane alongside [QMD](https://github.com/tobi/qmd),
+which combines local full-text and vector rankings without loading query
+expansion or reranking models. The two result lists are combined with weighted
+reciprocal-rank fusion. Each result reports the lane ranks and contributions
+that produced its final position. `--mode exact` stays model-free,
+`--mode keyword` uses QMD's full-text index, and `--mode semantic` selects its
+vector lane.
+
+QMD 2.5.3 uses its recommended compact EmbeddingGemma model for local vector
+retrieval. The first hybrid or semantic query downloads the embedding model;
+later runs reuse the local cache and incrementally update changed Markdown.
 
 Each vault gets a path-derived SQLite cache under the user's cache directory unless `--database` selects another file. `index.md` and every `AGENTS.md` are excluded because they are navigation and always-loaded instructions rather than knowledge records. Scope hubs remain ordinary Markdown, so QMD indexes their rationale and evidence like any other note. The cache may be removed at any time and recreated with `kb index`.
 
-Search results are joined back to a live vault scan, so each hit carries current typed metadata, tags, contextual link counts, and backlinks. Files outside the requested vault and stale indexed identities are discarded. A similarity score is a discovery aid, not a graph edge, a citation, or evidence that the result is true. Use `kb list` for exact metadata, `kb links` for authored relationships, and `kb search` when the same concept may be expressed in different words.
+Search results are joined back to the live session snapshot, so each hit carries
+current typed metadata and tags. Files outside the requested vault and stale
+indexed identities are discarded. QMD failure does not erase exact results;
+the response marks a failed lane unavailable or an incomplete embedding pass
+degraded, and reports that the result is partial. A
+retrieval score is a discovery aid, not a graph edge, a citation, or evidence
+that the result is true.
+
+Immediate explicit links and typed relationships can be returned with search,
+along with a bounded neighborhood around the strongest results. These graph
+neighbors remain a separate context collection. They do not enter primary text
+rank or become authored edges. When a repository root is supplied, bounded Git
+history can likewise explain when a note changed and which paths changed with
+it. Optional Git failure returns an explicit unavailable diagnostic and marks
+the search partial. `history: "required"` or an options object with
+`policy: "required"` rejects instead. Git evidence is provenance and
+historical recall, not a recency boost.
+
+## Code mode shares one bounded snapshot
+
+Agents that need several retrieval operations can use the SDK without spawning
+one CLI process per question:
+
+```ts
+import { openKnowledgeBase, packSearchContext } from "@hraness/kb/sdk";
+
+const kb = await openKnowledgeBase({ root: "kb", repository: "." });
+try {
+  const result = await kb.search({
+    query: "why captures preserve incomplete threads",
+    tags: ["capture"],
+    graph: { depth: 1 },
+    history: "auto",
+  });
+  console.log(packSearchContext(result).content);
+} finally {
+  await kb.close();
+}
+```
+
+Opening a session performs one confined vault scan. `grep`, `list`, `read`,
+`links`, `backlinks`, `search`, `history`, and `searchHistory` reuse that
+snapshot. QMD and Git are opened lazily. The session is intentionally read-only
+and does not watch the filesystem. Close it and open a new session after any
+Markdown write so later work cannot mistake an old snapshot for current state.
+
+Code-mode DAGs use `defineWorkflow` and `runWorkflow`. The staged
+`defineWorkflow<Input>("id").node(...).output(...)` builder infers each node's
+result and the final output while exposing only declared dependencies. A
+definition has at most 64 nodes, must be acyclic, and names one output node.
+Ready nodes run in declaration order with a default global concurrency of four
+and a maximum of eight. QMD work is always serialized; Git permits at most four
+nodes, bounded again by the global limit. The runner applies an aggregate
+structured-output byte limit. Failure or abort stops dependent nodes from
+starting and waits for already-running siblings to settle. The packaged
+workflows are ordinary imports, accept explicit inputs, and return structured
+results without writing the vault.
+
+```ts
+import { openKnowledgeBase } from "@hraness/kb/sdk";
+import { runWorkflow } from "@hraness/kb/workflow";
+import { explainChangeWorkflow } from "@hraness/kb/workflows";
+
+const kb = await openKnowledgeBase({ root: "kb", repository: "." });
+try {
+  const explanation = await runWorkflow(explainChangeWorkflow, {
+    kb,
+    input: { query: "why the capture path changed" },
+  });
+  console.log(explanation.output);
+} finally {
+  await kb.close();
+}
+```
+
+`decisionContextWorkflow` assembles ranked rationale and note provenance,
+`explainChangeWorkflow` searches authored rationale and Git evolution in
+parallel, and `planRadarWorkflow` joins exact plan state with retrieval and
+history.
+
+Changes to retrieval ranking use labeled cases and the exported
+`evaluateRetrievalBenchmark` metrics: recall at k, reciprocal rank, and nDCG.
+The included representative fixture is a deterministic regression for identity,
+conceptual, and mixed queries. It demonstrates complementary lanes in that
+fixture and does not claim universal superiority.
 
 ## Capture preserves an audit trail
 

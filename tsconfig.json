@@ -21,6 +21,9 @@
       "@hraness/kb/authoring": [
         "./src/authoring.ts"
       ],
+      "@hraness/kb/benchmark": [
+        "./src/benchmark.ts"
+      ],
       "@hraness/kb/browser-profiles": [
         "./src/clip/browser-profiles.ts"
       ],
@@ -60,6 +63,9 @@
       "@hraness/kb/clip/terminal": [
         "./src/clip/terminal.ts"
       ],
+      "@hraness/kb/git": [
+        "./src/git.ts"
+      ],
       "@hraness/kb/graph": [
         "./src/graph.ts"
       ],
@@ -75,8 +81,29 @@
       "@hraness/kb/query": [
         "./src/query.ts"
       ],
+      "@hraness/kb/sdk": [
+        "./src/sdk.ts"
+      ],
+      "@hraness/kb/search": [
+        "./src/search.ts"
+      ],
       "@hraness/kb/semantic": [
         "./src/semantic.ts"
+      ],
+      "@hraness/kb/workflow": [
+        "./src/workflow.ts"
+      ],
+      "@hraness/kb/workflows": [
+        "./src/workflows/index.ts"
+      ],
+      "@hraness/kb/workflows/decision-context": [
+        "./src/workflows/decision-context.ts"
+      ],
+      "@hraness/kb/workflows/explain-change": [
+        "./src/workflows/explain-change.ts"
+      ],
+      "@hraness/kb/workflows/plan-radar": [
+        "./src/workflows/plan-radar.ts"
       ]
     },
     "verbatimModuleSyntax": true,

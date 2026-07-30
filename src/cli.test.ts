@@ -8,6 +8,7 @@ import {
   agentContextNotePath,
 } from "./agent-context.js";
 import { main, parseArguments } from "./cli.js";
+import type { KnowledgeBaseSession } from "./sdk.js";
 import { scanVault, type ScanVaultOptions } from "./vault.js";
 
 function captureOutput(): {
@@ -120,15 +121,31 @@ describe("kb argument parsing", () => {
       "keyword",
       "--limit",
       "4",
+      "--candidate-limit",
+      "40",
       "--min-score",
       "0.2",
+      "--tag",
+      "agents",
+      "--where",
+      "status=active",
+      "--related",
+      "notes/context",
+      "--graph-depth",
+      "2",
     ])).toEqual({
       ok: true,
       value: {
         kind: "search",
         root: "vault",
+        repository: ".",
         mode: "keyword",
+        filters: [{ kind: "equals", path: "status", value: "active" }],
+        tags: ["agents"],
+        graph: { related: ["notes/context"], depth: 2 },
+        history: "auto",
         limit: 4,
+        candidateLimit: 40,
         minScore: 0.2,
         query: "bounded ingestion",
         json: false,
@@ -136,7 +153,24 @@ describe("kb argument parsing", () => {
     });
     expect(parseArguments(["search", "query", "--mode", "unknown"])).toEqual({
       ok: false,
-      message: "--mode must be semantic or keyword",
+      message: "--mode must be hybrid, exact, keyword, or semantic",
+    });
+    expect(parseArguments(["search", "query", "--min-score", "1.1"])).toEqual({
+      ok: false,
+      message: "--min-score must be a number from 0 through 1",
+    });
+    expect(parseArguments(["search", "query", "--require-history"])).toMatchObject({
+      ok: true,
+      value: { kind: "search", history: "required" },
+    });
+    expect(parseArguments([
+      "search",
+      "query",
+      "--no-history",
+      "--require-history",
+    ])).toEqual({
+      ok: false,
+      message: "--no-history and --require-history cannot be used together",
     });
   });
 
@@ -949,6 +983,7 @@ describe("kb vault commands", () => {
     expect(JSON.parse(indexOutput.stdout())).toMatchObject({ model: "local-model" });
 
     const searchOutput = captureOutput();
+    let closed = 0;
     expect(await main([
       "search",
       "agent memory",
@@ -956,41 +991,90 @@ describe("kb vault commands", () => {
       "vault",
       "--limit",
       "3",
+      "--min-score",
+      "0.2",
     ], searchOutput.output, {
-      searchSemanticVault: (options) => {
-        searchedArguments.push(options);
-        return Promise.resolve({
+      openKnowledgeBase: (options) => {
+        searchedArguments.push({ open: options });
+        const unused = (): never => {
+          throw new Error("not used in this test");
+        };
+        const session = {
           root: "/vault",
-          database: "/cache/index.sqlite",
-          model: "local-model",
-          mode: "semantic",
-          query: "agent memory",
-          update: { collections: 1, indexed: 0, updated: 0, unchanged: 1, removed: 0, needsEmbedding: 0 },
-          embedding: null,
-          results: [{
-            path: "notes/memory.md",
-            title: "Agent memory",
-            score: 0.9,
-            source: "vec",
-            docid: "abc123",
-            modifiedAt: "2026-07-22T12:00:00.000Z",
-            line: 4,
-            snippet: "Durable context for coding agents.",
-            tags: ["agents"],
-            metadata: { type: "note" },
-            inboundContextualCount: 2,
-            outboundContextualCount: 1,
-            backlinks: [],
-          }],
-        });
+          repository: ".",
+          noteCount: 1,
+          grep: unused,
+          list: unused,
+          read: unused,
+          links: unused,
+          backlinks: unused,
+          search: (searchOptions) => {
+            searchedArguments.push({ search: searchOptions });
+            return Promise.resolve({
+              query: "agent memory",
+              mode: "hybrid" as const,
+              results: [{
+                id: "notes/memory",
+                path: "notes/memory.md",
+                title: "Agent memory",
+                rank: 1,
+                score: 0.9,
+                identity: false,
+                line: 4,
+                snippet: "Durable context for coding agents.",
+                tags: ["agents"],
+                metadata: { type: "note" },
+                evidence: [{
+                  kind: "qmd" as const,
+                  rank: 1,
+                  source: "hybrid" as const,
+                  score: 0.9,
+                  signals: { keyword: true, semantic: true },
+                }],
+                contributions: [{
+                  lane: "qmd",
+                  rank: 1,
+                  weight: 1,
+                  value: 1 / 61,
+                }],
+              }],
+              graph: null,
+              history: null,
+              partial: false,
+              diagnostics: {
+                notes: 1,
+                model: "local-model",
+                elapsedMs: 2,
+                lanes: [{ lane: "qmd" as const, status: "ready" as const, results: 1 }],
+              },
+            });
+          },
+          history: unused,
+          searchHistory: unused,
+          close: () => {
+            closed += 1;
+            return Promise.resolve();
+          },
+        } satisfies KnowledgeBaseSession;
+        return Promise.resolve(session);
       },
     })).toBe(0);
-    expect(searchedArguments).toEqual([{
-      root: "vault",
-      query: "agent memory",
-      mode: "semantic",
-      limit: 3,
-    }]);
+    expect(searchedArguments).toEqual([
+      { open: { root: "vault", repository: "." } },
+      {
+        search: {
+          query: "agent memory",
+          mode: "hybrid",
+          filters: [],
+          tags: [],
+          graph: {},
+          history: "auto",
+          limit: 3,
+          minScore: 0.2,
+        },
+      },
+    ]);
+    expect(closed).toBe(1);
     expect(searchOutput.stdout()).toContain("notes/memory.md:4");
   });
 

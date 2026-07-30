@@ -16,7 +16,7 @@ views over that record.
    - `kb list` for exact frontmatter or tag filters.
    - `kb links <note>`, `kb backlinks <note>`, or `kb relation list <note>` for authored relationships.
    - `kb graph` for a whole-vault structural report.
-   - `kb search` when the same idea may be expressed in different words.
+   - `kb search` for a fused exact, full-text, and semantic view with visible evidence.
    - `kb graph` for whole-vault diagnostics.
 
 Update an existing note when the identity is unambiguous. Create a new note when the subject has a distinct durable identity, not merely because a search phrase differs.
@@ -89,14 +89,88 @@ a relationship as supported. If a recurring structural question is awkward to
 answer from the JSON report, add a focused command with a bounded contract
 rather than a second graph store.
 
-Use semantic search for recall rather than exact selection:
+Use hybrid search for broad recall while preserving exact evidence:
 
 ```sh
 kb search "capturing a signed-in virtualized page"
+kb search "capture" --tag ingestion --where status=accepted
+kb search "notes/write-path" --mode exact
 kb search "browser profile" --mode keyword
 ```
 
-Semantic mode uses QMD's recommended compact local embedding model. The first semantic query downloads it and builds a local cache; subsequent queries incrementally index changed Markdown. `kb index` can prewarm that cache. Search results suggest what to read next—they do not create links or establish that a claim is correct.
+The default combines a live exact scan with QMD's local full-text and compact
+embedding rankings, then reports each lane's evidence. It skips query expansion
+and reranking models. The first hybrid or semantic query downloads the embedding
+model and builds a local cache; subsequent queries incrementally index changed
+Markdown. `kb index` can prewarm that cache. `--mode exact` requires no model.
+
+Graph neighbors and Git provenance are returned separately from the primary
+rank. Use `--related <note>` to seed a bounded explicit neighborhood,
+`--no-graph` when it is unnecessary, and `--no-history` outside a Git
+repository. Use `--require-history` when a result without Git provenance is not
+usable; the command then fails instead of returning a partial Git lane. These
+views explain a result; they do not create links or establish that a claim is
+correct.
+
+For several related operations, open one read-only SDK session and reuse its
+single vault scan:
+
+```ts
+import { openKnowledgeBase } from "@hraness/kb/sdk";
+
+const kb = await openKnowledgeBase({ root: "kb", repository: "." });
+try {
+  const plans = kb.list({
+    filters: [{ kind: "equals", path: "type", value: "plan" }],
+  });
+  const context = await kb.search({ query: "current ingestion plan" });
+  const source = kb.read(context.results[0]?.id ?? plans[0]?.id ?? "index");
+  console.log(source.content);
+} finally {
+  await kb.close();
+}
+```
+
+The session does not watch the filesystem. Close and reopen it after any note
+write, authoring command, capture, refresh, or Git update that should appear in
+later results. Use the bounded `defineWorkflow` and `runWorkflow` API when
+independent retrieval branches can run concurrently; QMD work remains
+serialized by default. Import `decisionContextWorkflow`,
+`explainChangeWorkflow`, or `planRadarWorkflow` from `@hraness/kb/workflows`
+when one of those common DAGs matches the task.
+
+Use `history: "required"` for default required provenance, or
+`history: { policy: "required", noteLimit: 5 }` when the same requirement needs
+custom bounds. Custom workflows use a staged builder so every node sees a typed
+KB session and only its declared dependency results:
+
+```ts
+import { openKnowledgeBase } from "@hraness/kb/sdk";
+import { defineWorkflow, runWorkflow } from "@hraness/kb/workflow";
+
+type Input = { readonly query: string };
+
+const kb = await openKnowledgeBase({ root: "kb", repository: "." });
+const research = defineWorkflow<Input>("research")
+  .node({
+    id: "search",
+    resource: "qmd",
+    run: ({ input, kb }) => kb.search({ query: input.query }),
+  })
+  .node({
+    id: "pack",
+    needs: ["search"],
+    run: ({ result }) => result("search").results.map(({ path }) => path),
+  })
+  .output("pack");
+
+const execution = await runWorkflow(research, {
+  kb,
+  input: { query: "current ingestion plan" },
+});
+console.log(execution.output);
+await kb.close();
+```
 
 ## Preserve authority boundaries
 
@@ -194,6 +268,9 @@ kb refresh --root .
 kb graph --root .
 kb check --root .
 ```
+
+Any code-mode session opened before those writes is now stale. Close it before
+the write and open a new session after the final check.
 
 Open the evidence cited by each percolation candidate. Promote only concepts
 likely to be reused and relationships established by the source material.

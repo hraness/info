@@ -1,13 +1,57 @@
 // @bun
 import {
+  DEFAULT_WORKFLOW_OUTPUT_BYTES,
+  MAX_GIT_WORKFLOW_CONCURRENCY,
+  MAX_WORKFLOW_CONCURRENCY,
+  MAX_WORKFLOW_NODES,
+  MAX_WORKFLOW_OUTPUT_BYTES,
+  WorkflowRunError,
+  defineWorkflow,
+  runWorkflow,
+  workflowFromUnknown
+} from "./index-3v2z4f0q.js";
+import {
+  createRepresentativeRetrievalFixture,
+  evaluateRanking,
+  evaluateRetrievalBenchmark
+} from "./index-q5jk46m1.js";
+import {
   initVault
 } from "./index-awz7cev4.js";
 import {
-  MAX_NAVIGATION_INDEXED_CONNECTIONS,
-  MAX_NAVIGATION_RETURNED_CONNECTIONS,
-  NavigationBudgetError,
-  navigateLinks
-} from "./index-d13v9ckt.js";
+  openKnowledgeBase,
+  packSearchContext
+} from "./index-g7s5qk6t.js";
+import {
+  MAX_NOTE_UTF8_BYTES,
+  MAX_SCANNED_NOTES,
+  MAX_VAULT_UTF8_BYTES,
+  VaultScanBudgetError,
+  defaultIgnoredDirectories,
+  indexSemanticVault,
+  markdownFiles,
+  openSemanticSearchSession,
+  readVaultNotes,
+  recommendedEmbeddingModel,
+  refreshVault,
+  scanVault,
+  searchSemanticVault,
+  semanticDatabasePath
+} from "./index-hfdajx5y.js";
+import {
+  GitHistoryError,
+  MAX_GIT_HISTORY_COMMITS,
+  MAX_GIT_HISTORY_NOTES,
+  MAX_GIT_HISTORY_OUTPUT_BYTES,
+  MAX_GIT_HISTORY_TIMEOUT_MS,
+  MAX_GIT_PATHS_PER_COMMIT,
+  MAX_GIT_PATH_OBSERVATIONS,
+  gitHistoryForNotes,
+  indexGitHistory,
+  parseGitHistoryOutput,
+  runGitCommand,
+  searchGitHistory
+} from "./index-tb103fj6.js";
 import {
   DEFAULT_PERCOLATION_LIMIT,
   DEFAULT_PERCOLATION_MIN_SUPPORT,
@@ -19,25 +63,6 @@ import {
   MAX_SCOPED_PERCOLATION_MENTION_PAIRS,
   percolateVault
 } from "./index-egdc3x6v.js";
-import {
-  metadataAtPath,
-  queryVault
-} from "./index-m4bexhht.js";
-import {
-  MAX_NOTE_UTF8_BYTES,
-  MAX_SCANNED_NOTES,
-  MAX_VAULT_UTF8_BYTES,
-  VaultScanBudgetError,
-  defaultIgnoredDirectories,
-  indexSemanticVault,
-  markdownFiles,
-  readVaultNotes,
-  recommendedEmbeddingModel,
-  refreshVault,
-  scanVault,
-  searchSemanticVault,
-  semanticDatabasePath
-} from "./index-j9s77ka0.js";
 import {
   auditAgentGuideRepository,
   auditAgentGuideSource,
@@ -77,6 +102,21 @@ import {
   removeNoteRelation
 } from "./index-2fr3hf9q.js";
 import {
+  buildGraphContext,
+  fuseRankedCandidates,
+  searchExactVault
+} from "./index-rn4d2mpa.js";
+import {
+  MAX_NAVIGATION_INDEXED_CONNECTIONS,
+  MAX_NAVIGATION_RETURNED_CONNECTIONS,
+  NavigationBudgetError,
+  navigateLinks
+} from "./index-d13v9ckt.js";
+import {
+  metadataAtPath,
+  queryVault
+} from "./index-m4bexhht.js";
+import {
   MAX_ANALYZED_NOTES,
   MAX_CONNECTION_OBSERVATIONS,
   MAX_MENTIONS,
@@ -96,11 +136,16 @@ import {
   wikiLinks
 } from "./index-4962kvds.js";
 export {
+  workflowFromUnknown,
   wikiLinks,
   semanticDatabasePath,
   searchableMarkdown,
   searchSemanticVault,
+  searchGitHistory,
+  searchExactVault,
   scanVault,
+  runWorkflow,
+  runGitCommand,
   replaceCatalog,
   renderCatalog,
   removeNoteRelation,
@@ -110,7 +155,11 @@ export {
   queryVault,
   percolateVault,
   parseNote,
+  parseGitHistoryOutput,
   parseAgentContextMarker,
+  packSearchContext,
+  openSemanticSearchSession,
+  openKnowledgeBase,
   noteRevision,
   normalizeVaultPath,
   normalizeRepositoryScope,
@@ -125,15 +174,23 @@ export {
   inspectAgentContextRepository,
   initVault,
   indexSemanticVault,
+  indexGitHistory,
+  gitHistoryForNotes,
+  fuseRankedCandidates,
   formatAgentContextMarker,
+  evaluateRetrievalBenchmark,
+  evaluateRanking,
   discoverAgentGuides,
+  defineWorkflow,
   defaultIgnoredDirectories,
   defaultAgentGuideIgnoredDirectories,
+  createRepresentativeRetrievalFixture,
   createNote,
   createConceptNote,
   catalogStart,
   catalogEnd,
   canonicalNoteId,
+  buildGraphContext,
   auditAgentGuides,
   auditAgentGuideSource,
   auditAgentGuideRepository,
@@ -148,6 +205,7 @@ export {
   agentContextGuidePath,
   agentContextDirectory,
   addNoteRelation,
+  WorkflowRunError,
   VaultScanBudgetError,
   VaultAnalysisBudgetError,
   RepositoryScopeError,
@@ -155,6 +213,9 @@ export {
   NoteRecoveryRequiredError,
   NoteAlreadyExistsError,
   NavigationBudgetError,
+  MAX_WORKFLOW_OUTPUT_BYTES,
+  MAX_WORKFLOW_NODES,
+  MAX_WORKFLOW_CONCURRENCY,
   MAX_VAULT_UTF8_BYTES,
   MAX_SCOPED_PERCOLATION_MENTION_PAIRS,
   MAX_SCANNED_NOTES,
@@ -168,9 +229,18 @@ export {
   MAX_NAVIGATION_INDEXED_CONNECTIONS,
   MAX_MENTION_PAIRS,
   MAX_MENTIONS,
+  MAX_GIT_WORKFLOW_CONCURRENCY,
+  MAX_GIT_PATH_OBSERVATIONS,
+  MAX_GIT_PATHS_PER_COMMIT,
+  MAX_GIT_HISTORY_TIMEOUT_MS,
+  MAX_GIT_HISTORY_OUTPUT_BYTES,
+  MAX_GIT_HISTORY_NOTES,
+  MAX_GIT_HISTORY_COMMITS,
   MAX_CONNECTION_OBSERVATIONS,
   MAX_ANALYZED_NOTES,
   InvalidCanonicalNoteIdError,
+  GitHistoryError,
+  DEFAULT_WORKFLOW_OUTPUT_BYTES,
   DEFAULT_PERCOLATION_MIN_SUPPORT,
   DEFAULT_PERCOLATION_LIMIT,
   AgentContextRepositoryPathError

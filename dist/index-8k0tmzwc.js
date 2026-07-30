@@ -12,10 +12,7 @@ import {
   inspectClipEnvironment,
   renderAdapterCapabilities,
   renderDoctorReport
-} from "./index-xp284mff.js";
-import {
-  cloneBrowserProfile
-} from "./index-5n05se68.js";
+} from "./index-m6gx7374.js";
 import {
   acquireBrowser,
   acquireCookieHttp,
@@ -23,7 +20,7 @@ import {
   acquireFile,
   acquireHttp,
   assertSafePersistentProfile
-} from "./index-1fa66nh9.js";
+} from "./index-qx5jr97w.js";
 import {
   CONTENT_REWRITE_TRUNCATION_WARNING,
   buildClipMarkdown,
@@ -35,6 +32,19 @@ import {
   rewriteContentWithStatus,
   slugify
 } from "./index-hgve9rh2.js";
+import {
+  abortCaptureBundle,
+  beginCaptureBundle,
+  commitCaptureBundle,
+  redactSensitiveText,
+  redactSensitiveTextWithCount,
+  sanitizeArtifactUrl,
+  writeCaptureBundle
+} from "./index-ey9rycsn.js";
+import {
+  sanitizeTerminalLine,
+  sanitizeTerminalText
+} from "./index-1xxnjn0d.js";
 import {
   captureUrl,
   parseArguments,
@@ -59,18 +69,8 @@ import {
   BoundedByteBuffer
 } from "./index-gh719d91.js";
 import {
-  abortCaptureBundle,
-  beginCaptureBundle,
-  commitCaptureBundle,
-  redactSensitiveText,
-  redactSensitiveTextWithCount,
-  sanitizeArtifactUrl,
-  writeCaptureBundle
-} from "./index-ey9rycsn.js";
-import {
-  sanitizeTerminalLine,
-  sanitizeTerminalText
-} from "./index-1xxnjn0d.js";
+  cloneBrowserProfile
+} from "./index-5n05se68.js";
 
 // src/clip/capture.ts
 import {

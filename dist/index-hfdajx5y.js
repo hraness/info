@@ -383,6 +383,8 @@ async function refreshVault(root = ".", options = {}) {
 var recommendedEmbeddingModel = "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf";
 var collectionName = "kb";
 var markdownPattern = "**/*.md";
+var MAX_QMD_RESULT_BODY_BYTES = 64 * 1024 * 1024;
+var MAX_QMD_EXPLANATION_SCORES = 500;
 var qmdModuleSpecifier = "@tobilu/qmd";
 function cacheHome(dependencies) {
   const configured = dependencies.cacheHome ?? process.env.XDG_CACHE_HOME;
@@ -484,8 +486,53 @@ function parseSearchDocument(value, index) {
     ...chunkPos === undefined ? {} : { chunkPos }
   };
 }
-function parseSearchResults(value) {
-  return boundaryArray(value, "QMD search results").map((result, index) => parseSearchDocument(result, index));
+function boundedResultArray(value, label, maximum) {
+  const results = boundaryArray(value, label);
+  if (results.length > maximum) {
+    throw new Error(`${label} returned more than the requested ${maximum} results.`);
+  }
+  return results;
+}
+function parseSearchResults(value, maximum) {
+  return boundedResultArray(value, "QMD search results", maximum).map((result, index) => parseSearchDocument(result, index));
+}
+function finiteNumberArray(value, label) {
+  return boundedResultArray(value, label, MAX_QMD_EXPLANATION_SCORES).map((item, index) => boundaryNumber(item, `${label}[${index}]`));
+}
+function parseHybridSearchDocument(value, index) {
+  const label = `QMD hybrid search result[${index}]`;
+  const result = boundaryRecord(value, label);
+  const explanation = boundaryRecord(result.explain, `${label}.explain`);
+  const ftsScores = finiteNumberArray(explanation.ftsScores, `${label}.explain.ftsScores`);
+  const vectorScores = finiteNumberArray(explanation.vectorScores, `${label}.explain.vectorScores`);
+  const body = boundaryString(result.body, `${label}.body`);
+  const bestChunkPos = boundaryCount(result.bestChunkPos, `${label}.bestChunkPos`);
+  if (bestChunkPos > body.length) {
+    throw new Error(`${label}.bestChunkPos must fall within the verified document body.`);
+  }
+  return {
+    file: boundaryString(result.file, `${label}.file`),
+    title: boundaryString(result.title, `${label}.title`),
+    body,
+    bestChunkPos,
+    score: boundaryNumber(result.score, `${label}.score`),
+    docid: boundaryString(result.docid, `${label}.docid`),
+    signals: {
+      keyword: ftsScores.length > 0,
+      semantic: vectorScores.length > 0
+    }
+  };
+}
+function parseHybridSearchResults(value, maximum) {
+  let bodyBytes = 0;
+  return boundedResultArray(value, "QMD hybrid search results", maximum).map((result, index) => {
+    const document = parseHybridSearchDocument(result, index);
+    bodyBytes += Buffer.byteLength(document.body);
+    if (bodyBytes > MAX_QMD_RESULT_BODY_BYTES) {
+      throw new Error(`QMD hybrid search results exceed the ${MAX_QMD_RESULT_BODY_BYTES} byte body limit.`);
+    }
+    return document;
+  });
 }
 function boundUnknownMethod(owner, name, label) {
   const method = owner[name];
@@ -503,6 +550,7 @@ function parseSearchStore(value) {
   const getDocumentBody = boundUnknownMethod(store, "getDocumentBody", "QMD store");
   const searchLex = boundUnknownMethod(store, "searchLex", "QMD store");
   const searchVector = boundUnknownMethod(store, "searchVector", "QMD store");
+  const search = typeof store.search === "function" ? boundUnknownMethod(store, "search", "QMD store") : undefined;
   const update = boundUnknownMethod(store, "update", "QMD store");
   return {
     close: async () => {
@@ -516,8 +564,11 @@ function parseSearchStore(value) {
       }
       return body;
     },
-    searchLex: async (query, options) => parseSearchResults(await searchLex(query, options)),
-    searchVector: async (query, options) => parseSearchResults(await searchVector(query, options)),
+    searchLex: async (query, options) => parseSearchResults(await searchLex(query, options), options.limit),
+    searchVector: async (query, options) => parseSearchResults(await searchVector(query, options), options.limit),
+    ...search === undefined ? {} : {
+      search: async (options) => parseHybridSearchResults(await search(options), options.limit)
+    },
     update: async (options) => parseUpdateResult(await update(options))
   };
 }
@@ -679,6 +730,31 @@ async function resolvedSearchNote(root, result, notesByPath, notesByQmdPath) {
   const note = notesByPath.get(candidate.split(sep2).join("/"));
   return note ?? null;
 }
+async function resolvedHybridSearchNote(root, result, notesByPath, notesByQmdPath) {
+  const virtualPath = qmdVirtualNotePath(result.file);
+  if (virtualPath !== undefined) {
+    if (virtualPath === null)
+      return null;
+    const contentHash = createHash("sha256").update(result.body).digest("hex");
+    const candidates = notesByQmdPath.get(virtualPath)?.get(contentHash) ?? [];
+    const candidate2 = candidates[0];
+    return candidates.length === 1 && candidate2 !== undefined && candidate2.content === result.body ? candidate2 : null;
+  }
+  if (!isAbsolute(result.file))
+    return null;
+  let filepath;
+  try {
+    filepath = await realpath2(resolve2(result.file));
+  } catch {
+    return null;
+  }
+  const candidate = relative2(root, filepath);
+  if (candidate === "" || candidate === ".." || candidate.startsWith(`..${sep2}`) || isAbsolute(candidate)) {
+    return null;
+  }
+  const note = notesByPath.get(candidate.split(sep2).join("/"));
+  return note?.content === result.body ? note : null;
+}
 function queryOffset(body, query, suggested) {
   if (suggested !== undefined && Number.isSafeInteger(suggested) && suggested >= 0 && suggested <= body.length) {
     return suggested;
@@ -732,11 +808,42 @@ async function searchHit(store, root, query, result, notesByPath, notesByQmdPath
     backlinks: connection?.backlinks ?? []
   };
 }
+async function hybridSearchHit(root, result, notesByPath, notesByQmdPath, connectionsById) {
+  const note = await resolvedHybridSearchNote(root, result, notesByPath, notesByQmdPath);
+  if (note === null)
+    return null;
+  const connection = connectionsById.get(note.id);
+  const offset = result.bestChunkPos;
+  return {
+    path: note.path,
+    title: note.title,
+    score: result.score,
+    source: "hybrid",
+    docid: result.docid,
+    line: result.body.slice(0, offset).split(`
+`).length,
+    snippet: boundedSnippet(result.body, offset),
+    signals: result.signals,
+    tags: note.tags,
+    metadata: note.metadata,
+    inboundContextualCount: connection?.inboundContextualCount ?? 0,
+    outboundContextualCount: connection?.outboundContextualCount ?? 0,
+    backlinks: connection?.backlinks ?? []
+  };
+}
 function boundedLimit(value) {
   if (value === undefined)
     return 10;
   if (!Number.isSafeInteger(value) || value < 1 || value > 100) {
     throw new Error("Search limit must be an integer from 1 through 100.");
+  }
+  return value;
+}
+function boundedCandidateLimit(value, resultLimit) {
+  if (value === undefined)
+    return Math.max(40, resultLimit * 4);
+  if (!Number.isSafeInteger(value) || value < resultLimit || value > 500) {
+    throw new Error(`Search candidate limit must be an integer from ${resultLimit} through 500.`);
   }
   return value;
 }
@@ -748,38 +855,141 @@ function boundedScore(value) {
   }
   return value;
 }
-async function searchSemanticVault(options, dependencies = {}) {
+function boundedMode(value) {
+  const mode = value ?? "semantic";
+  if (mode !== "hybrid" && mode !== "keyword" && mode !== "semantic") {
+    throw new Error('Search mode must be "hybrid", "keyword", or "semantic".');
+  }
+  return mode;
+}
+async function executeSemanticSearch(context, options) {
   const query = options.query.trim();
   if (query === "")
     throw new Error("Search query must not be empty.");
+  const mode = boundedMode(options.mode);
+  const limit = boundedLimit(options.limit);
+  const candidateLimit = boundedCandidateLimit(options.candidateLimit, limit);
+  const minScore = boundedScore(options.minScore);
+  const embedding = mode === "keyword" ? null : await context.ensureEmbedding();
+  let hits;
+  if (mode === "hybrid") {
+    if (context.store.search === undefined) {
+      throw new Error("QMD store.search must be a function for hybrid search.");
+    }
+    const matches = await context.store.search({
+      queries: [
+        { type: "lex", query },
+        { type: "vec", query }
+      ],
+      collection: collectionName,
+      limit,
+      candidateLimit,
+      minScore,
+      rerank: false,
+      explain: true,
+      chunkStrategy: "regex"
+    });
+    hits = await Promise.all(matches.map((result) => hybridSearchHit(context.root, result, context.notesByPath, context.notesByQmdPath, context.connectionsById)));
+  } else {
+    const matches = mode === "semantic" ? await context.store.searchVector(query, {
+      collection: collectionName,
+      limit: candidateLimit
+    }) : await context.store.searchLex(query, {
+      collection: collectionName,
+      limit: candidateLimit
+    });
+    hits = await Promise.all(matches.filter(({ score }) => score >= minScore).map((result) => searchHit(context.store, context.root, query, result, context.notesByPath, context.notesByQmdPath, context.connectionsById)));
+  }
+  return {
+    root: context.root,
+    database: context.database,
+    model: recommendedEmbeddingModel,
+    mode,
+    query,
+    update: context.update,
+    embedding,
+    results: hits.filter((hit) => hit !== null).slice(0, limit)
+  };
+}
+async function openSemanticSearchSession(options, dependencies = {}) {
   const root = await resolvedDirectory(options.root);
   const database = databaseFor(root, options.database, dependencies);
-  const mode = options.mode ?? "semantic";
-  const limit = boundedLimit(options.limit);
-  const minScore = boundedScore(options.minScore);
   const store = await openStore(root, database, dependencies);
+  let update;
+  let snapshot2;
   try {
-    const update = await store.update({ collections: [collectionName] });
-    const embedding = mode === "semantic" ? await embedChanged(store, update, false) : null;
-    const matches = mode === "semantic" ? await store.searchVector(query, { collection: collectionName, limit }) : await store.searchLex(query, { collection: collectionName, limit });
-    const snapshot2 = await (dependencies.scanVault ?? scanVault)(root);
-    const notesByPath = new Map(snapshot2.notes.map((note) => [note.path, note]));
-    const notesByQmdPath = qmdNoteLookup(snapshot2.notes);
-    const connectionsById = new Map(snapshot2.analysis.noteConnections.map((connection) => [connection.id, connection]));
-    const hits = await Promise.all(matches.filter(({ score }) => score >= minScore).map((result) => searchHit(store, root, query, result, notesByPath, notesByQmdPath, connectionsById)));
-    return {
-      root,
-      database,
-      model: recommendedEmbeddingModel,
-      mode,
-      query,
-      update,
-      embedding,
-      results: hits.filter((hit) => hit !== null)
-    };
-  } finally {
+    update = await store.update({ collections: [collectionName] });
+    snapshot2 = await (dependencies.scanVault ?? ((vaultRoot) => scanVault(vaultRoot, { mentionScope: false })))(root);
+  } catch (error) {
     await store.close();
+    throw error;
+  }
+  const notesByPath = new Map(snapshot2.notes.map((note) => [note.path, note]));
+  const notesByQmdPath = qmdNoteLookup(snapshot2.notes);
+  const connectionsById = new Map(snapshot2.analysis.noteConnections.map((connection) => [connection.id, connection]));
+  let embeddingPromise;
+  const ensureEmbedding = () => {
+    embeddingPromise ??= embedChanged(store, update, false);
+    return embeddingPromise;
+  };
+  let tail = Promise.resolve();
+  let closeRequested = false;
+  let closePromise;
+  const serialize = (operation) => {
+    const result = tail.then(operation);
+    tail = result.then(() => {
+      return;
+    }, () => {
+      return;
+    });
+    return result;
+  };
+  const context = {
+    root,
+    database,
+    store,
+    update,
+    ensureEmbedding,
+    notesByPath,
+    notesByQmdPath,
+    connectionsById
+  };
+  return {
+    root,
+    database,
+    model: recommendedEmbeddingModel,
+    update,
+    search: (searchOptions) => {
+      if (closeRequested) {
+        return Promise.reject(new Error("Semantic search session is closed."));
+      }
+      return serialize(() => executeSemanticSearch(context, searchOptions));
+    },
+    close: () => {
+      if (closePromise !== undefined)
+        return closePromise;
+      closeRequested = true;
+      closePromise = serialize(() => store.close());
+      return closePromise;
+    }
+  };
+}
+async function searchSemanticVault(options, dependencies = {}) {
+  const session = await openSemanticSearchSession({
+    root: options.root,
+    ...options.database === undefined ? {} : { database: options.database }
+  }, dependencies);
+  try {
+    return await session.search({
+      query: options.query,
+      ...options.mode === undefined ? {} : { mode: options.mode },
+      ...options.limit === undefined ? {} : { limit: options.limit },
+      ...options.candidateLimit === undefined ? {} : { candidateLimit: options.candidateLimit },
+      ...options.minScore === undefined ? {} : { minScore: options.minScore }
+    });
+  } finally {
+    await session.close();
   }
 }
 
-export { MAX_SCANNED_NOTES, MAX_NOTE_UTF8_BYTES, MAX_VAULT_UTF8_BYTES, VaultScanBudgetError, defaultIgnoredDirectories, markdownFiles, readVaultNotes, scanVault, refreshVault, recommendedEmbeddingModel, semanticDatabasePath, indexSemanticVault, searchSemanticVault };
+export { MAX_SCANNED_NOTES, MAX_NOTE_UTF8_BYTES, MAX_VAULT_UTF8_BYTES, VaultScanBudgetError, defaultIgnoredDirectories, markdownFiles, readVaultNotes, scanVault, refreshVault, recommendedEmbeddingModel, semanticDatabasePath, indexSemanticVault, openSemanticSearchSession, searchSemanticVault };

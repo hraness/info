@@ -1,6 +1,6 @@
 ---
 name: query-kb
-description: Load scoped repository context, then search and navigate a hraness/kb Markdown vault with exact metadata, bounded links and typed relationships, backlinks, whole-vault graph reports, keyword search, or local semantic retrieval. Use when an agent needs the applicable repository instructions, rationale, prior knowledge, plans, captures, decisions, concepts, relationships, or evidence before answering, planning, or changing code.
+description: Load scoped repository context, then search and navigate a hraness/kb Markdown vault with hybrid text retrieval, exact metadata, bounded links and typed relationships, backlinks, whole-vault graph reports, and optional Git provenance. Use when an agent needs the applicable repository instructions, rationale, prior knowledge, plans, captures, decisions, concepts, relationships, or evidence before answering, planning, or changing code.
 ---
 
 # Query the knowledge base
@@ -29,7 +29,7 @@ authority; search scores, metadata rows, and graph results are derived views.
   resolve note identities before returning authored relationships.
 - A whole-vault structural question or relationship audit: use `kb graph --json`,
   then inspect the smallest relevant portion of its canonical output.
-- Concept expressed with different vocabulary: use `kb search`.
+- A phrase, identity, or concept expressed with different vocabulary: use `kb search`, whose default hybrid result preserves exact and QMD evidence separately.
 - Broad orientation: read `index.md`, then follow the smallest useful link trail.
 
 ```sh
@@ -41,6 +41,8 @@ kb links "Plan title or path" --root "$KB_ROOT" --direction both --depth 1 --lim
 kb relation list "Plan title or path" --root "$KB_ROOT" --json
 kb graph --root "$KB_ROOT" --json
 kb search "why browser capture uses the current tab" --root "$KB_ROOT" --json
+kb search "accepted ingestion plans" --root "$KB_ROOT" --where type=plan --where status=accepted --tag ingestion --json
+kb search "notes/write-path" --root "$KB_ROOT" --mode exact --no-history --json
 ```
 
 `kb context` prints hub titles and summaries, not hub bodies. Guides remain
@@ -58,20 +60,69 @@ titles or file paths. Unquoted `true`, `false`, `null`, and numeric filter
 values are typed. Keep quotes inside the argument to match a string with the
 same spelling, for example `--where 'external_id="9007199254740993"'`.
 
-## Use semantic search as discovery
+## Use hybrid search as discovery
 
-`kb search` incrementally updates a local QMD index and defaults to QMD's small
-embedding-only model. The first semantic query downloads the model; later
-queries reuse the local cache. Prewarm explicitly when useful:
+`kb search` first scans current Markdown for identity, phrase, metadata, tag,
+and prose matches. By default it runs that exact lane alongside QMD's local
+full-text and vector rankings, then combines the ranked lists while retaining
+each lane's evidence. Exact title and alias identities stay ahead of broader
+matches. The QMD path avoids query expansion and reranking models by default.
+
+The first hybrid or semantic query downloads QMD's compact local embedding
+model; later queries reuse the local cache. Prewarm explicitly when useful:
 
 ```sh
 kb index --root "$KB_ROOT"
 ```
 
-Use `--mode keyword` for exact BM25 retrieval without loading an embedding
-model. Treat semantic rank as a lead, not a fact. Open the returned Markdown,
-read enough surrounding context, and confirm claims against linked sources or
-capture manifests.
+Use `--mode exact` for live model-free search, `--mode keyword` for QMD
+full-text retrieval, or `--mode semantic` for its vector lane. Apply repeated
+`--where`, `--has`, and `--tag` filters before ranking. Treat every retrieval
+rank as a lead, not a fact. Open the returned Markdown, read enough surrounding
+context, and confirm claims against linked sources or capture manifests.
+
+Default search also returns bounded explicit graph context around the strongest
+results. Supply `--related <note>` to seed a known neighborhood or `--no-graph`
+when structure does not help. When `--repo` resolves a Git repository, search
+may include recent per-note provenance; use `--no-history` when it is irrelevant
+or unavailable. Use `--require-history` when the task cannot proceed with a
+partial Git lane. Graph neighbors and Git history remain separate from primary
+text rank. They explain and expand candidates without becoming authored facts,
+links, or recency boosts.
+
+## Reuse one snapshot in code mode
+
+For several related queries, prefer one SDK session to repeated CLI process
+startup:
+
+```ts
+import { openKnowledgeBase, packSearchContext } from "@hraness/kb/sdk";
+
+const kb = await openKnowledgeBase({ root: "kb", repository: "." });
+try {
+  const result = await kb.search({
+    query: "why browser capture uses the current tab",
+    graph: { depth: 1 },
+    history: "auto",
+  });
+  console.log(packSearchContext(result).content);
+} finally {
+  await kb.close();
+}
+```
+
+`grep`, `list`, `read`, `links`, `backlinks`, `search`, `history`, and
+`searchHistory` share one confined read-only scan. QMD and Git initialize
+lazily. The session does not watch Markdown or repository changes. Close it
+before a write and open a new session after the final refresh and check.
+
+When independent queries can run concurrently, compose them with
+`defineWorkflow` and `runWorkflow` or import a packaged workflow. The runner
+validates a finite acyclic graph, caps global concurrency, serializes QMD nodes,
+and keeps Git concurrency bounded. Do not bypass those resource groups with
+unbounded `Promise.all` calls. Custom workflows use the staged
+`defineWorkflow<Input>("id").node(...).output(...)` builder so dependency
+results and the final output remain typed.
 
 ## Use focused structural views
 
@@ -95,8 +146,9 @@ is evidence for a focused, tested command with an explicit output contract.
 ## Combine meaning with structure
 
 1. For a repository-path question, use `kb context` before broader retrieval.
-2. Use semantic search to discover candidate identities when exact structure
-   does not answer the question.
+2. Use default hybrid search to discover candidate identities when exact
+   structure does not answer the question. Read its lane evidence and partial
+   diagnostics before relying on the order.
 3. Use `kb list` to narrow by authored metadata such as `type`, `status`,
    `area`, or `tags`.
 4. Use `kb links` at depth 1 to inspect immediate explicit relationships and
@@ -116,3 +168,4 @@ Do not infer an edge from semantic similarity, or a conclusion from a tag. Do
 not write generated backlink sections into notes. If the query exposes stale
 metadata or a broken link, repair the authored Markdown and finish with
 `kb refresh --root "$KB_ROOT"` and `kb check --root "$KB_ROOT"`.
+Close any open SDK session before that repair and reopen it after validation.
