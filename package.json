@@ -182,7 +182,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test ./src",
     "test:package": "bun run ./scripts/package-smoke.ts",
-    "check": "bun run typecheck && bun run test && bun run build && bun run test:package",
+    "check": "bun run typecheck && bun run build && bun run test:package && bun run test",
     "prepack": "bun run check"
   },
   "dependencies": {
