@@ -5,7 +5,10 @@ import { analyzeVault, parseNote } from "./graph.js";
 import {
   buildGraphContext,
   fuseRankedCandidates,
+  MAX_SEARCH_QUERY_BYTES,
+  MAX_SEARCH_QUERY_TERMS,
   searchExactVault,
+  validateSearchQuery,
 } from "./search.js";
 
 function fixture() {
@@ -123,6 +126,30 @@ describe("live exact search", () => {
     expect(() => searchExactVault(notes, analysis, { query: "memory", limit: 501 }))
       .toThrow("1 through 500");
   });
+
+  test("bounds UTF-8 query bytes and unique normalized terms before scanning notes", () => {
+    expect(validateSearchQuery("  CAFÉ cafe\u0301  ")).toEqual({
+      query: "CAFÉ cafe\u0301",
+      normalized: "café café",
+      terms: ["café"],
+    });
+
+    let noteReads = 0;
+    const unreadNotes = new Proxy([] as ReturnType<typeof fixture>["notes"], {
+      get(target, property, receiver): unknown {
+        noteReads += 1;
+        const reflected: unknown = Reflect.get(target, property, receiver);
+        return reflected;
+      },
+    });
+    expect(() => searchExactVault(unreadNotes, analyzeVault([]), {
+      query: "🧠".repeat(Math.floor(MAX_SEARCH_QUERY_BYTES / 4) + 1),
+    })).toThrow(`${MAX_SEARCH_QUERY_BYTES.toLocaleString("en-US")} UTF-8 bytes`);
+    expect(() => validateSearchQuery(
+      Array.from({ length: MAX_SEARCH_QUERY_TERMS + 1 }, (_, index) => `term${index}`).join(" "),
+    )).toThrow(`${MAX_SEARCH_QUERY_TERMS} unique normalized terms`);
+    expect(noteReads).toBe(0);
+  });
 });
 
 describe("rank fusion", () => {
@@ -185,6 +212,18 @@ describe("rank fusion", () => {
         expect(reversed).toEqual(forward);
       },
     ));
+  });
+
+  test("lets cross-lane agreement win and breaks equal-rank ties by canonical id", () => {
+    const fused = fuseRankedCandidates([
+      { name: "exact", weight: 1, ids: ["z-exact", "shared"] },
+      { name: "qmd", weight: 1, ids: ["a-semantic", "shared"] },
+    ]);
+    expect(fused.map(({ id }) => id)).toEqual([
+      "shared",
+      "a-semantic",
+      "z-exact",
+    ]);
   });
 });
 

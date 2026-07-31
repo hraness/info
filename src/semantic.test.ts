@@ -1,8 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   indexSemanticVault,
@@ -14,7 +24,7 @@ import {
   type SemanticStoreOptions,
   type SemanticUpdateResult,
 } from "./semantic.js";
-import { scanVault } from "./vault.js";
+import { MAX_NOTE_UTF8_BYTES, scanVault } from "./vault.js";
 
 type SearchResultFixture = {
   readonly filepath: string;
@@ -117,6 +127,7 @@ describe("QMD indexing", () => {
     const optionsSeen: SemanticStoreOptions[] = [];
     const calls: string[] = [];
     await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
     const store = {
       update: () => {
         calls.push("update");
@@ -143,12 +154,147 @@ describe("QMD indexing", () => {
       expect(indexed.embedding).toMatchObject({ docsProcessed: 1, chunksEmbedded: 1 });
       expect(calls).toEqual(["update", `embed:${recommendedEmbeddingModel}`, "close"]);
       const canonicalRoot = await realpath(root);
+      const projectionRoot = optionsSeen[0]?.config.collections.kb?.path;
+      expect(projectionRoot).toBeString();
+      expect(projectionRoot).not.toBe(canonicalRoot);
+      expect(projectionRoot).toStartWith(await realpath(join(temporary, "cache")));
       expect(optionsSeen[0]).toMatchObject({
         config: {
-          collections: { kb: { path: canonicalRoot, pattern: "**/*.md" } },
+          collections: { kb: { path: projectionRoot, pattern: "**/*.md" } },
           models: { embed: recommendedEmbeddingModel },
         },
       });
+      expect(recommendedEmbeddingModel).toEndWith(
+        "#0f741b5a6585bd53aeb15cd1372c56f2a0f65e12",
+      );
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("indexes an immutable validated projection with an auditable path manifest", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const root = join(temporary, "vault");
+    const cache = join(temporary, "cache");
+    const database = join(cache, "projection.sqlite");
+    const notePath = join(root, "notes", "projection.md");
+    const original = "# Projection\n\nBounded snapshot content.\n";
+    const changed = "# Projection\n\nChanged after the scan.\n";
+    const optionsSeen: SemanticStoreOptions[] = [];
+    await mkdir(join(root, "notes"), { recursive: true });
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(notePath, original, "utf8");
+    const store = {
+      update: () => Promise.resolve(unchanged),
+      embed: () => Promise.resolve({ docsProcessed: 0, chunksEmbedded: 0, errors: 0, durationMs: 0 }),
+      searchLex: () => Promise.resolve([]),
+      searchVector: () => Promise.resolve([]),
+      getDocumentBody: () => Promise.resolve(null),
+      close: () => Promise.resolve(),
+    } satisfies FakeStore;
+    try {
+      await indexSemanticVault(
+        { root, database },
+        {
+          ...fakeDependencies(store, optionsSeen, cache),
+          scanVault: async (requestedRoot) => {
+            const snapshot = await scanVault(requestedRoot, { mentionScope: false });
+            await writeFile(notePath, changed, "utf8");
+            return snapshot;
+          },
+        },
+      );
+      const projectionRoot = optionsSeen[0]?.config.collections.kb?.path;
+      expect(projectionRoot).toBeString();
+      expect(await readFile(join(projectionRoot as string, "notes", "projection.md"), "utf8"))
+        .toBe(original);
+      expect(await readFile(notePath, "utf8")).toBe(changed);
+      const manifest = JSON.parse(
+        await readFile(`${database}.snapshot/manifest.json`, "utf8"),
+      ) as {
+        root: string;
+        generation: string;
+        indexIdentity: {
+          indexer: { package: string; version: string };
+          embedding: { model: string; chunkStrategy: string };
+        };
+        notes: { path: string; sha256: string; bytes: number }[];
+      };
+      expect(manifest.root).toBe(await realpath(root));
+      expect(projectionRoot).toEndWith(manifest.generation);
+      expect(manifest.notes).toContainEqual({
+        path: "notes/projection.md",
+        sha256: contentHash(original),
+        bytes: Buffer.byteLength(original),
+      });
+      const qmdEntry = fileURLToPath(import.meta.resolve("@tobilu/qmd"));
+      const qmdPackage = JSON.parse(
+        await readFile(resolve(dirname(qmdEntry), "..", "package.json"), "utf8"),
+      ) as { version: string };
+      expect(manifest.indexIdentity).toMatchObject({
+        indexer: { package: "@tobilu/qmd", version: qmdPackage.version },
+        embedding: { model: recommendedEmbeddingModel, chunkStrategy: "regex" },
+      });
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects an oversized live note before creating QMD database content", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const root = join(temporary, "vault");
+    const database = join(temporary, "cache", "oversized.sqlite");
+    let creates = 0;
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(
+      join(root, "oversized.md"),
+      `# Oversized\n${"x".repeat(MAX_NOTE_UTF8_BYTES)}`,
+      "utf8",
+    );
+    try {
+      expect(indexSemanticVault(
+        { root, database },
+        {
+          createStore: () => {
+            creates += 1;
+            return Promise.reject(new Error("QMD must not open"));
+          },
+        },
+      )).rejects.toThrow("exceeds the");
+      expect(creates).toBe(0);
+      expect(stat(database)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(stat(`${database}.snapshot`)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects an in-vault database before scanning or writing cache state", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-overlap-"));
+    const root = join(temporary, "vault");
+    const database = join(root, "cache", "index.sqlite");
+    let scans = 0;
+    let creates = 0;
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    try {
+      expect(indexSemanticVault(
+        { root, database },
+        {
+          scanVault: async (requestedRoot) => {
+            scans += 1;
+            return await scanVault(requestedRoot, { mentionScope: false });
+          },
+          createStore: () => {
+            creates += 1;
+            return Promise.reject(new Error("QMD must not open"));
+          },
+        },
+      )).rejects.toThrow("must not overlap the vault root");
+      expect({ scans, creates }).toEqual({ scans: 0, creates: 0 });
+      expect(stat(database)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(stat(`${database}.snapshot`)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await rm(temporary, { recursive: true, force: true });
     }
@@ -156,6 +302,7 @@ describe("QMD indexing", () => {
 
   test("closes the store when indexing fails", async () => {
     const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const cache = `${temporary}-cache`;
     let closed = false;
     const store = {
       update: () => Promise.reject(new Error("index failed")),
@@ -169,21 +316,24 @@ describe("QMD indexing", () => {
       },
     } satisfies FakeStore;
     try {
+      await writeFile(join(temporary, "index.md"), "# Knowledge base\n", "utf8");
       expect(indexSemanticVault(
         { root: temporary },
-        fakeDependencies(store, [], join(temporary, "cache")),
+        fakeDependencies(store, [], cache),
       )).rejects.toThrow("index failed");
       expect(closed).toBe(true);
     } finally {
       await rm(temporary, { recursive: true, force: true });
+      await rm(cache, { recursive: true, force: true });
     }
   });
 
   test("rejects malformed stores and closes the foreign resource when possible", async () => {
     const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const cache = `${temporary}-cache`;
     let closed = false;
     const dependencies: SemanticDependencies = {
-      cacheHome: join(temporary, "cache"),
+      cacheHome: cache,
       createStore: () => Promise.resolve({
         close: () => {
           closed = true;
@@ -193,16 +343,19 @@ describe("QMD indexing", () => {
       }),
     };
     try {
+      await writeFile(join(temporary, "index.md"), "# Knowledge base\n", "utf8");
       expect(indexSemanticVault({ root: temporary }, dependencies))
         .rejects.toThrow("QMD store.embed must be a function");
       expect(closed).toBe(true);
     } finally {
       await rm(temporary, { recursive: true, force: true });
+      await rm(cache, { recursive: true, force: true });
     }
   });
 
   test("rejects malformed QMD results before they enter the owned API", async () => {
     const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const cache = `${temporary}-cache`;
     let closed = false;
     const store = {
       update: () => Promise.resolve({ ...unchanged, needsEmbedding: "one" }),
@@ -216,13 +369,15 @@ describe("QMD indexing", () => {
       },
     } satisfies FakeStore;
     try {
+      await writeFile(join(temporary, "index.md"), "# Knowledge base\n", "utf8");
       expect(indexSemanticVault(
         { root: temporary },
-        fakeDependencies(store, [], join(temporary, "cache")),
+        fakeDependencies(store, [], cache),
       )).rejects.toThrow("QMD update result.needsEmbedding must be a finite number");
       expect(closed).toBe(true);
     } finally {
       await rm(temporary, { recursive: true, force: true });
+      await rm(cache, { recursive: true, force: true });
     }
   });
 });
@@ -288,7 +443,7 @@ describe("QMD search", () => {
       await Promise.all([session.close(), session.close()]);
       expect({ scans, updates, embeddings, searches, maximumActive, closes }).toEqual({
         scans: 1,
-        updates: 1,
+        updates: 2,
         embeddings: 1,
         searches: 2,
         maximumActive: 1,
@@ -300,13 +455,262 @@ describe("QMD search", () => {
     }
   });
 
-  test("runs fast typed lexical and vector queries through QMD hybrid fusion", async () => {
+  test("allows same-generation sessions and their keyword reads to overlap", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const root = join(temporary, "vault");
+    const database = join(temporary, "cache", "shared.sqlite");
+    const body = "# Shared generation\n\nParallel readers stay coherent.\n";
+    let creates = 0;
+    let activeSearches = 0;
+    let maximumSearches = 0;
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(join(root, "note.md"), body, "utf8");
+    const dependencies: SemanticDependencies = {
+      writerLease: { waitMs: 2_000, pollMs: 5 },
+      createStore: async () => {
+        await Promise.resolve();
+        creates += 1;
+        return {
+          update: () => Promise.resolve(unchanged),
+          embed: () => Promise.resolve({ docsProcessed: 0, chunksEmbedded: 0, errors: 0, durationMs: 0 }),
+          searchLex: async () => {
+            activeSearches += 1;
+            maximumSearches = Math.max(maximumSearches, activeSearches);
+            await Bun.sleep(25);
+            activeSearches -= 1;
+            return [result("qmd://kb/note.md", {
+              title: "Shared generation",
+              source: "fts",
+              hash: contentHash(body),
+            })];
+          },
+          searchVector: () => Promise.resolve([]),
+          getDocumentBody: () => Promise.resolve(body),
+          close: () => Promise.resolve(),
+        } satisfies FakeStore;
+      },
+    };
+    let sessions: readonly Awaited<ReturnType<typeof openSemanticSearchSession>>[] = [];
+    try {
+      sessions = await Promise.all([
+        openSemanticSearchSession({ root, database }, dependencies),
+        openSemanticSearchSession({ root, database }, dependencies),
+      ]);
+      expect(creates).toBe(2);
+      const results = await Promise.all(sessions.map((session) =>
+        session.search({ query: "parallel", mode: "keyword" })));
+      expect(results.every((found) => found.results[0]?.path === "note.md")).toBe(true);
+      expect(maximumSearches).toBe(2);
+    } finally {
+      await Promise.all(sessions.map((session) => session.close()));
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("serializes semantic sessions that name one database through directory aliases", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-alias-"));
+    const root = join(temporary, "vault");
+    const realCache = join(temporary, "cache-real");
+    const aliasCache = join(temporary, "cache-alias");
+    const database = join(realCache, "shared.sqlite");
+    let activeUpdates = 0;
+    let maximumUpdates = 0;
+    await mkdir(root);
+    await mkdir(realCache);
+    await symlink(realCache, aliasCache, "dir");
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(join(root, "note.md"), "# Aliased database\n", "utf8");
+    const dependencies: SemanticDependencies = {
+      writerLease: { waitMs: 2_000, pollMs: 5 },
+      createStore: () => Promise.resolve({
+        update: async () => {
+          activeUpdates += 1;
+          maximumUpdates = Math.max(maximumUpdates, activeUpdates);
+          await Bun.sleep(30);
+          activeUpdates -= 1;
+          return unchanged;
+        },
+        embed: () => Promise.resolve({ docsProcessed: 0, chunksEmbedded: 0, errors: 0, durationMs: 0 }),
+        searchLex: () => Promise.resolve([]),
+        searchVector: () => Promise.resolve([]),
+        getDocumentBody: () => Promise.resolve(null),
+        close: () => Promise.resolve(),
+      } satisfies FakeStore),
+    };
+    let sessions: readonly Awaited<ReturnType<typeof openSemanticSearchSession>>[] = [];
+    try {
+      sessions = await Promise.all([
+        openSemanticSearchSession({ root, database }, dependencies),
+        openSemanticSearchSession({
+          root,
+          database: join(aliasCache, "shared.sqlite"),
+        }, dependencies),
+      ]);
+      expect(maximumUpdates).toBe(1);
+      expect(new Set(sessions.map(({ database: path }) => path)))
+        .toEqual(new Set([join(await realpath(realCache), "shared.sqlite")]));
+    } finally {
+      await Promise.all(sessions.map((session) => session.close()));
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("waits for same-generation readers before a forced re-embed", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-force-"));
+    const root = join(temporary, "vault");
+    const database = join(temporary, "cache", "shared.sqlite");
+    let creates = 0;
+    let forceEmbeds = 0;
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(join(root, "note.md"), "# Force exclusion\n", "utf8");
+    const dependencies: SemanticDependencies = {
+      writerLease: { waitMs: 2_000, pollMs: 5 },
+      createStore: () => {
+        creates += 1;
+        return Promise.resolve({
+          update: () => Promise.resolve(unchanged),
+          embed: (options?: { readonly force?: boolean }) => {
+            if (options?.force === true) forceEmbeds += 1;
+            return Promise.resolve({ docsProcessed: 1, chunksEmbedded: 1, errors: 0, durationMs: 1 });
+          },
+          searchLex: () => Promise.resolve([]),
+          searchVector: () => Promise.resolve([]),
+          getDocumentBody: () => Promise.resolve(null),
+          close: () => Promise.resolve(),
+        } satisfies FakeStore);
+      },
+    };
+    let reader: Awaited<ReturnType<typeof openSemanticSearchSession>> | undefined;
+    try {
+      reader = await openSemanticSearchSession({ root, database }, dependencies);
+      const forced = indexSemanticVault({ root, database, force: true }, dependencies);
+      await Bun.sleep(50);
+      expect({ creates, forceEmbeds }).toEqual({ creates: 1, forceEmbeds: 0 });
+      await reader.close();
+      reader = undefined;
+      await forced;
+      expect({ creates, forceEmbeds }).toEqual({ creates: 2, forceEmbeds: 1 });
+    } finally {
+      await reader?.close();
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps different-generation sessions coherent by leasing through close", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const firstRoot = join(temporary, "first");
+    const secondRoot = join(temporary, "second");
+    const database = join(temporary, "cache", "shared.sqlite");
+    let creates = 0;
+    for (const [root, body] of [
+      [firstRoot, "# Alpha snapshot\n\nOnly alpha evidence.\n"],
+      [secondRoot, "# Beta snapshot\n\nOnly beta evidence.\n"],
+    ] as const) {
+      await mkdir(root);
+      await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+      await writeFile(join(root, "note.md"), body, "utf8");
+    }
+    const dependencies: SemanticDependencies = {
+      writerLease: { waitMs: 2_000, pollMs: 5 },
+      createStore: async (options) => {
+        creates += 1;
+        const projection = options.config.collections.kb?.path;
+        if (projection === undefined) throw new Error("missing projection");
+        const body = await readFile(join(projection, "note.md"), "utf8");
+        return {
+          update: () => Promise.resolve(unchanged),
+          embed: () => Promise.resolve({ docsProcessed: 0, chunksEmbedded: 0, errors: 0, durationMs: 0 }),
+          searchLex: () => Promise.resolve([
+            result("qmd://kb/note.md", {
+              title: body.includes("Alpha") ? "Alpha snapshot" : "Beta snapshot",
+              source: "fts",
+              hash: contentHash(body),
+            }),
+          ]),
+          searchVector: () => Promise.resolve([]),
+          getDocumentBody: () => Promise.resolve(body),
+          close: () => Promise.resolve(),
+        } satisfies FakeStore;
+      },
+    };
+    try {
+      const first = await openSemanticSearchSession(
+        { root: firstRoot, database },
+        dependencies,
+      );
+      const secondOpening = openSemanticSearchSession(
+        { root: secondRoot, database },
+        dependencies,
+      );
+      await Bun.sleep(50);
+      expect(creates).toBe(1);
+      const firstResult = await first.search({ query: "alpha", mode: "keyword" });
+      expect(firstResult.results[0]?.snippet).toContain("Only alpha evidence");
+      await first.close();
+
+      const second = await secondOpening;
+      try {
+        expect(creates).toBe(2);
+        const secondResult = await second.search({ query: "beta", mode: "keyword" });
+        expect(secondResult.results[0]?.snippet).toContain("Only beta evidence");
+      } finally {
+        await second.close();
+      }
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("runs concurrent fresh and warm real QMD keyword sessions without lock errors", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-real-"));
+    const root = join(temporary, "vault");
+    const database = join(temporary, "cache", "real.sqlite");
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(
+      join(root, "note.md"),
+      "# Real QMD concurrency\n\nFresh and warm readers share WAL-backed evidence.\n",
+      "utf8",
+    );
+    const dependencies: SemanticDependencies = {
+      writerLease: { waitMs: 5_000, pollMs: 5 },
+    };
+    let sessions: readonly Awaited<ReturnType<typeof openSemanticSearchSession>>[] = [];
+    try {
+      sessions = await Promise.all([
+        openSemanticSearchSession({ root, database }, dependencies),
+        openSemanticSearchSession({ root, database }, dependencies),
+      ]);
+      const fresh = await Promise.all(sessions.map((session) =>
+        session.search({ query: "WAL evidence", mode: "keyword" })));
+      expect(fresh.every((found) => found.results.some(({ path }) => path === "note.md")))
+        .toBe(true);
+      await Promise.all(sessions.map((session) => session.close()));
+      sessions = [];
+
+      sessions = await Promise.all([
+        openSemanticSearchSession({ root, database }, dependencies),
+        openSemanticSearchSession({ root, database }, dependencies),
+      ]);
+      const warm = await Promise.all(sessions.map((session) =>
+        session.search({ query: "warm readers", mode: "keyword" })));
+      expect(warm.every((found) => found.results.some(({ path }) => path === "note.md")))
+        .toBe(true);
+    } finally {
+      await Promise.all(sessions.map((session) => session.close()));
+      await rm(temporary, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  test("runs typed lexical and vector queries through QMD hybrid fusion", async () => {
     const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
     const root = join(temporary, "vault");
     const note = join(root, "notes", "hybrid.md");
     const virtualPath = "qmd://kb/notes/hybrid.md";
-    const seen: unknown[] = [];
-    let invalidPosition = false;
+    const seen: string[] = [];
+    let bodyReads = 0;
     let overReturn = false;
     await mkdir(join(root, "notes"), { recursive: true });
     await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
@@ -324,39 +728,29 @@ describe("QMD search", () => {
         errors: 0,
         durationMs: 0,
       }),
-      search: (options?: unknown) => {
-        seen.push(options);
-        const match = {
-            file: virtualPath,
-            displayPath: "notes/hybrid.md",
-            title: "Hybrid retrieval",
-            body,
-            bestChunk: "Forged text that is not present in the note.",
-            bestChunkPos: invalidPosition ? body.length + 1 : body.indexOf("Exact"),
-            score: 0.82,
-            context: null,
-            docid: "abc123",
-            explain: {
-              ftsScores: [4.2],
-              vectorScores: [0.76],
-              rrf: {
-                rank: 1,
-                positionScore: 1,
-                weight: 1,
-                baseScore: 1,
-                topRankBonus: 0.05,
-                totalScore: 1.05,
-                contributions: [],
-              },
-              rerankScore: 0,
-              blendedScore: 0.82,
-            },
-          };
-        return Promise.resolve(overReturn ? [match, match] : [match]);
+      searchLex: (query: string, options?: { readonly limit?: number }) => {
+        seen.push(`keyword:${query}:${String(options?.limit)}`);
+        const match = result(virtualPath, {
+          title: "Hybrid retrieval",
+          source: "fts",
+          hash: contentHash(body),
+          chunkPos: body.indexOf("Exact"),
+        });
+        return Promise.resolve(overReturn ? Array.from({ length: 41 }, () => match) : [match]);
       },
-      searchLex: () => Promise.reject(new Error("unexpected keyword search")),
-      searchVector: () => Promise.reject(new Error("unexpected vector search")),
-      getDocumentBody: () => Promise.reject(new Error("hybrid body is returned inline")),
+      searchVector: (query: string, options?: { readonly limit?: number }) => {
+        seen.push(`semantic:${query}:${String(options?.limit)}`);
+        return Promise.resolve([result(virtualPath, {
+          title: "Hybrid retrieval",
+          source: "vec",
+          hash: contentHash(body),
+          chunkPos: body.indexOf("related"),
+        })]);
+      },
+      getDocumentBody: () => {
+        bodyReads += 1;
+        return Promise.reject(new Error("live note content should satisfy reconciliation"));
+      },
       close: () => Promise.resolve(),
     } satisfies FakeStore;
     try {
@@ -371,19 +765,8 @@ describe("QMD search", () => {
         fakeDependencies(store, [], join(temporary, "cache")),
       );
       expect(seen).toEqual([
-        {
-          queries: [
-            { type: "lex", query: "hybrid evidence" },
-            { type: "vec", query: "hybrid evidence" },
-          ],
-          collection: "kb",
-          limit: 5,
-          candidateLimit: 40,
-          minScore: 0,
-          rerank: false,
-          explain: true,
-          chunkStrategy: "regex",
-        },
+        "keyword:hybrid evidence:40",
+        "semantic:hybrid evidence:40",
       ]);
       expect(found.results).toEqual([
         expect.objectContaining({
@@ -394,19 +777,77 @@ describe("QMD search", () => {
         }),
       ]);
       expect(found.results[0]?.snippet).toContain("Exact words and related meaning");
-      expect(found.results[0]?.snippet).not.toContain("Forged text");
+      expect(bodyReads).toBe(0);
+      expect(found.rawWindow).toEqual({
+        requested: 40,
+        returned: 1,
+        discarded: 0,
+        thresholdRejected: 0,
+        exhausted: true,
+      });
 
-      invalidPosition = true;
-      expect(searchSemanticVault(
-        { root, query: "hybrid evidence", mode: "hybrid", limit: 5 },
-        fakeDependencies(store, [], join(temporary, "cache")),
-      )).rejects.toThrow("bestChunkPos must fall within the verified document body");
-      invalidPosition = false;
       overReturn = true;
       expect(searchSemanticVault(
         { root, query: "hybrid evidence", mode: "hybrid", limit: 1 },
         fakeDependencies(store, [], join(temporary, "cache")),
-      )).rejects.toThrow("more than the requested 1 results");
+      )).rejects.toThrow("more than the requested 40 results");
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("retrieves hybrid candidates below QMD's former twenty-row structured cap", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-window-"));
+    const root = join(temporary, "vault");
+    const bodies = new Map<string, string>();
+    const limits: number[] = [];
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    const matches = await Promise.all(Array.from({ length: 25 }, async (_, index) => {
+      const path = `note-${String(index + 1).padStart(2, "0")}.md`;
+      const virtualPath = `qmd://kb/${path}`;
+      const body = `# Candidate ${index + 1}\n\nHybrid evidence ${index + 1}.\n`;
+      bodies.set(virtualPath, body);
+      await writeFile(join(root, path), body, "utf8");
+      return result(virtualPath, {
+        title: `Candidate ${index + 1}`,
+        hash: contentHash(body),
+        chunkPos: body.indexOf("Hybrid"),
+      });
+    }));
+    const store = {
+      update: () => Promise.resolve(unchanged),
+      embed: () => Promise.resolve({ docsProcessed: 0, chunksEmbedded: 0, errors: 0, durationMs: 0 }),
+      searchLex: (_query: string, options?: { readonly limit?: number }) => {
+        limits.push(options?.limit ?? 0);
+        return Promise.resolve(matches.map((match) => ({ ...match, source: "fts" as const })));
+      },
+      searchVector: (_query: string, options?: { readonly limit?: number }) => {
+        limits.push(options?.limit ?? 0);
+        return Promise.resolve(matches.map((match) => ({ ...match, source: "vec" as const })));
+      },
+      getDocumentBody: (path: string) => Promise.resolve(bodies.get(path) ?? null),
+      close: () => Promise.resolve(),
+    } satisfies FakeStore;
+    try {
+      const found = await searchSemanticVault(
+        {
+          root,
+          query: "hybrid evidence",
+          mode: "hybrid",
+          limit: 25,
+          candidateLimit: 25,
+        },
+        fakeDependencies(store, [], join(temporary, "cache")),
+      );
+      expect(limits).toEqual([25, 25]);
+      expect(found.results).toHaveLength(25);
+      expect(found.results[24]).toMatchObject({
+        path: "note-25.md",
+        source: "hybrid",
+        signals: { keyword: true, semantic: true },
+      });
+      expect(found.rawWindow?.exhausted).toBe(false);
     } finally {
       await rm(temporary, { recursive: true, force: true });
     }
@@ -438,6 +879,10 @@ describe("QMD search", () => {
             score: 0.91,
           }),
           result(join(temporary, "outside.md"), { score: 0.99 }),
+          result(virtualPath, {
+            hash: contentHash(body),
+            score: 0.1,
+          }),
         ]);
       },
       getDocumentBody: (path: string) => Promise.resolve(path === virtualPath ? body : "outside"),
@@ -461,6 +906,13 @@ describe("QMD search", () => {
         }),
       ]);
       expect(found.results[0]?.snippet).toContain("Semantic search finds concepts");
+      expect(found.rawWindow).toEqual({
+        requested: 40,
+        returned: 3,
+        discarded: 1,
+        thresholdRejected: 1,
+        exhausted: true,
+      });
       expect(calls).toEqual(["embed", "vector:concept discovery:40:kb", "close"]);
     } finally {
       await rm(temporary, { recursive: true, force: true });
@@ -469,6 +921,7 @@ describe("QMD search", () => {
 
   test("disambiguates handelized collisions by live content and rejects stale virtual hits", async () => {
     const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const cache = `${temporary}-cache`;
     const plans = join(temporary, "plans");
     const dottedBody = "# Dotted plan\n\nCurrent collision evidence.\n";
     const dashedBody = "# Dashed plan\n\nDifferent collision evidence.\n";
@@ -490,29 +943,29 @@ describe("QMD search", () => {
           hash: contentHash(dashedBody),
           source: "fts",
         }),
-        result(bodyCheckedPath, { hash: contentHash(bodyCheckedBody), source: "fts" }),
+        result(bodyCheckedPath, { hash: contentHash("# Body checked\n\nStale body.\n"), source: "fts" }),
       ]),
       searchVector: () => Promise.reject(new Error("unexpected vector search")),
-      getDocumentBody: (path: string) => Promise.resolve(
-        path === collisionPath ? dottedBody : "# Body checked\n\nStale body.\n",
-      ),
+      getDocumentBody: () => Promise.reject(new Error("unexpected body read")),
       close: () => Promise.resolve(),
     } satisfies FakeStore;
     try {
       const found = await searchSemanticVault(
         { root: temporary, query: "collision", mode: "keyword" },
-        fakeDependencies(store, [], join(temporary, "cache")),
+        fakeDependencies(store, [], cache),
       );
       expect(found.results).toEqual([
         expect.objectContaining({ path: "plans/collision.v1.md", source: "fts" }),
       ]);
     } finally {
       await rm(temporary, { recursive: true, force: true });
+      await rm(cache, { recursive: true, force: true });
     }
   });
 
   test("keyword mode stays model-free and validates bounds", async () => {
     const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const cache = `${temporary}-cache`;
     const note = join(temporary, "note.md");
     let embeds = 0;
     let lexicalLimit = 0;
@@ -527,15 +980,22 @@ describe("QMD search", () => {
       searchLex: (_query: string, options?: { readonly limit?: number }) => {
         lexicalLimit = options?.limit ?? 0;
         return Promise.resolve([
-          result(note, { source: "fts", score: 0.99, hash: contentHash("# Stale phrase\n") }),
-          result(note, { source: "fts", hash: contentHash("# Exact phrase\n") }),
+          result("qmd://kb/note.md", {
+            source: "fts",
+            score: 0.99,
+            hash: contentHash("# Stale phrase\n"),
+          }),
+          result("qmd://kb/note.md", {
+            source: "fts",
+            hash: contentHash("# Exact phrase\n"),
+          }),
         ]);
       },
       searchVector: () => Promise.reject(new Error("unexpected vector search")),
       getDocumentBody: () => Promise.resolve("# Exact phrase\n"),
       close: () => Promise.resolve(),
     } satisfies FakeStore;
-    const dependencies = fakeDependencies(store, [], join(temporary, "cache"));
+    const dependencies = fakeDependencies(store, [], cache);
     try {
       const found = await searchSemanticVault(
         {
@@ -543,14 +1003,36 @@ describe("QMD search", () => {
           query: "exact",
           mode: "keyword",
           limit: 1,
-          candidateLimit: 3,
+          candidateLimit: 2,
         },
         dependencies,
       );
       expect(found.results).toHaveLength(1);
       expect(found.results[0]).toMatchObject({ path: "note.md", source: "fts" });
+      expect(found.rawWindow).toEqual({
+        requested: 2,
+        returned: 2,
+        discarded: 1,
+        thresholdRejected: 0,
+        exhausted: false,
+      });
       expect(embeds).toBe(0);
-      expect(lexicalLimit).toBe(3);
+      expect(lexicalLimit).toBe(2);
+      const session = await openSemanticSearchSession(
+        { root: temporary },
+        dependencies,
+      );
+      try {
+        await session.search({
+          query: "exact",
+          mode: "keyword",
+          limit: 500,
+          candidateLimit: 500,
+        });
+        expect(lexicalLimit).toBe(500);
+      } finally {
+        await session.close();
+      }
       expect(searchSemanticVault({ root: temporary, query: "x", limit: 0 }, dependencies))
         .rejects.toThrow("integer from 1 through 100");
       expect(searchSemanticVault({ root: temporary, query: "x", minScore: 2 }, dependencies))
@@ -560,6 +1042,32 @@ describe("QMD search", () => {
         query: "x",
         mode: "invalid" as never,
       }, dependencies)).rejects.toThrow("Search mode must be");
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+      await rm(cache, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects an oversized shared query before opening QMD", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const database = join(temporary, "cache", "query.sqlite");
+    let creates = 0;
+    try {
+      expect(searchSemanticVault(
+        {
+          root: temporary,
+          database,
+          query: "x".repeat(16 * 1_024 + 1),
+        },
+        {
+          createStore: () => {
+            creates += 1;
+            return Promise.reject(new Error("QMD must not open"));
+          },
+        },
+      )).rejects.toThrow("at most 16,384 UTF-8 bytes");
+      expect(creates).toBe(0);
+      expect(stat(database)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await rm(temporary, { recursive: true, force: true });
     }

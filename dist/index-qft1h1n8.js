@@ -1,7 +1,7 @@
 // @bun
 import {
   fuseRankedCandidates
-} from "./index-rn4d2mpa.js";
+} from "./index-ahw5amhf.js";
 
 // src/benchmark.ts
 var MAX_BENCHMARK_CASES = 500;
@@ -166,7 +166,7 @@ function evaluateRetrievalBenchmark(benchmarkCases, options = {}) {
 }
 function fixtureCase(id, queryClass, judgments, exact, semanticLike) {
   const hybrid = fuseRankedCandidates([
-    { name: "exact", weight: 2, ids: exact },
+    { name: "exact", weight: 1, ids: exact },
     { name: "semantic-like", weight: 1, ids: semanticLike }
   ]).map(({ id: resultId }) => resultId);
   return {
@@ -180,7 +180,7 @@ function fixtureCase(id, queryClass, judgments, exact, semanticLike) {
     ]
   };
 }
-function createRepresentativeRetrievalFixture() {
+function createSyntheticRankFusionFixture() {
   return [
     fixtureCase("alias-identity", "identity", [{ id: "write-path", relevance: 3 }, { id: "agent-memory", relevance: 1 }], ["write-path", "agent-memory", "durable-notes"], ["durable-notes", "context-window", "write-path", "agent-memory"]),
     fixtureCase("literal-title", "identity", [{ id: "repository-context", relevance: 3 }], ["repository-context", "repository-map"], ["repository-map", "repository-context", "shared-context"]),
@@ -194,5 +194,6 @@ function createRepresentativeRetrievalFixture() {
     fixtureCase("plan-context", "mixed", [{ id: "active-plan", relevance: 3 }, { id: "prior-rationale", relevance: 2 }], ["active-plan", "status-noise", "prior-rationale"], ["concept-noise", "prior-rationale", "active-plan"])
   ];
 }
+var createRepresentativeRetrievalFixture = createSyntheticRankFusionFixture;
 
-export { evaluateRanking, evaluateRetrievalBenchmark, createRepresentativeRetrievalFixture };
+export { evaluateRanking, evaluateRetrievalBenchmark, createSyntheticRankFusionFixture, createRepresentativeRetrievalFixture };

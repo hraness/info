@@ -12,6 +12,8 @@ import {
 } from "./query.js";
 
 const MAX_EXACT_RESULTS = 500;
+export const MAX_SEARCH_QUERY_BYTES = 16 * 1_024;
+export const MAX_SEARCH_QUERY_TERMS = 64;
 const MAX_FUSION_LANES = 16;
 const MAX_FUSION_RESULTS_PER_LANE = 500;
 const MAX_RELATED_SEEDS = 10;
@@ -80,6 +82,15 @@ export type ExactSearchOptions = {
   readonly filters?: readonly MetadataFilter[];
   readonly tags?: readonly string[];
   readonly limit?: number;
+};
+
+export type ValidatedSearchQuery = {
+  /** Trimmed, original-casing query passed to retrieval backends. */
+  readonly query: string;
+  /** NFC-normalized query used for deterministic exact matching. */
+  readonly normalized: string;
+  /** Unique normalized terms used by exact matching. */
+  readonly terms: readonly string[];
 };
 
 export type FusionLaneName = string;
@@ -167,15 +178,40 @@ function checkedLimit(
   return limit;
 }
 
-function uniqueQueryTerms(query: string): readonly string[] {
-  const raw = [
-    ...new Set(
-      (normalize(query).match(/[\p{L}\p{N}][\p{L}\p{N}._/-]*/gu) ?? [])
-        .filter((term) => term !== ""),
-    ),
-  ];
+/** Validate one bounded query before exact scanning or local-model work begins. */
+export function validateSearchQuery(value: unknown): ValidatedSearchQuery {
+  if (typeof value !== "string") {
+    throw new TypeError("Search query must be a string.");
+  }
+  let bytes = 0;
+  for (const character of value) {
+    bytes += Buffer.byteLength(character, "utf8");
+    if (bytes > MAX_SEARCH_QUERY_BYTES) {
+      throw new RangeError(
+        `Search query must be at most ${MAX_SEARCH_QUERY_BYTES.toLocaleString("en-US")} UTF-8 bytes.`,
+      );
+    }
+  }
+  const query = value.trim();
+  if (query === "") throw new Error("Search query must not be empty.");
+  const normalized = normalize(query);
+  const unique = new Set<string>();
+  for (const match of normalized.matchAll(/[\p{L}\p{N}][\p{L}\p{N}._/-]*/gu)) {
+    const term = match[0];
+    unique.add(term);
+    if (unique.size > MAX_SEARCH_QUERY_TERMS) {
+      throw new RangeError(
+        `Search query may contain at most ${MAX_SEARCH_QUERY_TERMS} unique normalized terms.`,
+      );
+    }
+  }
+  const raw = [...unique];
   const meaningful = raw.filter((term) => term.length > 1 && !stopWords.has(term));
-  return meaningful.length > 0 ? meaningful : raw;
+  return {
+    query,
+    normalized,
+    terms: meaningful.length > 0 ? meaningful : raw,
+  };
 }
 
 function occurrenceCount(text: string, needle: string, maximum = 8): number {
@@ -375,14 +411,14 @@ export function searchExactVault(
   analysis: VaultAnalysis,
   options: ExactSearchOptions,
 ): readonly ExactSearchHit[] {
-  const phrase = normalize(options.query.trim());
-  if (phrase === "") throw new Error("Exact search query must not be empty.");
+  const validated = validateSearchQuery(options.query);
+  const phrase = validated.normalized;
   const limit = checkedLimit(options.limit, 40, MAX_EXACT_RESULTS, "Exact search limit");
   const allowed = new Set(queryVault(notes, analysis, {
     filters: options.filters ?? [],
     tags: options.tags ?? [],
   }).map(({ id }) => id));
-  const terms = uniqueQueryTerms(phrase);
+  const terms = validated.terms;
   return notes
     .filter((note) => allowed.has(note.id))
     .map((note) => exactHit(note, phrase, terms))

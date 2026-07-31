@@ -8,19 +8,29 @@ import {
 } from "./index-gh719d91.js";
 
 // src/clip/doctor.ts
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "fs";
 import { homedir, tmpdir } from "os";
 import { dirname, join, resolve } from "path";
 var expectedBunVersion = "1.3.14";
+var expectedQmdVersion = "2.5.3";
+var expectedSqliteVecVersion = "0.1.9";
+var expectedNodeLlamaCppVersion = "3.18.1";
+var expectedBetterSqliteVersion = "12.10.0";
+var homebrewSqliteLibraryPaths = [
+  "/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib",
+  "/usr/local/opt/sqlite/lib/libsqlite3.dylib"
+];
 var dependencyVersions = {
   defuddle: "0.19.1",
   "agent-browser": "0.32.3",
-  "@steipete/sweet-cookie": "0.4.0"
+  "@steipete/sweet-cookie": "0.4.0",
+  "@tobilu/qmd": expectedQmdVersion
 };
 var dependencyNames = [
   "defuddle",
   "agent-browser",
-  "@steipete/sweet-cookie"
+  "@steipete/sweet-cookie",
+  "@tobilu/qmd"
 ];
 var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 async function readBoundedStream(stream, maxBytes) {
@@ -123,6 +133,174 @@ function installedDependencyDirectory(name, packageRoot, readText) {
     directory = parent;
   }
   return null;
+}
+function installedPackageVersion(name, fromDirectory, readText) {
+  const installed = installedDependencyDirectory(name, fromDirectory, readText);
+  if (installed === null)
+    return null;
+  return {
+    directory: installed.directory,
+    version: typeof installed.manifest.version === "string" ? installed.manifest.version : null
+  };
+}
+function capabilityStatus(statuses) {
+  if (statuses.some((status) => status === "unavailable"))
+    return "unavailable";
+  return statuses.every((status) => status === "ready") ? "ready" : "partial";
+}
+function canonicalDirectory(path, realpath) {
+  try {
+    return realpath(path);
+  } catch {
+    return path;
+  }
+}
+function nativeSqliteVecPackage(platform, architecture) {
+  if (platform === "darwin" && (architecture === "arm64" || architecture === "x64")) {
+    return { name: `sqlite-vec-darwin-${architecture}`, binary: "vec0.dylib" };
+  }
+  if (platform === "linux" && (architecture === "arm64" || architecture === "x64")) {
+    return { name: `sqlite-vec-linux-${architecture}`, binary: "vec0.so" };
+  }
+  if (platform === "win32" && architecture === "x64") {
+    return { name: "sqlite-vec-windows-x64", binary: "vec0.dll" };
+  }
+  return null;
+}
+function nativeNodeLlamaCppPackage(platform, architecture) {
+  if (platform === "darwin" && architecture === "arm64") {
+    return {
+      name: "@node-llama-cpp/mac-arm64-metal",
+      binary: join("bins", "mac-arm64-metal", "llama-addon.node")
+    };
+  }
+  if (platform === "darwin" && architecture === "x64") {
+    return {
+      name: "@node-llama-cpp/mac-x64",
+      binary: join("bins", "mac-x64", "llama-addon.node")
+    };
+  }
+  if (platform === "linux" && architecture === "arm64") {
+    return {
+      name: "@node-llama-cpp/linux-arm64",
+      binary: join("bins", "linux-arm64", "llama-addon.node")
+    };
+  }
+  if (platform === "linux" && architecture === "arm") {
+    return {
+      name: "@node-llama-cpp/linux-armv7l",
+      binary: join("bins", "linux-armv7l", "llama-addon.node")
+    };
+  }
+  if (platform === "linux" && architecture === "x64") {
+    return {
+      name: "@node-llama-cpp/linux-x64",
+      binary: join("bins", "linux-x64", "llama-addon.node")
+    };
+  }
+  if (platform === "win32" && architecture === "arm64") {
+    return {
+      name: "@node-llama-cpp/win-arm64",
+      binary: join("bins", "win-arm64", "llama-addon.node")
+    };
+  }
+  if (platform === "win32" && architecture === "x64") {
+    return {
+      name: "@node-llama-cpp/win-x64",
+      binary: join("bins", "win-x64", "llama-addon.node")
+    };
+  }
+  return null;
+}
+function inspectSearchReadiness(dependencies, packageRoot, runtime, platform, architecture, currentBunVersion, exists, readText, realpath) {
+  const qmd = dependencies.find(({ name }) => name === "@tobilu/qmd");
+  const qmdStatus = qmd?.status ?? "unavailable";
+  const runtimeStatus = runtime === "bun" && currentBunVersion !== expectedBunVersion ? "partial" : "ready";
+  const installedQmdDirectory = installedDependencyDirectory("@tobilu/qmd", packageRoot, readText)?.directory;
+  const qmdDirectory = installedQmdDirectory === undefined ? packageRoot : canonicalDirectory(installedQmdDirectory, realpath);
+  let sqlite;
+  if (runtime === "bun" && platform === "darwin") {
+    const selectedLibraryPath = homebrewSqliteLibraryPaths.find((path) => exists(path)) ?? null;
+    sqlite = {
+      provider: "homebrew",
+      expectedVersion: null,
+      installedVersion: null,
+      searchedLibraryPaths: homebrewSqliteLibraryPaths,
+      selectedLibraryPath,
+      nativeBindingPresent: null,
+      status: selectedLibraryPath === null ? "unavailable" : "ready"
+    };
+  } else if (runtime === "bun") {
+    sqlite = {
+      provider: "bun-built-in",
+      expectedVersion: null,
+      installedVersion: null,
+      searchedLibraryPaths: [],
+      selectedLibraryPath: null,
+      nativeBindingPresent: null,
+      status: "ready"
+    };
+  } else {
+    const installed = installedPackageVersion("better-sqlite3", qmdDirectory, readText);
+    const nativeBindingPresent = installed === null ? false : exists(join(installed.directory, "build", "Release", "better_sqlite3.node"));
+    sqlite = {
+      provider: "better-sqlite3",
+      expectedVersion: expectedBetterSqliteVersion,
+      installedVersion: installed?.version ?? null,
+      searchedLibraryPaths: [],
+      selectedLibraryPath: null,
+      nativeBindingPresent,
+      status: installed === null ? "unavailable" : installed.version === expectedBetterSqliteVersion && nativeBindingPresent ? "ready" : "partial"
+    };
+  }
+  const sqliteVecPackage = installedPackageVersion("sqlite-vec", qmdDirectory, readText);
+  const nativeDefinition = nativeSqliteVecPackage(platform, architecture);
+  const nativePackage = nativeDefinition === null ? null : installedPackageVersion(nativeDefinition.name, qmdDirectory, readText);
+  const nativeBinaryPresent = nativeDefinition === null || nativePackage === null ? null : exists(join(nativePackage.directory, nativeDefinition.binary));
+  const sqliteVecStatus = nativeDefinition === null || sqliteVecPackage === null || nativePackage === null ? "unavailable" : sqliteVecPackage.version === expectedSqliteVecVersion && nativePackage.version === expectedSqliteVecVersion && nativeBinaryPresent === true ? "ready" : "partial";
+  const nodeLlamaCpp = installedPackageVersion("node-llama-cpp", qmdDirectory, readText);
+  const canonicalNodeLlamaCppDirectory = nodeLlamaCpp === null ? qmdDirectory : canonicalDirectory(nodeLlamaCpp.directory, realpath);
+  const nativeEmbeddingDefinition = nativeNodeLlamaCppPackage(platform, architecture);
+  const nativeEmbeddingPackage = nativeEmbeddingDefinition === null ? null : installedPackageVersion(nativeEmbeddingDefinition.name, canonicalNodeLlamaCppDirectory, readText);
+  const nativeEmbeddingBinaryPresent = nativeEmbeddingDefinition === null || nativeEmbeddingPackage === null ? null : exists(join(nativeEmbeddingPackage.directory, nativeEmbeddingDefinition.binary));
+  const embeddingRuntimeStatus = nodeLlamaCpp === null ? "unavailable" : nativeEmbeddingDefinition === null || nativeEmbeddingPackage === null ? "partial" : nodeLlamaCpp.version === expectedNodeLlamaCppVersion && nativeEmbeddingPackage.version === expectedNodeLlamaCppVersion && nativeEmbeddingBinaryPresent === true ? "ready" : "partial";
+  const keywordStatus = capabilityStatus([
+    qmdStatus,
+    runtimeStatus,
+    ...runtime === "node" ? [sqlite.status] : []
+  ]);
+  return {
+    runtime,
+    platform,
+    architecture,
+    keywordOnly: {
+      status: keywordStatus,
+      modelRequired: false
+    },
+    semanticPrerequisites: {
+      status: capabilityStatus([keywordStatus, sqlite.status, sqliteVecStatus, embeddingRuntimeStatus]),
+      sqlite,
+      sqliteVec: {
+        expectedVersion: expectedSqliteVecVersion,
+        installedVersion: sqliteVecPackage?.version ?? null,
+        nativePackageName: nativeDefinition?.name ?? null,
+        nativeInstalledVersion: nativePackage?.version ?? null,
+        nativeBinaryPresent,
+        status: sqliteVecStatus
+      },
+      embeddingRuntime: {
+        expectedVersion: expectedNodeLlamaCppVersion,
+        installedVersion: nodeLlamaCpp?.version ?? null,
+        nativePackageName: nativeEmbeddingDefinition?.name ?? null,
+        nativeInstalledVersion: nativeEmbeddingPackage?.version ?? null,
+        nativeBinaryPresent: nativeEmbeddingBinaryPresent,
+        status: embeddingRuntimeStatus
+      },
+      embeddingModel: {
+        cacheStatus: "not-inspected"
+      }
+    }
+  };
 }
 function reportDependency(name, packageRoot, rootManifest, readText) {
   const expectedVersion = dependencyVersions[name];
@@ -278,9 +456,12 @@ async function inspectClipEnvironment(options = {}) {
   const packageRoot = resolve(options.packageRoot ?? findKbPackageRoot());
   const homeDirectory = options.homeDirectory ?? homedir();
   const platform = options.platform ?? process.platform;
+  const architecture = options.architecture ?? process.arch;
+  const runtime = options.runtime ?? (process.versions.bun === undefined ? "node" : "bun");
   const exists = options.exists ?? existsSync;
   const readText = options.readText ?? ((path) => readFileSync(path, "utf8"));
-  const which = options.which ?? ((name) => Bun.which(name));
+  const realpath = options.realpath ?? realpathSync;
+  const which = options.which ?? ((name) => typeof Bun === "undefined" ? null : Bun.which(name));
   const run = options.run ?? runDiagnosticCommand;
   const rootManifest = readJsonRecord(join(packageRoot, "package.json"), readText);
   const dependencies = dependencyNames.map((name) => reportDependency(name, packageRoot, rootManifest, readText));
@@ -362,7 +543,8 @@ async function inspectClipEnvironment(options = {}) {
     }
   ];
   const warnings = [];
-  const currentBunVersion = options.currentBunVersion ?? Bun.version;
+  const currentBunVersion = options.currentBunVersion ?? (typeof Bun === "undefined" ? "not running under Bun" : Bun.version);
+  const search = inspectSearchReadiness(dependencies, packageRoot, runtime, platform, architecture, currentBunVersion, exists, readText, realpath);
   if (currentBunVersion !== expectedBunVersion) {
     warnings.push(`Use Bun ${expectedBunVersion}; current runtime is ${currentBunVersion}.`);
   }
@@ -402,8 +584,25 @@ async function inspectClipEnvironment(options = {}) {
   } else if (tesseractVersion === null) {
     warnings.push("Tesseract was found, but its version could not be verified; kb pdf can attempt OCR with a degraded tool report.");
   }
+  if (search.keywordOnly.status !== "ready") {
+    warnings.push("QMD keyword-only search is not ready; exact Markdown search remains available.");
+  }
+  const keywordFallback = search.keywordOnly.status === "ready" ? " Keyword-only QMD search remains available." : "";
+  if (runtime === "bun" && platform === "darwin" && search.semanticPrerequisites.sqlite.status !== "ready") {
+    warnings.push(`Install Homebrew SQLite with \`brew install sqlite\`; semantic and hybrid vector retrieval are unavailable.${keywordFallback}`);
+  } else if (runtime === "node" && search.semanticPrerequisites.sqlite.status !== "ready") {
+    warnings.push(`Reinstall @hraness/kb with Node so better-sqlite3 ${expectedBetterSqliteVersion} and its native binding are available.${keywordFallback}`);
+  }
+  if (search.semanticPrerequisites.sqliteVec.status !== "ready") {
+    const nativePackage = search.semanticPrerequisites.sqliteVec.nativePackageName;
+    warnings.push(nativePackage === null ? `sqlite-vec ${expectedSqliteVecVersion} has no native package for ${platform}-${architecture}; semantic and hybrid vector retrieval are unavailable.${keywordFallback}` : `Reinstall @hraness/kb so sqlite-vec ${expectedSqliteVecVersion} and ${nativePackage} ${expectedSqliteVecVersion} are installed; semantic and hybrid vector retrieval are unavailable.${keywordFallback}`);
+  }
+  if (search.semanticPrerequisites.embeddingRuntime.status !== "ready") {
+    const nativePackage = search.semanticPrerequisites.embeddingRuntime.nativePackageName;
+    warnings.push(nativePackage === null ? `node-llama-cpp ${expectedNodeLlamaCppVersion} has no prebuilt package for ${platform}-${architecture}; semantic and hybrid vector retrieval require a compatible local embedding runtime.${keywordFallback}` : `Reinstall @hraness/kb with Bun so node-llama-cpp ${expectedNodeLlamaCppVersion} and ${nativePackage} ${expectedNodeLlamaCppVersion} with its native binary are installed; semantic and hybrid vector retrieval are not ready.${keywordFallback}`);
+  }
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: (options.now ?? (() => new Date))().toISOString(),
     bun: {
       expectedVersion: expectedBunVersion,
@@ -418,22 +617,36 @@ async function inspectClipEnvironment(options = {}) {
     browsers,
     chromeProfileNames: agentBrowser.profiles,
     tools,
+    search,
     warnings
   };
 }
 function versionSummary(report) {
+  const declared = report.declaredVersion ?? "not declared";
   const installed = report.installedVersion ?? "not installed";
-  return `${report.name}: ${report.status} (installed ${installed}; expected ${report.expectedVersion})`;
+  return `${report.name}: ${report.status} (declared ${declared}; installed ${installed}; expected ${report.expectedVersion})`;
 }
 function renderDoctorReport(report) {
+  const sqlite = report.search.semanticPrerequisites.sqlite;
+  const sqliteDetail = sqlite.provider === "homebrew" ? sqlite.selectedLibraryPath === null ? `not found (checked ${sqlite.searchedLibraryPaths.join(", ")})` : sqlite.selectedLibraryPath : sqlite.provider === "better-sqlite3" ? `${sqlite.installedVersion ?? "not installed"}; native binding ${sqlite.nativeBindingPresent === true ? "present" : "not found"}` : "provided by Bun";
+  const sqliteVec = report.search.semanticPrerequisites.sqliteVec;
+  const nativePackage = sqliteVec.nativePackageName === null ? `unsupported for ${report.search.platform}-${report.search.architecture}` : `${sqliteVec.nativePackageName} ${sqliteVec.nativeInstalledVersion ?? "not installed"}; native binary ${sqliteVec.nativeBinaryPresent === true ? "present" : "not found"}`;
+  const embeddingRuntime = report.search.semanticPrerequisites.embeddingRuntime;
+  const nativeEmbeddingRuntime = embeddingRuntime.nativePackageName === null ? `unsupported for ${report.search.platform}-${report.search.architecture}` : `${embeddingRuntime.nativePackageName} ${embeddingRuntime.nativeInstalledVersion ?? "not installed"}; native binary ${embeddingRuntime.nativeBinaryPresent === true ? "present" : "not found"}`;
   const lines = [
-    "KB ingestion environment",
+    "KB environment",
     `Bun: ${report.bun.status} (${report.bun.currentVersion}; expected ${report.bun.expectedVersion})`,
     ...report.dependencies.map(versionSummary),
     `agent-browser derive-client: ${report.deriveClient.status}`,
     ...report.browsers.map((browser) => `${browser.name}: ${browser.status}${browser.paths.length === 0 ? "" : ` (${browser.paths.join(", ")})`}`),
     `Chrome profiles: ${report.chromeProfileNames.length === 0 ? "none discovered" : report.chromeProfileNames.join(", ")}`,
     ...report.tools.map((tool) => `${tool.name}: ${tool.status}${tool.version === null ? "" : ` (${tool.version})`}${tool.path === null ? "" : ` at ${tool.path}`}`),
+    `QMD keyword-only search: ${report.search.keywordOnly.status} (embedding model not required)`,
+    `Semantic prerequisites: ${report.search.semanticPrerequisites.status}`,
+    `SQLite extension support: ${sqlite.status} (${sqlite.provider}: ${sqliteDetail})`,
+    `sqlite-vec: ${sqliteVec.status} (installed ${sqliteVec.installedVersion ?? "not installed"}; expected ${sqliteVec.expectedVersion}; ${nativePackage})`,
+    `Embedding runtime: ${embeddingRuntime.status} (node-llama-cpp ${embeddingRuntime.installedVersion ?? "not installed"}; expected ${embeddingRuntime.expectedVersion}; ${nativeEmbeddingRuntime})`,
+    "Embedding model cache: not inspected; first semantic use may download the configured local model",
     "Cookie/keychain probe: not performed"
   ];
   if (report.warnings.length > 0) {
@@ -611,4 +824,4 @@ function renderAdapterCapabilities(capabilities = adapterCapabilities) {
 `;
 }
 
-export { expectedBunVersion, runDiagnosticCommand, inspectClipEnvironment, renderDoctorReport, adapterCapabilities, renderAdapterCapabilities };
+export { expectedBunVersion, expectedQmdVersion, expectedSqliteVecVersion, expectedNodeLlamaCppVersion, runDiagnosticCommand, inspectClipEnvironment, renderDoctorReport, adapterCapabilities, renderAdapterCapabilities };

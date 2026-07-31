@@ -102,14 +102,19 @@ The default combines a live exact scan with QMD's local full-text and compact
 embedding rankings, then reports each lane's evidence. It skips query expansion
 and reranking models. The first hybrid or semantic query downloads the embedding
 model and builds a local cache; subsequent queries incrementally index changed
-Markdown. `kb index` can prewarm that cache. `--mode exact` requires no model.
+Markdown. KB validates a bounded immutable Markdown projection before QMD
+indexes it. Shared-database mutations are serialized across local agent
+processes, same-generation readers can overlap, and a projection change waits
+for older readers to close. `kb index` can prewarm that cache. `--mode exact`
+requires no model.
 
 Graph neighbors and Git provenance are returned separately from the primary
 rank. Use `--related <note>` to seed a bounded explicit neighborhood,
-`--no-graph` when it is unnecessary, and `--no-history` outside a Git
-repository. Use `--require-history` when a result without Git provenance is not
-usable; the command then fails instead of returning an unavailable or
-incomplete Git lane. Automatic history keeps normal commits usable when one
+`--no-graph` when it is unnecessary, and `--history` when recent note
+provenance helps. Omitted history performs no Git work. Use `--require-history`
+when a result without Git provenance is not usable; the command then fails
+instead of returning an unavailable or incomplete Git lane. Automatic history
+keeps normal commits usable when one
 commit exceeds its changed-path detail limit. The affected note retains that
 commit's identity and vault-local association, while diagnostics and packed
 context identify the incomplete co-change evidence. These views explain a
@@ -126,7 +131,10 @@ try {
   const plans = kb.list({
     filters: [{ kind: "equals", path: "type", value: "plan" }],
   });
-  const context = await kb.search({ query: "current ingestion plan" });
+  const context = await kb.search({
+    query: "current ingestion plan",
+    history: "auto",
+  });
   const source = kb.read(context.results[0]?.id ?? plans[0]?.id ?? "index");
   console.log(source.content);
 } finally {
@@ -142,7 +150,7 @@ serialized by default. Import `decisionContextWorkflow`,
 `explainChangeWorkflow`, or `planRadarWorkflow` from `@hraness/kb/workflows`
 when one of those common DAGs matches the task.
 
-Use `history: "required"` for default required provenance, or
+Use `history: "required"` when provenance is mandatory, or
 `history: { policy: "required", noteLimit: 5 }` when the same requirement needs
 custom bounds. Custom workflows use a staged builder so every node sees a typed
 KB session and only its declared dependency results:

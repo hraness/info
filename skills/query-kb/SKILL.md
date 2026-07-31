@@ -76,17 +76,22 @@ kb index --root "$KB_ROOT"
 ```
 
 Use `--mode exact` for live model-free search, `--mode keyword` for QMD
-full-text retrieval, or `--mode semantic` for its vector lane. Apply repeated
-`--where`, `--has`, and `--tag` filters before ranking. Treat every retrieval
-rank as a lead, not a fact. Open the returned Markdown, read enough surrounding
-context, and confirm claims against linked sources or capture manifests.
+full-text retrieval, or `--mode semantic` for its vector lane. Repeated
+`--where`, `--has`, and `--tag` constraints are checked against the live
+Markdown snapshot. QMD has no path-allowlist search in the pinned release, so a
+selective semantic query over-fetches a bounded global window and reports a
+degraded partial lane when that window cannot prove completeness. Treat every
+retrieval rank as a lead, not a fact. Open the returned Markdown, read enough
+surrounding context, and confirm claims against linked sources or capture
+manifests.
 
 Default search also returns bounded explicit graph context around the strongest
 results. Supply `--related <note>` to seed a known neighborhood or `--no-graph`
-when structure does not help. When `--repo` resolves a Git repository, search
-may include recent per-note provenance; use `--no-history` when it is irrelevant
-or unavailable. Use `--require-history` when the task cannot proceed with a
-partial Git lane. Graph neighbors and Git history remain separate from primary
+when structure does not help. Search does no Git work unless provenance is
+requested. Use `--history --repo <repository>` for optional recent per-note
+provenance or `--require-history --repo <repository>` when the task cannot
+proceed with a partial Git lane. `--no-history` remains an explicit compatibility
+form. Graph neighbors and Git history remain separate from primary
 text rank. They explain and expand candidates without becoming authored facts,
 links, or recency boosts.
 

@@ -1,9 +1,23 @@
 // @bun
 import {
+  MAX_QUERY_FILTERS,
+  MAX_QUERY_METADATA_PATH_SEGMENTS,
+  MAX_QUERY_METADATA_PATH_UTF8_BYTES,
+  MAX_QUERY_OPTIONS_UTF8_BYTES,
+  MAX_QUERY_TAGS,
+  MAX_QUERY_TEXT_UTF8_BYTES,
   metadataAtPath,
-  queryVault
-} from "./index-m4bexhht.js";
-export {
   queryVault,
-  metadataAtPath
+  validateQueryOptions
+} from "./index-7gsmq0jt.js";
+export {
+  validateQueryOptions,
+  queryVault,
+  metadataAtPath,
+  MAX_QUERY_TEXT_UTF8_BYTES,
+  MAX_QUERY_TAGS,
+  MAX_QUERY_OPTIONS_UTF8_BYTES,
+  MAX_QUERY_METADATA_PATH_UTF8_BYTES,
+  MAX_QUERY_METADATA_PATH_SEGMENTS,
+  MAX_QUERY_FILTERS
 };

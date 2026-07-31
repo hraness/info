@@ -235,34 +235,52 @@ title, aliases, path, tags, typed metadata, and prose. Exact title and alias
 identities remain visible in the result evidence and stay ahead of broader
 matches.
 
-Hybrid mode is the default. It runs the exact lane alongside [QMD](https://github.com/tobi/qmd),
-which combines local full-text and vector rankings without loading query
-expansion or reranking models. The two result lists are combined with weighted
-reciprocal-rank fusion. Each result reports the lane ranks and contributions
-that produced its final position. `--mode exact` stays model-free,
+Hybrid mode is the default. It runs the exact lane alongside [QMD](https://github.com/tobi/qmd).
+KB requests QMD's direct local full-text and vector rankings at the declared
+candidate bound, then fuses them without query expansion or reranking models.
+This avoids QMD 2.5.3's smaller fixed structured-hybrid pool. Both the inner
+QMD lists and the outer exact/QMD lists receive neutral equal weights in
+reciprocal-rank fusion. Exact title, alias, and path identities are
+pinned separately, while agreement between lanes outranks single-lane evidence.
+Each result reports the lane ranks and contributions that produced its final
+position. `--mode exact` stays model-free,
 `--mode keyword` uses QMD's full-text index, and `--mode semantic` selects its
 vector lane.
 
-QMD 2.5.3 uses its recommended compact EmbeddingGemma model for local vector
-retrieval. The first hybrid or semantic query downloads the embedding model;
-later runs reuse the local cache and incrementally update changed Markdown.
+KB pins QMD 2.5.3 and one full upstream revision of its compact
+EmbeddingGemma model for local vector retrieval. The revision prevents branch
+drift and gives the model a revision-specific cache identity; it is not a
+byte-level checksum claim. The first hybrid or semantic query downloads that
+revision. Later runs reuse the local cache and incrementally update changed
+Markdown.
 
-Each vault gets a path-derived SQLite cache under the user's cache directory unless `--database` selects another file. `index.md` and every `AGENTS.md` are excluded because they are navigation and always-loaded instructions rather than knowledge records. Scope hubs remain ordinary Markdown, so QMD indexes their rationale and evidence like any other note. The cache may be removed at any time and recreated with `kb index`.
+Each vault gets a path-derived SQLite cache under the user's cache directory unless `--database` selects another file outside the vault. KB refuses a database symlink or multiply linked database file and claims its adjacent snapshot directory with a versioned ownership record before cleanup. It scans and bounds the live Markdown first, then atomically refreshes a disposable validated source projection beside the database. QMD indexes that projection, so it cannot read a note that bypassed KB's per-note or aggregate vault limits or recursively ingest its own cache. Cached files are checked against the manifest before reuse. An older snapshot directory without the ownership record is never removed automatically; delete the explicitly named disposable `.snapshot` directory and retry.
+
+A database-scoped process lease serializes projection installation, store updates, and embedding writes across agents. The generation identity includes the immutable note bytes and the QMD version, embedding model, collection configuration, and projection contract that interpret the shared SQLite state. Sessions with the same identity may read concurrently; an identity change waits for older readers to close before mutating the database. QMD operations within one open session remain serialized. `index.md` and every `AGENTS.md` are excluded because they are navigation and always-loaded instructions rather than knowledge records. Scope hubs remain ordinary Markdown, so QMD indexes their rationale and evidence like any other note. The database and source projection may be removed at any time and recreated with `kb index`.
 
 Search results are joined back to the live session snapshot, so each hit carries
 current typed metadata and tags. Files outside the requested vault and stale
-indexed identities are discarded. QMD failure does not erase exact results;
-the response marks a failed lane unavailable or an incomplete embedding pass
-degraded, and reports that the result is partial. A
+indexed identities are discarded. Metadata and tag constraints are authoritative
+at that join boundary. QMD 2.5.3 cannot rank against a path allowlist, so a
+filtered search uses a bounded global candidate window. Selective searches use
+the largest supported window by default. Any observed QMD rows discarded by
+live reconciliation or filters leave an underfilled request explicitly degraded,
+even when QMD's chunk-level retrieval returned fewer rows than requested. QMD failure
+does not erase exact results; the response marks a failed lane unavailable or
+an incomplete embedding pass degraded, and reports that the result is partial. A
 retrieval score is a discovery aid, not a graph edge, a citation, or evidence
 that the result is true.
 
 Immediate explicit links and typed relationships can be returned with search,
 along with a bounded neighborhood around the strongest results. These graph
 neighbors remain a separate context collection. They do not enter primary text
-rank or become authored edges. When a repository root is supplied, bounded Git
-history can likewise explain when a note changed and which paths changed with
-it. A commit that exceeds the per-commit changed-path detail limit retains its
+rank or become authored edges. When explicitly requested, bounded Git history
+can likewise explain when a note changed and which paths changed with it.
+`--history`, `--require-history`, or SDK history options enable that separate
+lane. Omitted history performs no Git indexing, and an explicit request with no
+primary results has nothing to enrich. Query, note, and detail bounds are
+validated before the Git index opens. A commit that exceeds the per-commit
+changed-path detail limit retains its
 hash, subject, time, and vault-local note associations while its co-change set
 is marked incomplete. Later commits continue indexing. Automatic history
 returns the usable provenance with a degraded diagnostic only when the selected
@@ -335,11 +353,12 @@ try {
 parallel, and `planRadarWorkflow` joins exact plan state with retrieval and
 history.
 
-Changes to retrieval ranking use labeled cases and the exported
-`evaluateRetrievalBenchmark` metrics: recall at k, reciprocal rank, and nDCG.
-The included representative fixture is a deterministic regression for identity,
-conceptual, and mixed queries. It demonstrates complementary lanes in that
-fixture and does not claim universal superiority.
+Changes to retrieval ranking use the exported `evaluateRetrievalBenchmark`
+metrics: recall at k, reciprocal rank, and nDCG. The included six-case synthetic
+rank-fusion fixture supplies already-ranked IDs for identity, conceptual, and
+mixed examples. It checks metric and fusion arithmetic only. It does not execute
+the production retriever, QMD, or the embedding model, measure speed, or claim
+universal superiority.
 
 ## Capture preserves an audit trail
 

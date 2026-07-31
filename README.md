@@ -14,10 +14,10 @@ history are authoritative; the QMD search database, graph views, catalog, and
 Git index are derived and replaceable.
 
 ```sh
-bun add --global github:hraness/kb#v0.11.1
+bun add --global github:hraness/kb#v0.12.0
 ```
 
-[article](https://crclte.com/articles/a-durable-knowledge-base-is-a-write-path)
+[article](https://hraness.com/engineering/a-durable-knowledge-base-is-a-write-path)
 
 [website](https://hraness.com/kb)
 
@@ -27,23 +27,35 @@ service. hybrid search adds QMD's local keyword and embedding index. graph and
 Git evidence stay separate from the primary exact and text relevance rank.
 
 <!-- article:a-durable-knowledge-base-is-a-write-path:start -->
-## [A knowledge base for your coding agents](<https://crclte.com/articles/a-durable-knowledge-base-is-a-write-path>)
+## [A knowledge base for your coding agents](<https://hraness.com/engineering/a-durable-knowledge-base-is-a-write-path>)
 
-> Give coding agents durable, searchable memory beside the repository with plain Markdown, Git history, local hybrid search, explicit relationships, and a TypeScript SDK.
+> Give coding agents durable, searchable memory beside the repository with plain Markdown, Git history, and replaceable local search.
 
 Coding agents lose useful context when a session ends. The next agent can search the code again, but it cannot recover a source that was never saved, a decision that stayed in chat, or the relationship between two notes that nobody recorded. Repeating that work costs time and produces inconsistent answers.
 
-[hraness/kb](<https://hraness.com/kb>) gives agents durable, repository-adjacent memory without making the application depend on a knowledge system. Sources, maintained notes, plans, and scope context stay in ordinary Markdown under Git. Agents can find an exact identifier, filter frontmatter and tags, search locally by words or meaning, follow backlinks and typed relations, and inspect the Git history behind a note. A reusable TypeScript API lets one agent session share that context across several queries.
+Search alone cannot preserve agent memory. The system also needs a write path into inspectable files under version control: evidence can be captured, current understanding can be revised, plans can accumulate outcomes, and mandatory edit rules can move onto the instruction path. Search indexes, graph views, and embeddings used for meaning-based similarity should remain derived and replaceable.
 
-![Four icon cards show sources flowing into durable memory, linked ideas, and search for reuse by future coding-agent sessions.](<https://crclte.com/article-diagrams/a-durable-knowledge-base-is-a-write-path.light.webp>)
+[hraness/kb](<https://hraness.com/kb>) implements that split as repository-adjacent Markdown and Git. Exact lookup, metadata filters, local search, explicit links, and Git provenance help an agent find and inspect the files without making application code depend on the knowledge system.
+
+![Four icon cards show sources flowing into durable memory, linked ideas, and search for reuse by future coding-agent sessions.](<https://hraness.com/engineering/diagrams/a-durable-knowledge-base-is-a-write-path.light.webp>)
 
 *hraness/kb turns source material into memory that agents can link and find again.*
 
-Rules that must govern an edit still belong in a scoped `AGENTS.md` file. KB is the pull-based knowledge plane for rationale, history, examples, evidence, plans, and neighboring decisions. It can explain an applicable `AGENTS.md` rule, but it does not override one or force the whole vault into every prompt.
+### The pattern converged across agent tools
 
-The control plane stays on the repository path, while the knowledge plane remains an ordinary Markdown vault. Scope hubs are optional, and application code imports neither KB nor its indexes:
+[Devin's 2024 release history](<https://docs.devin.ai/release-notes/2024>) records Knowledge that could be recalled across future sessions and Repo Knowledge produced by scanning repositories. Its [2025 release history](<https://docs.devin.ai/release-notes/2025>) records DeepWiki in April, codebase intelligence inside Devin in May, and a DeepWiki Model Context Protocol server later that month.
 
-**Conceptual control plane, KB vault, and derived views**
+In April 2026, Andrej Karpathy published an [LLM Wiki proposal](<https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f>) with immutable raw sources, an agent-maintained interlinked Markdown wiki, and an instruction schema. Its operations are ingest, query, and lint, with QMD as an optional search layer when a simple index stops being enough. These systems converged on durable agent-readable knowledge. The sequence does not establish direct lineage between them or hraness/kb.
+
+### Separate rules from explanations
+
+A repository needs two kinds of memory. Rules that must govern an edit belong in a scoped `AGENTS.md` file on the path to the code. Rationale, history, examples, evidence, plans, and neighboring decisions belong in a knowledge base that an agent pulls only when the task needs them. This keeps mandatory instructions short without throwing away the context behind them.
+
+A root guide carries repository-wide policy, and nested guides add constraints owned by a package or product. A nearby knowledge note can explain why a parser rejects a tempting shortcut, preserve the source behind the decision, and link the plan that introduced it. If the note and the applicable guide disagree, the guide controls the edit and the note needs repair. [Agent docs hygiene](<https://hraness.com/engineering/the-ai-codebase-agent-docs-hygiene>) covers that instruction path in more detail.
+
+The result has two concrete parts: scoped instruction files govern edits, while an ordinary Markdown vault stores supporting context. Application code imports neither the vault nor its search indexes:
+
+**Repository rules beside durable knowledge**
 
 ```text
 repository/
@@ -52,183 +64,63 @@ repository/
 │   ├── AGENTS.md                     # scoped rules and checks
 │   └── src/
 └── kb/
-    ├── scopes/
-    │   └── packages-parser--94a91e4eddfa.md
     ├── articles/<slug>/              # captured evidence and assets
-    ├── notes/                         # maintained synthesis
-    ├── plans/                         # decisions and verification
-    ├── riffs/                         # voice-preserving source thought
+    ├── notes/                         # maintained explanations
+    ├── plans/                         # decisions and outcomes
     └── index.md                       # regenerated catalog
-
-authored Markdown + frontmatter + wikilinks + Git history
-              ├── exact identifiers, metadata, tags, and prose
-              ├── QMD keyword + vector retrieval     # derived local index
-              ├── backlinks, typed relations, and Git provenance
-              └── TypeScript sessions and workflows
 ```
 
-Markdown and repository Git history are authoritative in this map. The catalog, graph views, QMD search database, and bounded Git index can be deleted and rebuilt. A search session scans the live vault once, then combines exact results with QMD keyword and vector results. It returns graph neighbors and Git provenance as separate evidence instead of letting either one silently change the primary relevance rank.
+### Keep the implementation small and the files authoritative
 
-### Separate rules from explanations
+hraness/kb packages the pattern as a small file contract. A useful vault can begin with Markdown, Git, `index.md`, and standard file search. Source capture, metadata queries, QMD, typed relationships, graph traversal, and TypeScript sessions are layers to add when the simpler setup stops answering the repository's questions. Application code need not import KB, and no hosted service or graph database owns its records.
 
-`AGENTS.md` belongs on the path to the code it governs. A root guide carries repository-wide policy; nested guides add the constraints owned by a package, product, or source boundary. Keep every load-bearing edit-time rule on that inherited path. If an edit would be wrong when the agent misses a sentence, that sentence does not belong only in KB. [Agent docs hygiene](<https://crclte.com/articles/the-ai-codebase-agent-docs-hygiene>) explains how to keep that path scoped and checked.
+Captured sources preserve evidence, notes hold current explanations, and plans retain decisions and outcomes. YAML frontmatter adds queryable metadata without requiring one domain schema for every vault. Stable paths, explicit links, and reviewable Git changes keep the material legible outside the CLI.
 
-KB holds material whose value depends on the question. A scope hub can explain why a parser rejects a tempting shortcut, link the plan that introduced the rule, preserve a source that supports it, and point to neighboring decisions. An agent pulls that prose when the task reaches the boundary. If a hub and an applicable guide disagree, the guide controls the edit and the hub needs repair.
+The Markdown files are authoritative. The catalog, QMD database, backlink view, graph traversal, and bounded Git index are derived and replaceable. Deleting one of those views removes a way to retrieve knowledge, not the knowledge itself.
 
-A mapped hub declares optional frontmatter with `type: agent-context` and an exact repository-relative directory in `scope`. For `packages/parser`, the canonical hub at `kb/scopes/packages-parser--94a91e4eddfa.md` begins:
+### Preserve evidence and plans as working records
 
-**Optional parser scope hub**
+Durable reasoning needs inspectable evidence. `kb clip` can read a public URL, saved HTML, rendered page, or a page already open in an authenticated browser. The [capture documentation](<https://github.com/hraness/kb/blob/main/docs/capture.md>) defines the supported routes. A capture writes readable Markdown beside localized assets and `capture.json`, whose manifest records where the material came from, how it was extracted, what was saved, and any warnings. “Complete” describes the selected page surface, not every hidden branch or future version of the site.
 
-```markdown
----
-title: Parser context
-type: agent-context
-scope: packages/parser
----
-# Parser context
-```
-
-Its guide at `packages/parser/AGENTS.md` carries the reciprocal marker `<!-- kb:context scopes/packages-parser--94a91e4eddfa -->` before its required `# Contents` and `# Guidelines` headings. This one-line link lets validation check both sides without loading the hub into every task.
-
-`kb agents identity <scope>` emits the normalized scope, note ID and path, owning guide path, and exact marker without writing files. The canonical ID is `scopes/<readable normalized slug>--<12-char SHA-256 prefix>`. The bounded slug avoids mirroring a deep repository tree under `scopes/`, while the hash makes paths with the same leaf name, such as `packages/parser` and `projects/parser`, distinct. The full path remains in `scope` metadata. Moving a directory deliberately changes its identity, so the hub ID and reciprocal marker must change together.
-
-### Pull context, then check the mapping
-
-`kb context <path> --root kb --repo .` returns the inherited guide chain from the repository root to the target and identifies the valid hubs mapped to that chain. It does not load hub prose. The agent receives the normative rules first, then opens the nearest useful hub only when the task needs its explanation.
-
-From that hub, the agent can expand a bounded neighborhood with `kb links`, inspect backlinks, filter exact metadata, or use semantic search when vocabulary differs. The command is a routing aid, not an instruction loader for the whole vault. A small guide that needs no explanatory neighborhood can remain unmapped.
-
-`kb agents check` validates both sides of every declared mapping: the hub type and exact scope, canonical slug-and-hash identity, reciprocal guide marker, and real guide and scope paths confined to the repository. Missing mappings on otherwise valid small guides are allowed. The check catches broken identity and unsafe paths; it cannot decide whether the prose is true or the rule is wise.
-
-`kb agents audit` is advisory. It ranks individual guides and cumulative inherited context, then surfaces long bullets and exact duplicates for review. Length is not a correctness test: a long guide may encode necessary constraints, and a short one may be wrong. The audit identifies where attention may pay off without turning a word limit into policy.
-
-### Several systems converged on durable agent memory
-
-This design direction did not begin with one recent proposal. Cognition's [2024 Devin release history](<https://docs.devin.ai/release-notes/2024>) described Knowledge that Devin could recall across future sessions by September 2024 and automatic Repo Knowledge from repository scans by November. On April 3, 2025, [Devin 2.0 introduced Devin Wiki and Devin Search](<https://cognition.com/blog/devin-2>). Cognition launched the public [DeepWiki service on May 5](<https://cognition.com/blog/deepwiki>), then a [DeepWiki Model Context Protocol server](<https://cognition.com/blog/deepwiki-mcp-server>) on May 22 for programmatic retrieval.
-
-In April 2026, Andrej Karpathy published an [LLM Wiki proposal](<https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f>) with three layers: raw sources, an agent-maintained Markdown wiki, and an instruction schema. Its operations are ingest, query, and lint, with QMD suggested when the collection outgrows an index file. hraness/kb is not an implementation of Cognition's products, and the resemblance does not establish direct lineage. The sequence shows convergence on one pressure: useful reasoning must become a durable artifact before a session ends.
-
-### Keep the files authoritative and portable
-
-A knowledge base earns trust differently from a chat transcript. Its records need stable paths, reviewable changes, and a format that remains legible when the current agent is gone. Plain Markdown, YAML frontmatter, explicit wikilinks, and Git meet that bar with little codebase coupling. An agent can begin with `index.md` and ordinary file tools or use the KB commands, skills, and TypeScript API. Neither path requires a hosted database or a proprietary document format.
-
-Directory names express editing authority without becoming a framework. Captured articles preserve what a source said. Notes hold current synthesis. Plans record intended work, evidence, and outcomes. Riffs preserve a speaker's claims and uncertainty. Scope hubs organize optional repository context. QMD and Git indexes live outside the authored graph and remain replaceable. The application under development does not need to import KB.
-
-### Make evidence capture an auditable write path
-
-Durable reasoning needs inspectable evidence. `kb clip` can read a public URL, saved HTML, rendered page, or the page already open in an authenticated browser. The [capture documentation](<https://github.com/hraness/kb/blob/main/docs/capture.md>) defines layered extraction routes. A capture writes readable Markdown beside localized assets and `capture.json`, whose manifest records the source URL, attempted routes, chosen extractor, completeness state, counts, warnings, and artifact hashes. “Complete” describes the selected bounded surface, not every hidden branch or future version of the page.
-
-PDFs use the same durable bundle for a local path or public HTTP(S) URL. `kb pdf` sends remote input through a DNS-pinned acquisition boundary that denies private networks, then removes sensitive URL parameters from saved provenance. Local and remote capture preserve the original bytes, infer headings from native layout, extract bounded images, and use local optical character recognition for scans and screenshots.
-
-**Capture a local or public remote PDF**
+**Capture a web source or local PDF**
 
 ```shell
+kb clip "https://example.com/article" --output articles
 kb pdf "/absolute/path/to/document.pdf" --output articles
-kb pdf "https://example.com/document.pdf" --output articles
 ```
 
-The resulting bundle is evidence, not final interpretation. A maintained note can cite several captures, record disagreement, and change when later evidence warrants it. The sources stay available for audit. This boundary prevents an agent from silently replacing what a page said with what it now believes the page meant.
+The resulting bundle is evidence, not final interpretation. A maintained note can cite several captures, record disagreement, and change when later evidence warrants it. The sources stay available for audit. This prevents an agent from silently replacing what a page said with what it now believes the page meant.
 
-### Search the live vault with complementary signals
+The `plan-kb` skill creates a normal Markdown file under `kb/plans/` with an outcome, status, area, assumptions, dependencies, decisions, and verification method. The file grows during execution as agents record deviations, review findings, evidence, and the final result. Completed plans remain in Git as the history of the work. When a finding becomes a rule whose omission would make a future edit wrong, move that rule into the applicable `AGENTS.md` and retain the plan as its rationale.
 
-An identifier, title, alias, path, tag, or quoted phrase should not depend on an embedding. KB scans the current Markdown and ranks those exact matches first. `kb list` handles questions that are already structured. It parses frontmatter such as `type`, `status`, `area`, dates, aliases, and tags into bounded values. Repeated filters use AND semantics, dotted paths reach nested metadata, and stable path tie-breakers make the result reproducible. The vault does not need one global domain schema.
+### Search and connect with bounded signals
 
-**Exact, hybrid, and metadata retrieval**
+An identifier, title, alias, path, tag, or quoted phrase should not depend on an embedding. Exact mode reads the live Markdown. The default hybrid mode combines those results with keyword and vector result orders from [QMD, a local search engine for Markdown](<https://github.com/tobi/qmd>), while keeping exact identity matches first. Graph context and Git provenance remain separate evidence, so neither silently changes the primary text rank.
+
+**Exact, hybrid, and requested Git retrieval**
 
 ```shell
 kb search "parser-v2" --root kb --mode exact
 kb search "why does the parser reject this input?" --root kb \
   --tag architecture --where status=active --json
-kb list --root kb --where type=plan --where status=in-progress --sort area --json
+kb search "why did the parser change?" --root kb --history --json
 ```
 
-The default search adds [QMD, a local search engine for Markdown](<https://github.com/tobi/qmd>), for vocabulary that differs from the note. QMD combines keyword BM25 and vectors from its compact local embedding model. KB fuses the exact and QMD result orders, joins each hit back to live Markdown metadata, and explains which lane contributed. `--mode exact`, `--mode keyword`, and `--mode semantic` remain available when one signal fits the question. Metadata and tag filters apply to the live notes in every mode.
+`--mode keyword` uses QMD's local full-text index without loading an embedding model. Hybrid and semantic modes use a pinned local embedding model. KB reconciles every QMD hit with current Markdown before returning it, and applies metadata and tag filters to those live notes. Search modes remain explicit through `--mode exact`, `--mode keyword`, `--mode semantic`, and `--mode hybrid`.
 
-Backlinks, typed relations, and Git history answer different questions, so they stay outside the primary text rank. A search result can include a bounded graph neighborhood and recent commits for the returned notes as separate evidence. Git can also search commit messages and changed paths directly. This helps an agent distinguish why a note is relevant from how it is connected or when it changed.
+Retrieval is bounded. The high-level `kb search` and `KnowledgeBaseSession.search` surfaces return at most 100 primary results and request at most 500 candidates from each QMD retrieval lane. Selective filters can discard stale or ineligible rows from that window. When those discards prevent KB from filling the requested eligible result set, KB marks the QMD lane degraded and the overall result partial instead of presenting the bounded approximation as complete. Scores are local ranking signals, not probabilities, and cannot be compared across modes.
 
-Git indexing bounds each commit's changed-path detail. If a repository-wide rename crosses that limit, KB retains the commit identity and its vault-local note associations, marks co-change paths incomplete for affected notes, and continues with later commits. Automatic search returns that usable lane as partial; `--require-history` rejects incomplete selected-note provenance.
+Each note owns its outbound typed relationships in frontmatter. KB derives backlinks, inverse edges, and bounded traversal at read time, so parallel agents do not contend on one generated fact file. `kb percolate <note>` reports recurring concepts and missing-link candidates with inspectable support but writes nothing. An agent reads the cited notes before creating a reusable concept or relationship. Semantic similarity never creates an edge automatically.
 
-A vector score does not mean that a passage is current, correct, or supported by its sources. Use hybrid search to find candidates, metadata to narrow them, links and Git provenance to inspect context, and the Markdown plus cited captures to verify the answer. QMD remains optional and local. Deleting its database does not delete knowledge.
+Git provenance is opt-in. A search without `--history` performs no Git indexing. `--history` requests best-effort provenance, while `--require-history` rejects unavailable history or incomplete provenance for the selected notes. If one commit exceeds the 2,000-path detail limit, KB retains its identity and vault-local note associations, marks its co-change detail incomplete, and continues through later commits. Best-effort search reports that requested lane as partial.
 
-### Let concepts and relationships percolate
-
-A useful vault eventually contains ideas that recur across source boundaries. Keeping every occurrence as an isolated tag makes the pattern hard to inspect; moving all graph state into one generated file gives parallel agents a permanent merge conflict. KB uses a smaller convention. A reusable concept is an ordinary Markdown note with `type: concept`. A note stores only the typed outbound assertions it owns:
-
-**A source-owned typed relationship**
-
-```markdown
----
-type: note
-tags:
-  - local-first
-relations:
-  supports:
-    - notes/durable-agent-memory
-  contrasts-with:
-    - notes/conversation-history
----
-
-# The write path
-
-The local-first write path supports durable agent memory because ...
-```
-
-Predicates use lower-kebab-case and targets use exact vault-root note IDs. The explanatory sentence matters: frontmatter makes an assertion queryable, but it does not supply its reason. Inverse edges, backlinks, transitive paths, and shared-concept neighborhoods are derived at read time. KB does not inject them into another note.
-
-`kb percolate <note>` reviews repeated tags without concept notes, notes that share ideas but lack a contextual edge, exact unlinked title or alias mentions, and relationship-hygiene findings. Each result carries inspectable support; relationship candidates count independent shared tags or concept neighbors, not both endpoints of one match. The command is read-only. An agent opens the cited notes, promotes only concepts likely to be reused, and authors a relationship only when the prose or evidence establishes it:
-
-**Review, create, and relate without a central graph file**
-
-```shell
-kb percolate notes/write-path --root kb --limit 25 --json
-kb note create notes/durable-agent-memory \
-  --root kb --title "Durable agent memory" --type concept \
-  --body-file /path/to/reviewed-concept.md
-kb relation add notes/write-path supports notes/durable-agent-memory \
-  --root kb
-```
-
-### Keep relationships explicit and bounded
-
-Wikilinks answer a precise question: which relationships did an author state in prose? The scanner resolves exact and relative targets or a unique basename, and reports broken or ambiguous links rather than guessing. Backlinks reverse those resolved edges at read time.
-
-KB keeps the current surface specific: `kb graph` reports the resolved whole-vault structure, `kb backlinks` reverses authored edges, `kb relation list` separates authored outbound assertions from derived inbound ones, and `kb links` performs cycle-safe traversal with explicit depth and result limits. Traversal does not expand through semantic similarity. These commands rebuild their views from Markdown and return canonical note identities; no graph database or generated fact file becomes shared state.
-
-A one-off whole-vault question can inspect the bounded JSON graph in an agent or a task-local script. If the same question keeps returning, it can become a named operation with an explicit output contract and regression tests. During parallel work, each lane can run `kb check --no-catalog` without rewriting `index.md`; the integrating agent performs one final refresh.
-
-### Compose retrieval in TypeScript
-
-The command line covers one query at a time. The code-mode SDK opens one read-only session, scans the live vault once, and exposes exact search, metadata queries, reads, links, backlinks, hybrid search, Git provenance, and Git-history search through one typed object. An agent can keep that session open while it compares evidence or builds a report.
-
-**Reuse one live knowledge-base session**
-
-```typescript
-import { openKnowledgeBase } from "@hraness/kb/sdk";
-
-const kb = await openKnowledgeBase({ root: "kb", repository: "." });
-const context = await kb.search({
-  query: "why did the parser boundary change?",
-  tags: ["architecture"],
-  graph: { depth: 1 },
-  history: "auto",
-});
-
-await kb.close();
-```
-
-For compound work, `defineWorkflow` and `runWorkflow` execute a finite dependency graph of trusted TypeScript functions. Independent nodes run in parallel, dependent nodes wait for their inputs, QMD work is serialized, Git work has its own bound, and abort or failure stops new scheduling. The bundled `decision-context`, `explain-change`, and `plan-radar` workflows are reusable examples for common agent questions. A staged builder infers each custom node's dependency results and final output. The workflow limit keeps code-mode tasks inspectable and prevents several agents from creating a new shared state file to coordinate retrieval.
-
-### Keep plans durable and promote rules to AGENTS.md
-
-A plan shown only in chat has the same session boundary as the reasoning that produced it. The `plan-kb` skill writes a normal Markdown file with an outcome, status, area, assumptions, dependencies, decisions, and verification method. During execution, the same plan accumulates deviations, review findings, command evidence, and the final result. Completed plans remain as history. A finding that becomes a load-bearing edit rule moves into the applicable `AGENTS.md`; its rationale and evidence may stay linked from the scope hub.
-
-hraness/kb also ships six Agent Skills that preserve the same file contract. `save-url-kb` selects a URL acquisition route and records completeness; `save-pdf-kb` preserves a PDF's text, images, bytes, and provenance; `query-kb` chooses exact metadata, local hybrid search, graph context, or Git provenance; `percolate-kb` reviews changed notes for reusable concepts and evidence-backed relationships; `refresh-kb` regenerates the catalog and reviews graph diagnostics; and `plan-kb` keeps execution knowledge durable. The [agent workflow documentation](<https://github.com/hraness/kb/blob/main/docs/agent-workflow.md>) defines how these skills meet the CLI contracts across agent runners. Skills guide writes and retrieval; they do not make application code depend on KB.
+Search finds candidates. Similarity does not establish that a passage is current, correct, or supported by its sources. The checked six-case rank-fusion fixture is a deterministic regression, not a real-corpus retrieval, latency, or RAG benchmark. The Markdown, cited captures, explicit relationships, and requested Git history supply the material a reader must inspect.
 
 ### Adopt the smallest useful split
 
-Start with a short inherited `AGENTS.md` path for rules whose omission would make an edit wrong. Add a scope hub only when its rationale, evidence, plans, or linked decisions deserve pull-based retrieval. A small vault may need only Markdown, Git, an index, and ordinary file search. Add typed relationships, metadata queries, graph traversal, QMD, browser capture, PDF ingestion, or code-mode workflows when the simpler layer stops answering the repository's questions.
+Start with a short inherited `AGENTS.md` path for rules whose omission would make an edit wrong. A small knowledge base may need only Markdown, Git, an index page, and ordinary file search. Add source capture when evidence keeps disappearing. Add metadata or hybrid search when file search stops answering the repository's questions. Add links and graph views only when the relationships themselves help people make decisions.
 
-The useful property is continuity without lock-in. An agent can save evidence, leave a durable plan, find the same idea through exact or semantic language, inspect the links and commits around it, and hand the result to another agent as plain files. Checks validate structure rather than truth. Capture preserves a selected surface rather than the source's trustworthiness. A typed edge records an authored assertion, and similarity supplies candidates rather than conclusions. People and agents still have to revise the concepts, evidence, and explanations when the repository changes.
+Treat the knowledge base as repository-adjacent durable memory. Authored Markdown and Git are the record; catalogs, indexes, embeddings, and graph views are replaceable ways to find and inspect it. Checks can validate structure, captures can preserve a selected surface, and similarity can suggest candidates. None of those mechanisms proves that a source is trustworthy or an explanation is still true. People and agents must revise the knowledge as the repository changes.
 <!-- article:a-durable-knowledge-base-is-a-write-path:end -->
 
 ## Install
@@ -241,7 +133,7 @@ Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
 Install hraness/kb and its bundled Agent Skills from
-https://github.com/hraness/kb at the immutable v0.11.1 tag. Follow the repository
+https://github.com/hraness/kb at the immutable v0.12.0 tag. Follow the repository
 README, install the `kb` CLI, copy or link the skills I need into this agent
 runner's configured skills directory, and verify the installation with
 `kb doctor` and `kb --help`. Do not initialize or modify a vault until I ask.
@@ -251,10 +143,10 @@ The repository and packed package carry the same skill directories, so an agent
 can inspect the tagged instructions before placing them in its runner-specific
 discovery path.
 
-Install the CLI from the immutable `v0.11.1` tag:
+Install the CLI from the immutable `v0.12.0` tag:
 
 ```sh
-bun add --global github:hraness/kb#v0.11.1
+bun add --global github:hraness/kb#v0.12.0
 kb --help
 ```
 
@@ -263,7 +155,7 @@ For programmatic use, declare the same pinned source in a project:
 ```json
 {
   "dependencies": {
-    "@hraness/kb": "github:hraness/kb#v0.11.1"
+    "@hraness/kb": "github:hraness/kb#v0.12.0"
   }
 }
 ```
@@ -281,13 +173,20 @@ kb --help
 HTTP capture works with the installed JavaScript dependencies. Rendered capture additionally needs a local Chromium-compatible browser. [yt-dlp](https://github.com/yt-dlp/yt-dlp) adds YouTube metadata, thumbnails, and transcripts; full audio or video localization is opt-in and some formats also need [FFmpeg](https://ffmpeg.org). PDF ingestion uses the open-source Poppler tools `pdfinfo` and `pdftohtml`; [Tesseract](https://github.com/tesseract-ocr/tesseract) adds local OCR for scans and screenshots.
 
 Structural commands and exact search read the current Markdown directly and
-need no service, model, or graph database. Keyword search uses
-[QMD](https://github.com/tobi/qmd)'s local BM25 index. Hybrid and semantic
-search also use its recommended compact local EmbeddingGemma model. The first
-`kb index`, hybrid `kb search`, or semantic `kb search` downloads the model
-(about 300 MB). The default hybrid mode combines live exact results with QMD
-keyword and vector results. `--mode exact`, keyword search, and every structural
-command work without an embedding model.
+need no service, model, or graph database. KB pins
+[QMD](https://github.com/tobi/qmd) 2.5.3 for local keyword and vector search.
+`--mode keyword` uses its full-text index without an embedding model. Hybrid
+and semantic search use a revision-pinned compact local EmbeddingGemma model;
+the first index or vector query downloads about 300 MB. On macOS with Bun,
+install extension-capable Homebrew SQLite with `brew install sqlite` before
+using vector retrieval.
+
+`kb doctor` statically checks the pinned QMD, SQLite, sqlite-vec,
+node-llama-cpp, and matching native packages without importing native code or
+downloading the model. Exact and keyword search remain model-free. KB also
+refuses an older adjacent `.snapshot` directory that lacks its ownership
+marker; inspect and remove only the explicitly named disposable directory,
+then retry so KB never guesses that unrelated files are cache data.
 
 ## Start a vault
 
@@ -339,12 +238,12 @@ question deliberately.
 | `kb percolate [note] --root <directory>` | Report evidence-backed recurring-concept and missing-relationship candidates without writing notes. |
 | `kb list --root <directory>` | Filter typed, nested frontmatter and tags; sort by metadata, title, path, or graph counts. `kb notes` is an alias. |
 | `kb index --root <directory>` | Build or incrementally refresh the optional local QMD embedding index. |
-| `kb search <query> --root <directory>` | Combine live exact matches with local QMD keyword and vector retrieval. Use `--mode exact\|keyword\|semantic`, metadata and tag filters, bounded graph context, or separate Git provenance. `--require-history` fails when selected-note provenance is unavailable or incomplete; `--no-history` skips it. |
+| `kb search <query> --root <directory>` | Combine live exact matches with local QMD keyword and vector retrieval. Use `--mode exact\|keyword\|semantic\|hybrid`, metadata and tag filters, or bounded graph context. Omitted history performs no Git work; `--history` requests best-effort provenance and `--require-history` rejects unavailable or incomplete selected-note provenance. |
 | `kb context <repository-path> --root <vault> --repo <repository>` | List inherited guides root to nearest and reciprocal context hubs nearest to root. Use `--kind auto\|file\|directory` to control how the target path is interpreted. |
 | `kb agents identity <repository-scope>` | Derive the normalized scope, canonical hub ID and path, owning guide path, and exact reciprocal marker without writing files. |
 | `kb agents check --root <vault> --repo <repository>` | Validate context identities, exact scopes, reciprocal markers, real guide paths, collisions, confinement, and guide shape. Unmapped guides remain valid. |
 | `kb agents audit --root <vault> --repo <repository>` | Run the same correctness gate, then report deterministic per-guide, section, inherited-chain, long-bullet, and exact-duplicate advisories. |
-| `kb doctor` | Report required and optional local capture capabilities. |
+| `kb doctor` | Report capture capabilities and statically inspect local QMD, SQLite, sqlite-vec, node-llama-cpp, and native search prerequisites without loading a model. |
 | `kb adapters` | Print the installed platform capability matrix. |
 
 Vault commands default to the current directory and `index.md`; use `--root` and `--index` to select alternatives. Commands that report structured data accept `--json`. Run `kb --help` for the complete top-level surface and `kb clip --help` for capture, authentication, evidence, and resource-bound options.

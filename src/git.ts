@@ -11,6 +11,8 @@ export const MAX_GIT_HISTORY_OUTPUT_BYTES = 32 * 1024 * 1024;
 export const MAX_GIT_HISTORY_TIMEOUT_MS = 30_000;
 export const MAX_GIT_PATHS_PER_COMMIT = 2_000;
 export const MAX_GIT_PATH_OBSERVATIONS = 100_000;
+export const MAX_GIT_NOTE_ID_UTF8_BYTES = 16 * 1_024;
+export const MAX_GIT_NOTE_IDS_UTF8_BYTES = 16 * 1_024 * 1_024;
 
 const DEFAULT_COMMITS = 200;
 const DEFAULT_OUTPUT_BYTES = 8 * 1024 * 1024;
@@ -164,6 +166,13 @@ export type GitHistoryForNotesOptions = {
   readonly cochangedPathsPerCommit?: number;
 };
 
+export type ValidatedGitHistoryForNotesOptions = Required<GitHistoryForNotesOptions>;
+
+export type ValidatedGitHistoryForNotesRequest = {
+  readonly noteIds: readonly string[];
+  readonly options: ValidatedGitHistoryForNotesOptions;
+};
+
 export type GitHistoryForNotesResult =
   | {
       readonly status: "ready";
@@ -179,6 +188,16 @@ export type SearchGitHistoryOptions = {
   readonly limit?: number;
   readonly commitsPerHit?: number;
   readonly cochangedPathsPerCommit?: number;
+};
+
+export type ValidatedSearchGitHistoryOptions = {
+  readonly query: string;
+  readonly normalizedQuery: string;
+  readonly terms: readonly string[];
+  readonly allowedNoteIds: ReadonlySet<string> | null;
+  readonly limit: number;
+  readonly commitsPerHit: number;
+  readonly cochangedPathsPerCommit: number;
 };
 
 export type GitHistorySearchCommit = GitHistoryNoteCommit & {
@@ -972,11 +991,14 @@ function limitedCommitsForNotes(
   }));
 }
 
-function noteOptions(options: GitHistoryForNotesOptions): {
-  readonly commitsPerNote: number;
-  readonly cochangedPathsPerCommit: number;
-} {
-  return {
+/** Validate and normalize bounded per-note provenance options without opening Git. */
+export function validateGitHistoryForNotesOptions(
+  options: GitHistoryForNotesOptions = {},
+): ValidatedGitHistoryForNotesOptions {
+  if (typeof options !== "object" || options === null || Array.isArray(options)) {
+    throw new GitHistoryError("malformed", "Git history options must be an object.");
+  }
+  return Object.freeze({
     commitsPerNote: checkedInteger(
       options.commitsPerNote,
       DEFAULT_COMMITS_PER_NOTE,
@@ -991,7 +1013,70 @@ function noteOptions(options: GitHistoryForNotesOptions): {
       MAX_COCHANGED_PATHS,
       "Cochanged-path limit",
     ),
-  };
+  });
+}
+
+function isIterableObject(value: unknown): value is Iterable<unknown> {
+  return typeof value === "object"
+    && value !== null
+    && Symbol.iterator in value
+    && typeof value[Symbol.iterator] === "function";
+}
+
+function checkedNoteIds(
+  value: unknown,
+  label: string,
+  countMessage: string,
+): readonly string[] {
+  if (!Array.isArray(value) && !isIterableObject(value)) {
+    throw new GitHistoryError("malformed", `${label}s must be provided as an array or set.`);
+  }
+  const noteIds: string[] = [];
+  let noteIdBytes = 0;
+  for (const noteId of value) {
+    if (noteIds.length >= MAX_GIT_HISTORY_NOTES) {
+      throw new GitHistoryError("budget", countMessage);
+    }
+    if (typeof noteId !== "string") {
+      throw new GitHistoryError(
+        "malformed",
+        `${label} ${noteIds.length + 1} must be a string.`,
+      );
+    }
+    const noteIdByteLength = Buffer.byteLength(noteId, "utf8");
+    if (noteIdByteLength > MAX_GIT_NOTE_ID_UTF8_BYTES) {
+      throw new GitHistoryError(
+        "budget",
+        `${label} ${noteIds.length + 1} must be at most `
+          + `${MAX_GIT_NOTE_ID_UTF8_BYTES.toLocaleString("en-US")} UTF-8 bytes.`,
+      );
+    }
+    noteIdBytes += noteIdByteLength;
+    if (noteIdBytes > MAX_GIT_NOTE_IDS_UTF8_BYTES) {
+      throw new GitHistoryError(
+        "budget",
+        `${label}s must total at most `
+          + `${MAX_GIT_NOTE_IDS_UTF8_BYTES.toLocaleString("en-US")} UTF-8 bytes.`,
+      );
+    }
+    noteIds.push(noteId);
+  }
+  return Object.freeze(noteIds);
+}
+
+/** Validate a direct note-provenance request before opening or indexing Git. */
+export function validateGitHistoryForNotesRequest(
+  noteIds: readonly string[],
+  options: GitHistoryForNotesOptions = {},
+): ValidatedGitHistoryForNotesRequest {
+  return Object.freeze({
+    noteIds: checkedNoteIds(
+      noteIds,
+      "Git history note ID",
+      `At most ${MAX_GIT_HISTORY_NOTES} note IDs may be requested.`,
+    ),
+    options: validateGitHistoryForNotesOptions(options),
+  });
 }
 
 function noteCommit(
@@ -1018,19 +1103,16 @@ export function gitHistoryForNotes(
   noteIds: readonly string[],
   options: GitHistoryForNotesOptions = {},
 ): GitHistoryForNotesResult {
+  const request = validateGitHistoryForNotesRequest(noteIds, options);
   if (index.status === "unavailable") return index;
-  if (noteIds.length > MAX_GIT_HISTORY_NOTES) {
-    throw new GitHistoryError("budget", `At most ${MAX_GIT_HISTORY_NOTES} note IDs may be requested.`);
-  }
-  const selected = noteOptions(options);
-  const allowed = new Set(noteIds);
+  const allowed = new Set(request.noteIds);
   const notes = index.notes
     .filter((note) => allowed.has(note.id))
     .map((note): GitHistoryNoteProvenance => Object.freeze({
       id: note.id,
       path: note.path,
-      commits: Object.freeze(note.commits.slice(0, selected.commitsPerNote).map((commit) =>
-        noteCommit(commit, note.repositoryPath, selected.cochangedPathsPerCommit))),
+      commits: Object.freeze(note.commits.slice(0, request.options.commitsPerNote).map((commit) =>
+        noteCommit(commit, note.repositoryPath, request.options.cochangedPathsPerCommit))),
     }));
   const returnedNoteIds = new Set(notes.map(({ id }) => id));
   const returnedCommitHashes = new Set(notes.flatMap(({ commits }) =>
@@ -1052,7 +1134,13 @@ function normalizedSearch(value: string): string {
   return value.normalize("NFC").toLocaleLowerCase("en-US");
 }
 
-function queryTerms(query: string): { readonly normalized: string; readonly terms: readonly string[] } {
+function queryTerms(query: unknown): { readonly normalized: string; readonly terms: readonly string[] } {
+  if (typeof query !== "string") {
+    throw new GitHistoryError(
+      "malformed",
+      `Git history query must be one to ${MAX_QUERY_LENGTH} characters on one line.`,
+    );
+  }
   const trimmed = query.trim();
   if (trimmed === "" || trimmed.length > MAX_QUERY_LENGTH || /[\0\r\n]/u.test(trimmed)) {
     throw new GitHistoryError(
@@ -1063,6 +1151,45 @@ function queryTerms(query: string): { readonly normalized: string; readonly term
   const normalized = normalizedSearch(trimmed);
   const terms = [...new Set(normalized.split(/[^\p{L}\p{N}_./-]+/u).filter(Boolean))].slice(0, 20);
   return { normalized, terms: Object.freeze(terms) };
+}
+
+/** Validate and normalize a history-search request before opening or indexing Git. */
+export function validateSearchGitHistoryOptions(
+  options: SearchGitHistoryOptions,
+): ValidatedSearchGitHistoryOptions {
+  if (typeof options !== "object" || options === null || Array.isArray(options)) {
+    throw new GitHistoryError("malformed", "Git history search options must be an object.");
+  }
+  const limit = checkedInteger(
+    options.limit,
+    DEFAULT_SEARCH_LIMIT,
+    1,
+    MAX_SEARCH_LIMIT,
+    "Git search limit",
+  );
+  const provenance = validateGitHistoryForNotesOptions({
+    ...(options.commitsPerHit === undefined ? {} : { commitsPerNote: options.commitsPerHit }),
+    ...(options.cochangedPathsPerCommit === undefined
+      ? {}
+      : { cochangedPathsPerCommit: options.cochangedPathsPerCommit }),
+  });
+  const { normalized, terms } = queryTerms(options.query);
+  const checkedAllowed = options.allowedNoteIds === undefined
+    ? null
+    : checkedNoteIds(
+        options.allowedNoteIds,
+        "Git search allowed note ID",
+        `Git search accepts at most ${MAX_GIT_HISTORY_NOTES} allowed note IDs.`,
+      );
+  return Object.freeze({
+    query: options.query.trim(),
+    normalizedQuery: normalized,
+    terms,
+    allowedNoteIds: checkedAllowed === null ? null : new Set(checkedAllowed),
+    limit,
+    commitsPerHit: provenance.commitsPerNote,
+    cochangedPathsPerCommit: provenance.cochangedPathsPerCommit,
+  });
 }
 
 function matchStrength(value: string, normalizedQuery: string, terms: readonly string[]): number {
@@ -1111,28 +1238,12 @@ export function searchGitHistory(
   index: GitHistoryIndexResult,
   options: SearchGitHistoryOptions,
 ): GitHistorySearchResult {
+  const request = validateSearchGitHistoryOptions(options);
   if (index.status === "unavailable") return index;
-  const limit = checkedInteger(options.limit, DEFAULT_SEARCH_LIMIT, 1, MAX_SEARCH_LIMIT, "Git search limit");
-  const provenance = noteOptions({
-    ...(options.commitsPerHit === undefined ? {} : { commitsPerNote: options.commitsPerHit }),
-    ...(options.cochangedPathsPerCommit === undefined
-      ? {}
-      : { cochangedPathsPerCommit: options.cochangedPathsPerCommit }),
-  });
-  const { normalized, terms } = queryTerms(options.query);
-  const allowed = options.allowedNoteIds === undefined
-    ? null
-    : new Set(options.allowedNoteIds);
-  if (allowed !== null && allowed.size > MAX_GIT_HISTORY_NOTES) {
-    throw new GitHistoryError(
-      "budget",
-      `Git search accepts at most ${MAX_GIT_HISTORY_NOTES} allowed note IDs.`,
-    );
-  }
   const hits: GitHistorySearchHit[] = [];
   for (const note of index.notes) {
-    if (allowed !== null && !allowed.has(note.id)) continue;
-    const matches = scoredCommits(note, normalized, terms);
+    if (request.allowedNoteIds !== null && !request.allowedNoteIds.has(note.id)) continue;
+    const matches = scoredCommits(note, request.normalizedQuery, request.terms);
     if (matches.length === 0) continue;
     const score = matches.reduce((total, match, matchIndex) =>
       total + match.score / (matchIndex + 1), 0);
@@ -1140,16 +1251,16 @@ export function searchGitHistory(
       id: note.id,
       path: note.path,
       score: Number(score.toFixed(6)),
-      commits: Object.freeze(matches.slice(0, provenance.commitsPerNote).map((match) => Object.freeze({
-        ...noteCommit(match.commit, note.repositoryPath, provenance.cochangedPathsPerCommit),
+      commits: Object.freeze(matches.slice(0, request.commitsPerHit).map((match) => Object.freeze({
+        ...noteCommit(match.commit, note.repositoryPath, request.cochangedPathsPerCommit),
         matchedSubject: match.matchedSubject,
-        matchedPaths: Object.freeze(match.matchedPaths.slice(0, provenance.cochangedPathsPerCommit)),
+        matchedPaths: Object.freeze(match.matchedPaths.slice(0, request.cochangedPathsPerCommit)),
       }))),
     }));
   }
   hits.sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
   const searchableNoteIds = new Set(index.notes.flatMap(({ id }) =>
-    allowed === null || allowed.has(id) ? [id] : []));
+    request.allowedNoteIds === null || request.allowedNoteIds.has(id) ? [id] : []));
   const limitedCommits = limitedCommitsForNotes(
     index.limitedCommits,
     searchableNoteIds,
@@ -1158,8 +1269,8 @@ export function searchGitHistory(
   return Object.freeze({
     status: "ready",
     head: index.head,
-    query: options.query.trim(),
-    hits: Object.freeze(hits.slice(0, limit)),
+    query: request.query,
+    hits: Object.freeze(hits.slice(0, request.limit)),
     ...(limitedCommits.length === 0 ? {} : { limitedCommits }),
   });
 }

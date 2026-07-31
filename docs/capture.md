@@ -4,17 +4,20 @@
 
 ## Check local capabilities
 
-Run the diagnostics before using browser state, PDF ingestion, or video capture:
+Run the diagnostics before using local search, browser state, PDF ingestion, or video capture:
 
 ```sh
 kb doctor
 kb adapters
 ```
 
-`kb doctor --json` reports the installed runtime, extraction dependencies,
-browser support, profile display names, yt-dlp, ffmpeg, Poppler
-(`pdfinfo` and `pdftohtml`), and Tesseract. The Poppler pair is required by
-`kb pdf`; Tesseract adds local OCR for scans and screenshots.
+`kb doctor --json` reports the installed runtime, QMD and static semantic-search
+prerequisites, extraction dependencies, browser support, profile display names,
+yt-dlp, ffmpeg, Poppler (`pdfinfo` and `pdftohtml`), and Tesseract. The semantic
+report distinguishes model-free keyword readiness from SQLite and sqlite-vec
+vector prerequisites; it does not inspect or download the embedding model. The
+Poppler pair is required by `kb pdf`; Tesseract adds local OCR for scans and
+screenshots.
 `kb adapters --json` returns the current platform capability matrix.
 
 ## Capture or inspect a page

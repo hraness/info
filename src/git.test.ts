@@ -10,6 +10,9 @@ import {
   gitHistoryForNotes,
   indexGitHistory,
   MAX_GIT_HISTORY_COMMITS,
+  MAX_GIT_HISTORY_NOTES,
+  MAX_GIT_NOTE_ID_UTF8_BYTES,
+  MAX_GIT_NOTE_IDS_UTF8_BYTES,
   MAX_GIT_PATH_OBSERVATIONS,
   MAX_GIT_PATHS_PER_COMMIT,
   parseGitHistoryOutput,
@@ -488,6 +491,60 @@ describe("Git history indexing", () => {
 
     expect(await rejected(indexGitHistory({ ...fixture, required: true }, { runGit: unavailable })))
       .toMatchObject({ name: "GitHistoryError", kind: "unavailable" });
+  });
+
+  test("validates bounded requests before returning an unavailable index", () => {
+    const unavailable = {
+      status: "unavailable",
+      repository: "/repo",
+      root: "/repo/kb",
+      vaultPrefix: "kb",
+      reason: "git executable missing",
+    } as const;
+    expect(() => gitHistoryForNotes(
+      unavailable,
+      Array.from({ length: MAX_GIT_HISTORY_NOTES + 1 }, () => "duplicate"),
+    )).toThrow(`At most ${MAX_GIT_HISTORY_NOTES} note IDs`);
+    expect(() => gitHistoryForNotes(
+      unavailable,
+      ["x".repeat(MAX_GIT_NOTE_ID_UTF8_BYTES + 1)],
+    )).toThrow(`${MAX_GIT_NOTE_ID_UTF8_BYTES.toLocaleString("en-US")} UTF-8 bytes`);
+    const multibyteNoteId = "\u{1f4a1}".repeat(MAX_GIT_NOTE_ID_UTF8_BYTES / 4);
+    expect(Buffer.byteLength(multibyteNoteId, "utf8")).toBe(MAX_GIT_NOTE_ID_UTF8_BYTES);
+    const aggregateOverflow = Array.from(
+      { length: (MAX_GIT_NOTE_IDS_UTF8_BYTES / MAX_GIT_NOTE_ID_UTF8_BYTES) + 1 },
+      () => multibyteNoteId,
+    );
+    expect(() => gitHistoryForNotes(
+      unavailable,
+      aggregateOverflow,
+    )).toThrow(`${MAX_GIT_NOTE_IDS_UTF8_BYTES.toLocaleString("en-US")} UTF-8 bytes`);
+    expect(() => searchGitHistory(unavailable, {
+      query: "memory",
+      allowedNoteIds: aggregateOverflow,
+    })).toThrow(`${MAX_GIT_NOTE_IDS_UTF8_BYTES.toLocaleString("en-US")} UTF-8 bytes`);
+    expect(() => gitHistoryForNotes(
+      unavailable,
+      ["notes/memory"],
+      { commitsPerNote: 0 },
+    )).toThrow("Per-note commit limit must be an integer from 1 through 50");
+    expect(() => searchGitHistory(unavailable, { query: "\n" }))
+      .toThrow("one to 500 characters");
+    expect(() => searchGitHistory(unavailable, {
+      query: "memory",
+      allowedNoteIds: Array.from(
+        { length: MAX_GIT_HISTORY_NOTES + 1 },
+        () => "duplicate",
+      ),
+    })).toThrow(`at most ${MAX_GIT_HISTORY_NOTES} allowed note IDs`);
+    expect(() => searchGitHistory(unavailable, { query: "memory", limit: 101 }))
+      .toThrow("Git search limit must be an integer from 1 through 100");
+    expect(() => searchGitHistory(unavailable, { query: "memory", commitsPerHit: 51 }))
+      .toThrow("Per-note commit limit must be an integer from 1 through 50");
+    expect(() => searchGitHistory(unavailable, {
+      query: "memory",
+      cochangedPathsPerCommit: 101,
+    })).toThrow("Cochanged-path limit must be an integer from 0 through 100");
   });
 
   test("distinguishes command failure and malformed provider output", async () => {

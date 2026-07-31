@@ -287,7 +287,7 @@ function fixtureCase(
   semanticLike: readonly string[],
 ): RetrievalBenchmarkCase {
   const hybrid = fuseRankedCandidates([
-    { name: "exact", weight: 2, ids: exact },
+    { name: "exact", weight: 1, ids: exact },
     { name: "semantic-like", weight: 1, ids: semanticLike },
   ]).map(({ id: resultId }) => resultId);
   return {
@@ -307,7 +307,7 @@ function fixtureCase(
  * query shapes. Its synthetic semantic-like rankings exercise complementarity;
  * the fixture does not establish universal superiority over either input lane.
  */
-export function createRepresentativeRetrievalFixture(): readonly RetrievalBenchmarkCase[] {
+export function createSyntheticRankFusionFixture(): readonly RetrievalBenchmarkCase[] {
   return [
     fixtureCase(
       "alias-identity",
@@ -357,3 +357,6 @@ export function createRepresentativeRetrievalFixture(): readonly RetrievalBenchm
     ),
   ];
 }
+
+/** @deprecated Use createSyntheticRankFusionFixture. */
+export const createRepresentativeRetrievalFixture = createSyntheticRankFusionFixture;

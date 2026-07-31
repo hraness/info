@@ -4,13 +4,15 @@ import {
 } from "./index-d13v9ckt.js";
 import {
   queryVault
-} from "./index-m4bexhht.js";
+} from "./index-7gsmq0jt.js";
 import {
   lookupNote
 } from "./index-4962kvds.js";
 
 // src/search.ts
 var MAX_EXACT_RESULTS = 500;
+var MAX_SEARCH_QUERY_BYTES = 16 * 1024;
+var MAX_SEARCH_QUERY_TERMS = 64;
 var MAX_FUSION_LANES = 16;
 var MAX_FUSION_RESULTS_PER_LANE = 500;
 var MAX_RELATED_SEEDS = 10;
@@ -56,12 +58,36 @@ function checkedLimit(value, fallback, maximum, label) {
   }
   return limit;
 }
-function uniqueQueryTerms(query) {
-  const raw = [
-    ...new Set((normalize(query).match(/[\p{L}\p{N}][\p{L}\p{N}._/-]*/gu) ?? []).filter((term) => term !== ""))
-  ];
+function validateSearchQuery(value) {
+  if (typeof value !== "string") {
+    throw new TypeError("Search query must be a string.");
+  }
+  let bytes = 0;
+  for (const character of value) {
+    bytes += Buffer.byteLength(character, "utf8");
+    if (bytes > MAX_SEARCH_QUERY_BYTES) {
+      throw new RangeError(`Search query must be at most ${MAX_SEARCH_QUERY_BYTES.toLocaleString("en-US")} UTF-8 bytes.`);
+    }
+  }
+  const query = value.trim();
+  if (query === "")
+    throw new Error("Search query must not be empty.");
+  const normalized = normalize(query);
+  const unique = new Set;
+  for (const match of normalized.matchAll(/[\p{L}\p{N}][\p{L}\p{N}._/-]*/gu)) {
+    const term = match[0];
+    unique.add(term);
+    if (unique.size > MAX_SEARCH_QUERY_TERMS) {
+      throw new RangeError(`Search query may contain at most ${MAX_SEARCH_QUERY_TERMS} unique normalized terms.`);
+    }
+  }
+  const raw = [...unique];
   const meaningful = raw.filter((term) => term.length > 1 && !stopWords.has(term));
-  return meaningful.length > 0 ? meaningful : raw;
+  return {
+    query,
+    normalized,
+    terms: meaningful.length > 0 ? meaningful : raw
+  };
 }
 function occurrenceCount(text, needle, maximum = 8) {
   if (needle === "")
@@ -230,15 +256,14 @@ ${id}`, 30],
   };
 }
 function searchExactVault(notes, analysis, options) {
-  const phrase = normalize(options.query.trim());
-  if (phrase === "")
-    throw new Error("Exact search query must not be empty.");
+  const validated = validateSearchQuery(options.query);
+  const phrase = validated.normalized;
   const limit = checkedLimit(options.limit, 40, MAX_EXACT_RESULTS, "Exact search limit");
   const allowed = new Set(queryVault(notes, analysis, {
     filters: options.filters ?? [],
     tags: options.tags ?? []
   }).map(({ id }) => id));
-  const terms = uniqueQueryTerms(phrase);
+  const terms = validated.terms;
   return notes.filter((note) => allowed.has(note.id)).map((note) => exactHit(note, phrase, terms)).filter((hit) => hit !== null).toSorted((left, right) => Number(right.identity) - Number(left.identity) || right.score - left.score || left.path.localeCompare(right.path)).slice(0, limit);
 }
 function fuseRankedCandidates(lanes, k = 60) {
@@ -433,4 +458,4 @@ function buildGraphContext(notes, analysis, options) {
   };
 }
 
-export { searchExactVault, fuseRankedCandidates, buildGraphContext };
+export { MAX_SEARCH_QUERY_BYTES, MAX_SEARCH_QUERY_TERMS, validateSearchQuery, searchExactVault, fuseRankedCandidates, buildGraphContext };

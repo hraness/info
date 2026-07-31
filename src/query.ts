@@ -8,6 +8,13 @@ import {
   type VaultAnalysis,
 } from "./graph.js";
 
+export const MAX_QUERY_FILTERS = 64;
+export const MAX_QUERY_TAGS = 64;
+export const MAX_QUERY_METADATA_PATH_UTF8_BYTES = 1_024;
+export const MAX_QUERY_METADATA_PATH_SEGMENTS = 32;
+export const MAX_QUERY_TEXT_UTF8_BYTES = 16 * 1_024;
+export const MAX_QUERY_OPTIONS_UTF8_BYTES = 64 * 1_024;
+
 export type MetadataPath = string | readonly string[];
 
 export type MetadataFilter =
@@ -69,11 +76,6 @@ function isMetadataObject(value: MetadataValue): value is MetadataObject {
   return value !== null && typeof value === "object" && !isMetadataArray(value);
 }
 
-function pathSegments(path: MetadataPath): readonly string[] {
-  return (typeof path === "string" ? path.split(".") : [...path])
-    .map((segment) => segment.trim());
-}
-
 function normalizedString(value: string): string {
   return value.normalize("NFC").toLocaleLowerCase("en-US");
 }
@@ -82,21 +84,152 @@ function normalizedTag(value: string): string {
   return normalizedString(value.trim().replace(/^#+/u, ""));
 }
 
+type QueryTextBudget = { bytes: number };
+
+type PreparedMetadataSegment = {
+  readonly exact: string;
+  readonly normalized: string;
+  readonly arrayIndex: number | null;
+};
+
+type PreparedMetadataPath = {
+  readonly segments: readonly PreparedMetadataSegment[];
+  readonly valid: boolean;
+};
+
+type MetadataKeyCache = WeakMap<MetadataObject, ReadonlyMap<string, string | null>>;
+
+function formattedBytes(value: number): string {
+  return value.toLocaleString("en-US");
+}
+
+function boundedTextBytes(value: string, maximum: number, label: string): number {
+  const bytes = Buffer.byteLength(value, "utf8");
+  if (bytes > maximum) {
+    throw new RangeError(
+      `${label} must be at most ${formattedBytes(maximum)} UTF-8 bytes.`,
+    );
+  }
+  return bytes;
+}
+
+function addQueryText(
+  budget: QueryTextBudget,
+  bytes: number,
+): void {
+  budget.bytes += bytes;
+  if (budget.bytes > MAX_QUERY_OPTIONS_UTF8_BYTES) {
+    throw new RangeError(
+      `Query options may contain at most ${formattedBytes(MAX_QUERY_OPTIONS_UTF8_BYTES)} UTF-8 bytes of text.`,
+    );
+  }
+}
+
+function prepareMetadataPath(
+  path: MetadataPath,
+  label: string,
+  budget?: QueryTextBudget,
+): PreparedMetadataPath {
+  let rawSegments: readonly string[];
+  let pathBytes = 0;
+  if (typeof path === "string") {
+    pathBytes = boundedTextBytes(path, MAX_QUERY_METADATA_PATH_UTF8_BYTES, label);
+    rawSegments = path.split(".");
+  } else {
+    if (!Array.isArray(path)) throw new TypeError(`${label} must be a string or string array.`);
+    if (path.length > MAX_QUERY_METADATA_PATH_SEGMENTS) {
+      throw new RangeError(
+        `${label} may contain at most ${MAX_QUERY_METADATA_PATH_SEGMENTS} segments.`,
+      );
+    }
+    const segments: string[] = [];
+    for (const [index, segment] of path.entries()) {
+      if (typeof segment !== "string") {
+        throw new TypeError(`${label} segment ${index + 1} must be a string.`);
+      }
+      pathBytes += Buffer.byteLength(segment, "utf8") + (index === 0 ? 0 : 1);
+      if (pathBytes > MAX_QUERY_METADATA_PATH_UTF8_BYTES) {
+        throw new RangeError(
+          `${label} must be at most ${formattedBytes(MAX_QUERY_METADATA_PATH_UTF8_BYTES)} UTF-8 bytes.`,
+        );
+      }
+      segments.push(segment);
+    }
+    rawSegments = segments;
+  }
+  if (rawSegments.length > MAX_QUERY_METADATA_PATH_SEGMENTS) {
+    throw new RangeError(
+      `${label} may contain at most ${MAX_QUERY_METADATA_PATH_SEGMENTS} segments.`,
+    );
+  }
+  if (budget !== undefined) addQueryText(budget, pathBytes);
+
+  const segments = rawSegments.map((raw): PreparedMetadataSegment => {
+    const exact = raw.trim();
+    return {
+      exact,
+      normalized: normalizedString(exact),
+      arrayIndex: /^(?:0|[1-9]\d*)$/u.test(exact) ? Number(exact) : null,
+    };
+  });
+  return {
+    segments,
+    valid: segments.length > 0 && segments.every(({ exact }) => exact !== ""),
+  };
+}
+
+function normalizedObjectKeys(
+  value: MetadataObject,
+  cache: MetadataKeyCache,
+): ReadonlyMap<string, string | null> {
+  const cached = cache.get(value);
+  if (cached !== undefined) return cached;
+  const indexed = new Map<string, string | null>();
+  for (const key of Object.keys(value)) {
+    const normalized = normalizedString(key);
+    indexed.set(normalized, indexed.has(normalized) ? null : key);
+  }
+  cache.set(value, indexed);
+  return indexed;
+}
+
 function objectValue(
   value: MetadataObject,
-  segment: string,
+  segment: PreparedMetadataSegment,
+  cache: MetadataKeyCache,
 ): MetadataLookup {
-  if (Object.hasOwn(value, segment)) {
-    const candidate = value[segment];
+  if (Object.hasOwn(value, segment.exact)) {
+    const candidate = value[segment.exact];
     return candidate === undefined ? { found: false } : { found: true, value: candidate };
   }
-  const normalizedSegment = normalizedString(segment);
-  const matches = Object.keys(value).filter(
-    (key) => normalizedString(key) === normalizedSegment,
-  );
-  if (matches.length !== 1) return { found: false };
-  const candidate = value[matches[0] ?? ""];
+  const matchedKey = normalizedObjectKeys(value, cache).get(segment.normalized);
+  if (matchedKey === undefined || matchedKey === null) return { found: false };
+  const candidate = value[matchedKey];
   return candidate === undefined ? { found: false } : { found: true, value: candidate };
+}
+
+function metadataAtPreparedPath(
+  metadata: MetadataObject,
+  path: PreparedMetadataPath,
+  cache: MetadataKeyCache,
+): MetadataLookup {
+  if (!path.valid) return { found: false };
+
+  let current: MetadataValue = metadata;
+  for (const segment of path.segments) {
+    if (isMetadataArray(current)) {
+      if (segment.arrayIndex === null) return { found: false };
+      const candidate: MetadataValue | undefined = current[segment.arrayIndex];
+      if (candidate === undefined) return { found: false };
+      current = candidate;
+      continue;
+    }
+    if (!isMetadataObject(current)) return { found: false };
+    const lookup = objectValue(current, segment, cache);
+    if (!lookup.found) return lookup;
+    current = lookup.value;
+  }
+  return { found: true, value: current };
 }
 
 /** Resolve an exact nested field, with unambiguous case-insensitive object keys. */
@@ -104,60 +237,204 @@ export function metadataAtPath(
   metadata: MetadataObject,
   path: MetadataPath,
 ): MetadataLookup {
-  const segments = pathSegments(path);
-  if (segments.length === 0 || segments.some((segment) => segment === "")) {
-    return { found: false };
-  }
-
-  let current: MetadataValue = metadata;
-  for (const segment of segments) {
-    if (isMetadataArray(current)) {
-      if (!/^(?:0|[1-9]\d*)$/u.test(segment)) return { found: false };
-      const index = Number(segment);
-      const candidate: MetadataValue | undefined = current[index];
-      if (candidate === undefined) return { found: false };
-      current = candidate;
-      continue;
-    }
-    if (!isMetadataObject(current)) return { found: false };
-    const lookup = objectValue(current, segment);
-    if (!lookup.found) return lookup;
-    current = lookup.value;
-  }
-  return { found: true, value: current };
+  return metadataAtPreparedPath(
+    metadata,
+    prepareMetadataPath(path, "Metadata path"),
+    new WeakMap(),
+  );
 }
 
-function equalsScalar(value: MetadataValue, expected: MetadataScalar): boolean {
-  if (isMetadataArray(value)) return value.some((candidate) => equalsScalar(candidate, expected));
-  if (isMetadataObject(value)) return false;
-  if (typeof value === "string" && typeof expected === "string") {
-    return normalizedString(value) === normalizedString(expected);
+type PreparedMetadataFilter =
+  | {
+      readonly kind: "equals";
+      readonly path: PreparedMetadataPath;
+      readonly value: MetadataScalar;
+      readonly normalizedValue?: string;
+    }
+  | {
+      readonly kind: "exists";
+      readonly path: PreparedMetadataPath;
+    };
+
+function equalsScalar(
+  value: MetadataValue,
+  filter: Extract<PreparedMetadataFilter, { readonly kind: "equals" }>,
+  stringCache: Map<string, string>,
+): boolean {
+  if (isMetadataArray(value)) {
+    return value.some((candidate) => equalsScalar(candidate, filter, stringCache));
   }
-  return Object.is(value, expected);
+  if (isMetadataObject(value)) return false;
+  if (typeof value === "string" && filter.normalizedValue !== undefined) {
+    let normalized = stringCache.get(value);
+    if (normalized === undefined) {
+      normalized = normalizedString(value);
+      stringCache.set(value, normalized);
+    }
+    return normalized === filter.normalizedValue;
+  }
+  return Object.is(value, filter.value);
 }
 
 type QueryableMetadata = Pick<Note, "metadata" | "tags">;
 
-function matchesFilter(note: QueryableMetadata, filter: MetadataFilter): boolean {
-  const lookup = metadataAtPath(note.metadata, filter.path);
+function matchesFilter(
+  note: QueryableMetadata,
+  filter: PreparedMetadataFilter,
+  keyCache: MetadataKeyCache,
+  stringCache: Map<string, string>,
+): boolean {
+  const lookup = metadataAtPreparedPath(note.metadata, filter.path, keyCache);
   if (filter.kind === "exists") return lookup.found;
-  return lookup.found && equalsScalar(lookup.value, filter.value);
+  return lookup.found && equalsScalar(lookup.value, filter, stringCache);
 }
 
-function matchesTags(note: QueryableMetadata, tags: readonly string[]): boolean {
+function matchesTags(note: QueryableMetadata, tags: ReadonlySet<string>): boolean {
   const noteTags = new Set(note.tags.map(normalizedTag));
-  return tags.every((tag) => {
-    const normalized = normalizedTag(tag);
-    return normalized !== "" && noteTags.has(normalized);
-  });
+  for (const tag of tags) {
+    if (tag === "" || !noteTags.has(tag)) return false;
+  }
+  return true;
+}
+
+type PreparedQuerySort =
+  | {
+      readonly kind: "builtin";
+      readonly field: "title" | "path" | "inbound" | "outbound";
+    }
+  | {
+      readonly kind: "metadata";
+      readonly path: PreparedMetadataPath;
+    };
+
+type PreparedQueryOptions = {
+  readonly filters: readonly PreparedMetadataFilter[];
+  readonly tags: ReadonlySet<string>;
+  readonly sort: PreparedQuerySort;
+  readonly direction: QueryDirection;
+  readonly limit?: number;
+};
+
+function isMetadataScalar(value: unknown): value is MetadataScalar {
+  return value === null
+    || typeof value === "string"
+    || typeof value === "number"
+    || typeof value === "boolean";
+}
+
+function prepareFilter(
+  value: unknown,
+  index: number,
+  budget: QueryTextBudget,
+): PreparedMetadataFilter {
+  const label = `Query filter ${index + 1}`;
+  if (value === null || typeof value !== "object") {
+    throw new TypeError(`${label} must be an equals or exists filter.`);
+  }
+  const filter = value as Readonly<Record<string, unknown>>;
+  const path = prepareMetadataPath(
+    filter.path as MetadataPath,
+    `${label} metadata path`,
+    budget,
+  );
+  if (filter.kind === "exists") return { kind: "exists", path };
+  if (filter.kind !== "equals") {
+    throw new TypeError(`${label} must be an equals or exists filter.`);
+  }
+  if (!isMetadataScalar(filter.value)) {
+    throw new TypeError(`${label} value must be a metadata scalar.`);
+  }
+  if (typeof filter.value === "string") {
+    const bytes = boundedTextBytes(
+      filter.value,
+      MAX_QUERY_TEXT_UTF8_BYTES,
+      `${label} string value`,
+    );
+    addQueryText(budget, bytes);
+    return {
+      kind: "equals",
+      path,
+      value: filter.value,
+      normalizedValue: normalizedString(filter.value),
+    };
+  }
+  return { kind: "equals", path, value: filter.value };
+}
+
+function prepareSort(
+  value: QuerySort | undefined,
+  budget: QueryTextBudget,
+): PreparedQuerySort {
+  if (value === undefined) return { kind: "builtin", field: "path" };
+  if (value.kind === "metadata") {
+    return {
+      kind: "metadata",
+      path: prepareMetadataPath(value.path, "Query sort metadata path", budget),
+    };
+  }
+  if (
+    value.kind !== "builtin"
+    || !["title", "path", "inbound", "outbound"].includes(value.field)
+  ) {
+    throw new TypeError("Query sort must name a supported built-in field or metadata path.");
+  }
+  return value;
+}
+
+function prepareQueryOptions(options: QueryOptions): PreparedQueryOptions {
+  const rawFilters: unknown = options.filters ?? [];
+  if (!Array.isArray(rawFilters)) throw new TypeError("Query filters must be an array.");
+  if (rawFilters.length > MAX_QUERY_FILTERS) {
+    throw new RangeError(`Query filters may contain at most ${MAX_QUERY_FILTERS} entries.`);
+  }
+  const rawTags: unknown = options.tags ?? [];
+  if (!Array.isArray(rawTags)) throw new TypeError("Query tags must be an array.");
+  if (rawTags.length > MAX_QUERY_TAGS) {
+    throw new RangeError(`Query tags may contain at most ${MAX_QUERY_TAGS} entries.`);
+  }
+  if (options.direction !== undefined && options.direction !== "asc" && options.direction !== "desc") {
+    throw new TypeError("Query direction must be asc or desc.");
+  }
+  if (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit < 0)) {
+    throw new RangeError("Query limit must be a non-negative safe integer.");
+  }
+
+  const budget: QueryTextBudget = { bytes: 0 };
+  const filters = rawFilters.map((filter, index) => prepareFilter(filter, index, budget));
+  const tags = new Set<string>();
+  for (const [index, value] of rawTags.entries()) {
+    if (typeof value !== "string") throw new TypeError(`Query tag ${index + 1} must be a string.`);
+    const bytes = boundedTextBytes(
+      value,
+      MAX_QUERY_TEXT_UTF8_BYTES,
+      `Query tag ${index + 1}`,
+    );
+    addQueryText(budget, bytes);
+    tags.add(normalizedTag(value));
+  }
+  const sort = prepareSort(options.sort, budget);
+  return {
+    filters,
+    tags,
+    sort,
+    direction: options.direction ?? "asc",
+    ...(options.limit === undefined ? {} : { limit: options.limit }),
+  };
+}
+
+/** Validate all metadata-query work bounds without scanning a vault. */
+export function validateQueryOptions(options: QueryOptions = {}): void {
+  prepareQueryOptions(options);
+}
+
+function compareNormalizedText(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
 }
 
 function compareText(left: string, right: string): number {
-  const normalizedLeft = normalizedString(left);
-  const normalizedRight = normalizedString(right);
-  if (normalizedLeft < normalizedRight) return -1;
-  if (normalizedLeft > normalizedRight) return 1;
-  return 0;
+  return compareNormalizedText(normalizedString(left), normalizedString(right));
 }
 
 function canonicalMetadata(value: MetadataValue): string {
@@ -172,56 +449,66 @@ function canonicalMetadata(value: MetadataValue): string {
     .join(",")}}`;
 }
 
-function metadataRank(value: MetadataValue): number {
-  if (value === null) return 0;
-  if (typeof value === "boolean") return 1;
-  if (typeof value === "number") return 2;
-  if (typeof value === "string") return 3;
-  if (isMetadataArray(value)) return 4;
-  return 5;
-}
+type SortKey =
+  | { readonly found: false }
+  | {
+      readonly found: true;
+      readonly rank: number;
+      readonly number?: number;
+      readonly text?: string;
+    };
 
-function compareMetadata(left: MetadataValue, right: MetadataValue): number {
-  const rank = metadataRank(left) - metadataRank(right);
-  if (rank !== 0) return rank;
-  if (typeof left === "number" && typeof right === "number") return left - right;
-  if (typeof left === "boolean" && typeof right === "boolean") {
-    return Number(left) - Number(right);
+function metadataSortKey(value: MetadataValue): SortKey {
+  if (value === null) return { found: true, rank: 0 };
+  if (typeof value === "boolean") {
+    return { found: true, rank: 1, number: Number(value) };
   }
-  if (typeof left === "string" && typeof right === "string") return compareText(left, right);
-  return compareText(canonicalMetadata(left), canonicalMetadata(right));
+  if (typeof value === "number") return { found: true, rank: 2, number: value };
+  if (typeof value === "string") {
+    return { found: true, rank: 3, text: normalizedString(value) };
+  }
+  return {
+    found: true,
+    rank: isMetadataArray(value) ? 4 : 5,
+    text: normalizedString(canonicalMetadata(value)),
+  };
 }
 
-type SortValue =
-  | { readonly found: true; readonly value: MetadataValue }
-  | { readonly found: false };
-
-function rowSortValue(row: QueryRow, sort: QuerySort): SortValue {
-  if (sort.kind === "metadata") return metadataAtPath(row.metadata, sort.path);
+function rowSortKey(
+  row: QueryRow,
+  sort: PreparedQuerySort,
+  keyCache: MetadataKeyCache,
+): SortKey {
+  if (sort.kind === "metadata") {
+    const lookup = metadataAtPreparedPath(row.metadata, sort.path, keyCache);
+    return lookup.found ? metadataSortKey(lookup.value) : { found: false };
+  }
   switch (sort.field) {
     case "title":
-      return { found: true, value: row.title };
+      return { found: true, rank: 3, text: normalizedString(row.title) };
     case "path":
-      return { found: true, value: row.path };
+      return { found: true, rank: 3, text: normalizedString(row.path) };
     case "inbound":
-      return { found: true, value: row.inboundContextualCount };
+      return { found: true, rank: 2, number: row.inboundContextualCount };
     case "outbound":
-      return { found: true, value: row.outboundContextualCount };
+      return { found: true, rank: 2, number: row.outboundContextualCount };
   }
 }
 
-function compareRows(
-  left: QueryRow,
-  right: QueryRow,
-  sort: QuerySort,
+function compareSortKeys(
+  left: SortKey,
+  right: SortKey,
   direction: QueryDirection,
 ): number {
-  const leftValue = rowSortValue(left, sort);
-  const rightValue = rowSortValue(right, sort);
-  if (!leftValue.found && !rightValue.found) return 0;
-  if (!leftValue.found) return 1;
-  if (!rightValue.found) return -1;
-  const compared = compareMetadata(leftValue.value, rightValue.value);
+  if (!left.found && !right.found) return 0;
+  if (!left.found) return 1;
+  if (!right.found) return -1;
+  const rank = left.rank - right.rank;
+  const compared = rank !== 0
+    ? rank
+    : left.number !== undefined && right.number !== undefined
+      ? left.number - right.number
+      : compareNormalizedText(left.text ?? "", right.text ?? "");
   return direction === "desc" ? -compared : compared;
 }
 
@@ -248,13 +535,8 @@ export function queryVault(
   analysis: VaultAnalysis,
   options: QueryOptions = {},
 ): readonly QueryRow[] {
-  const filters = options.filters ?? [];
-  const tags = options.tags ?? [];
-  const sort = options.sort ?? { kind: "builtin", field: "path" };
-  const direction = options.direction ?? "asc";
-  if (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit < 0)) {
-    throw new RangeError("Query limit must be a non-negative safe integer.");
-  }
+  const prepared = prepareQueryOptions(options);
+  const keyCache: MetadataKeyCache = new WeakMap();
 
   const connections = new Map(
     analysis.noteConnections.map((connection) => [connection.id, connection]),
@@ -263,14 +545,22 @@ export function queryVault(
     .map((note, index) => ({ index, row: queryRow(note, connections.get(note.id)) }))
     .filter((candidate): candidate is { readonly index: number; readonly row: QueryRow } =>
       candidate.row !== null)
-    .filter(({ row }) =>
-      filters.every((filter) => matchesFilter(row, filter))
-      && matchesTags(row, tags));
+    .filter(({ row }) => {
+      const stringCache = new Map<string, string>();
+      return prepared.filters.every((filter) =>
+        matchesFilter(row, filter, keyCache, stringCache))
+        && matchesTags(row, prepared.tags);
+    })
+    .map((candidate) => ({
+      ...candidate,
+      pathKey: normalizedString(candidate.row.path),
+      sortKey: rowSortKey(candidate.row, prepared.sort, keyCache),
+    }));
 
   const sorted = indexed.toSorted((left, right) =>
-    compareRows(left.row, right.row, sort, direction)
-    || compareText(left.row.path, right.row.path)
+    compareSortKeys(left.sortKey, right.sortKey, prepared.direction)
+    || compareNormalizedText(left.pathKey, right.pathKey)
     || left.index - right.index);
   const rows = sorted.map(({ row }) => row);
-  return options.limit === undefined ? rows : rows.slice(0, options.limit);
+  return prepared.limit === undefined ? rows : rows.slice(0, prepared.limit);
 }

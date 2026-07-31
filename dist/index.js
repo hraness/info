@@ -12,16 +12,22 @@ import {
 } from "./index-3v2z4f0q.js";
 import {
   createRepresentativeRetrievalFixture,
+  createSyntheticRankFusionFixture,
   evaluateRanking,
   evaluateRetrievalBenchmark
-} from "./index-q5jk46m1.js";
+} from "./index-qft1h1n8.js";
 import {
   initVault
 } from "./index-awz7cev4.js";
 import {
+  DEFAULT_SEARCH_RESULTS,
+  MAX_SEARCH_CANDIDATES,
+  MAX_SEARCH_NOTE_REFERENCE_BYTES,
+  MAX_SEARCH_RELATED_SEEDS,
+  MAX_SEARCH_RESULTS,
   openKnowledgeBase,
   packSearchContext
-} from "./index-e2p9924f.js";
+} from "./index-wjyf6bx7.js";
 import {
   MAX_NOTE_UTF8_BYTES,
   MAX_SCANNED_NOTES,
@@ -37,21 +43,26 @@ import {
   scanVault,
   searchSemanticVault,
   semanticDatabasePath
-} from "./index-hfdajx5y.js";
+} from "./index-6m6y70a2.js";
 import {
   GitHistoryError,
   MAX_GIT_HISTORY_COMMITS,
   MAX_GIT_HISTORY_NOTES,
   MAX_GIT_HISTORY_OUTPUT_BYTES,
   MAX_GIT_HISTORY_TIMEOUT_MS,
+  MAX_GIT_NOTE_IDS_UTF8_BYTES,
+  MAX_GIT_NOTE_ID_UTF8_BYTES,
   MAX_GIT_PATHS_PER_COMMIT,
   MAX_GIT_PATH_OBSERVATIONS,
   gitHistoryForNotes,
   indexGitHistory,
   parseGitHistoryOutput,
   runGitCommand,
-  searchGitHistory
-} from "./index-7w7gqq0f.js";
+  searchGitHistory,
+  validateGitHistoryForNotesOptions,
+  validateGitHistoryForNotesRequest,
+  validateSearchGitHistoryOptions
+} from "./index-1gwbassd.js";
 import {
   DEFAULT_PERCOLATION_LIMIT,
   DEFAULT_PERCOLATION_MIN_SUPPORT,
@@ -102,10 +113,13 @@ import {
   removeNoteRelation
 } from "./index-2fr3hf9q.js";
 import {
+  MAX_SEARCH_QUERY_BYTES,
+  MAX_SEARCH_QUERY_TERMS,
   buildGraphContext,
   fuseRankedCandidates,
-  searchExactVault
-} from "./index-rn4d2mpa.js";
+  searchExactVault,
+  validateSearchQuery
+} from "./index-ahw5amhf.js";
 import {
   MAX_NAVIGATION_INDEXED_CONNECTIONS,
   MAX_NAVIGATION_RETURNED_CONNECTIONS,
@@ -113,9 +127,16 @@ import {
   navigateLinks
 } from "./index-d13v9ckt.js";
 import {
+  MAX_QUERY_FILTERS,
+  MAX_QUERY_METADATA_PATH_SEGMENTS,
+  MAX_QUERY_METADATA_PATH_UTF8_BYTES,
+  MAX_QUERY_OPTIONS_UTF8_BYTES,
+  MAX_QUERY_TAGS,
+  MAX_QUERY_TEXT_UTF8_BYTES,
   metadataAtPath,
-  queryVault
-} from "./index-m4bexhht.js";
+  queryVault,
+  validateQueryOptions
+} from "./index-7gsmq0jt.js";
 import {
   MAX_ANALYZED_NOTES,
   MAX_CONNECTION_OBSERVATIONS,
@@ -138,6 +159,11 @@ import {
 export {
   workflowFromUnknown,
   wikiLinks,
+  validateSearchQuery,
+  validateSearchGitHistoryOptions,
+  validateQueryOptions,
+  validateGitHistoryForNotesRequest,
+  validateGitHistoryForNotesOptions,
   semanticDatabasePath,
   searchableMarkdown,
   searchSemanticVault,
@@ -184,6 +210,7 @@ export {
   defineWorkflow,
   defaultIgnoredDirectories,
   defaultAgentGuideIgnoredDirectories,
+  createSyntheticRankFusionFixture,
   createRepresentativeRetrievalFixture,
   createNote,
   createConceptNote,
@@ -217,8 +244,20 @@ export {
   MAX_WORKFLOW_NODES,
   MAX_WORKFLOW_CONCURRENCY,
   MAX_VAULT_UTF8_BYTES,
+  MAX_SEARCH_RESULTS,
+  MAX_SEARCH_RELATED_SEEDS,
+  MAX_SEARCH_QUERY_TERMS,
+  MAX_SEARCH_QUERY_BYTES,
+  MAX_SEARCH_NOTE_REFERENCE_BYTES,
+  MAX_SEARCH_CANDIDATES,
   MAX_SCOPED_PERCOLATION_MENTION_PAIRS,
   MAX_SCANNED_NOTES,
+  MAX_QUERY_TEXT_UTF8_BYTES,
+  MAX_QUERY_TAGS,
+  MAX_QUERY_OPTIONS_UTF8_BYTES,
+  MAX_QUERY_METADATA_PATH_UTF8_BYTES,
+  MAX_QUERY_METADATA_PATH_SEGMENTS,
+  MAX_QUERY_FILTERS,
   MAX_PERCOLATION_NOTES,
   MAX_PERCOLATION_MENTION_PAIRS,
   MAX_PERCOLATION_MENTIONS,
@@ -232,6 +271,8 @@ export {
   MAX_GIT_WORKFLOW_CONCURRENCY,
   MAX_GIT_PATH_OBSERVATIONS,
   MAX_GIT_PATHS_PER_COMMIT,
+  MAX_GIT_NOTE_ID_UTF8_BYTES,
+  MAX_GIT_NOTE_IDS_UTF8_BYTES,
   MAX_GIT_HISTORY_TIMEOUT_MS,
   MAX_GIT_HISTORY_OUTPUT_BYTES,
   MAX_GIT_HISTORY_NOTES,
@@ -241,6 +282,7 @@ export {
   InvalidCanonicalNoteIdError,
   GitHistoryError,
   DEFAULT_WORKFLOW_OUTPUT_BYTES,
+  DEFAULT_SEARCH_RESULTS,
   DEFAULT_PERCOLATION_MIN_SUPPORT,
   DEFAULT_PERCOLATION_LIMIT,
   AgentContextRepositoryPathError

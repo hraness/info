@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -8,15 +8,67 @@ import { findKbPackageRoot } from "./package-root.js";
 import type { Platform } from "./platforms.js";
 
 export const expectedBunVersion = "1.3.14" as const;
+export const expectedQmdVersion = "2.5.3" as const;
+export const expectedSqliteVecVersion = "0.1.9" as const;
+export const expectedNodeLlamaCppVersion = "3.18.1" as const;
+
+const expectedBetterSqliteVersion = "12.10.0" as const;
+const homebrewSqliteLibraryPaths = [
+  "/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib",
+  "/usr/local/opt/sqlite/lib/libsqlite3.dylib",
+] as const;
 
 export type CapabilityStatus = "ready" | "partial" | "unavailable";
 
 export type DependencyReport = {
-  readonly name: "defuddle" | "agent-browser" | "@steipete/sweet-cookie";
+  readonly name: "defuddle" | "agent-browser" | "@steipete/sweet-cookie" | "@tobilu/qmd";
   readonly expectedVersion: string;
   readonly declaredVersion: string | null;
   readonly installedVersion: string | null;
   readonly status: CapabilityStatus;
+};
+
+export type SearchReadinessReport = {
+  readonly runtime: "bun" | "node";
+  readonly platform: NodeJS.Platform;
+  readonly architecture: NodeJS.Architecture;
+  /** Keyword-only QMD search does not initialize or require an embedding model. */
+  readonly keywordOnly: {
+    readonly status: CapabilityStatus;
+    readonly modelRequired: false;
+  };
+  /** Static prerequisites only. Doctor never loads sqlite-vec or an embedding model. */
+  readonly semanticPrerequisites: {
+    readonly status: CapabilityStatus;
+    readonly sqlite: {
+      readonly provider: "bun-built-in" | "homebrew" | "better-sqlite3";
+      readonly expectedVersion: string | null;
+      readonly installedVersion: string | null;
+      readonly searchedLibraryPaths: readonly string[];
+      readonly selectedLibraryPath: string | null;
+      readonly nativeBindingPresent: boolean | null;
+      readonly status: CapabilityStatus;
+    };
+    readonly sqliteVec: {
+      readonly expectedVersion: typeof expectedSqliteVecVersion;
+      readonly installedVersion: string | null;
+      readonly nativePackageName: string | null;
+      readonly nativeInstalledVersion: string | null;
+      readonly nativeBinaryPresent: boolean | null;
+      readonly status: CapabilityStatus;
+    };
+    readonly embeddingRuntime: {
+      readonly expectedVersion: typeof expectedNodeLlamaCppVersion;
+      readonly installedVersion: string | null;
+      readonly nativePackageName: string | null;
+      readonly nativeInstalledVersion: string | null;
+      readonly nativeBinaryPresent: boolean | null;
+      readonly status: CapabilityStatus;
+    };
+    readonly embeddingModel: {
+      readonly cacheStatus: "not-inspected";
+    };
+  };
 };
 
 export type BrowserReport = {
@@ -33,7 +85,8 @@ export type ToolReport = {
 };
 
 export type DoctorReport = {
-  readonly schemaVersion: 1;
+  /** Schema 2 adds `search`; all schema-1 fields retain their names and meanings. */
+  readonly schemaVersion: 2;
   readonly generatedAt: string;
   readonly bun: {
     readonly expectedVersion: typeof expectedBunVersion;
@@ -49,6 +102,7 @@ export type DoctorReport = {
   /** Display names only. Cookie stores and keychains are never inspected by doctor. */
   readonly chromeProfileNames: readonly string[];
   readonly tools: readonly ToolReport[];
+  readonly search: SearchReadinessReport;
   readonly warnings: readonly string[];
 };
 
@@ -72,10 +126,13 @@ export type DoctorOptions = {
   readonly packageRoot?: string;
   readonly homeDirectory?: string;
   readonly platform?: NodeJS.Platform;
+  readonly architecture?: NodeJS.Architecture;
+  readonly runtime?: "bun" | "node";
   readonly currentBunVersion?: string;
   readonly now?: () => Date;
   readonly exists?: (path: string) => boolean;
   readonly readText?: (path: string) => string;
+  readonly realpath?: (path: string) => string;
   readonly which?: (executable: string) => string | null;
   readonly run?: DiagnosticCommandRunner;
 };
@@ -86,11 +143,13 @@ const dependencyVersions = {
   "defuddle": "0.19.1",
   "agent-browser": "0.32.3",
   "@steipete/sweet-cookie": "0.4.0",
+  "@tobilu/qmd": expectedQmdVersion,
 } as const satisfies Readonly<Record<DependencyReport["name"], string>>;
 const dependencyNames: readonly DependencyReport["name"][] = [
   "defuddle",
   "agent-browser",
   "@steipete/sweet-cookie",
+  "@tobilu/qmd",
 ];
 
 const isRecord = (value: unknown): value is JsonRecord =>
@@ -178,12 +237,12 @@ function dependencyVersion(manifest: JsonRecord | null, name: string): string | 
   return null;
 }
 
-function packageDirectory(name: DependencyReport["name"]): readonly string[] {
+function packageDirectory(name: string): readonly string[] {
   return name.startsWith("@") ? name.split("/") : [name];
 }
 
 function installedDependencyDirectory(
-  name: DependencyReport["name"],
+  name: string,
   packageRoot: string,
   readText: (path: string) => string,
 ): { readonly directory: string; readonly manifest: JsonRecord } | null {
@@ -198,6 +257,235 @@ function installedDependencyDirectory(
     directory = parent;
   }
   return null;
+}
+
+function installedPackageVersion(
+  name: string,
+  fromDirectory: string,
+  readText: (path: string) => string,
+): { readonly directory: string; readonly version: string | null } | null {
+  const installed = installedDependencyDirectory(name, fromDirectory, readText);
+  if (installed === null) return null;
+  return {
+    directory: installed.directory,
+    version: typeof installed.manifest.version === "string" ? installed.manifest.version : null,
+  };
+}
+
+function capabilityStatus(statuses: readonly CapabilityStatus[]): CapabilityStatus {
+  if (statuses.some((status) => status === "unavailable")) return "unavailable";
+  return statuses.every((status) => status === "ready") ? "ready" : "partial";
+}
+
+function canonicalDirectory(path: string, realpath: (path: string) => string): string {
+  try {
+    return realpath(path);
+  } catch {
+    return path;
+  }
+}
+
+function nativeSqliteVecPackage(
+  platform: NodeJS.Platform,
+  architecture: NodeJS.Architecture,
+): { readonly name: string; readonly binary: string } | null {
+  if (platform === "darwin" && (architecture === "arm64" || architecture === "x64")) {
+    return { name: `sqlite-vec-darwin-${architecture}`, binary: "vec0.dylib" };
+  }
+  if (platform === "linux" && (architecture === "arm64" || architecture === "x64")) {
+    return { name: `sqlite-vec-linux-${architecture}`, binary: "vec0.so" };
+  }
+  if (platform === "win32" && architecture === "x64") {
+    return { name: "sqlite-vec-windows-x64", binary: "vec0.dll" };
+  }
+  return null;
+}
+
+function nativeNodeLlamaCppPackage(
+  platform: NodeJS.Platform,
+  architecture: NodeJS.Architecture,
+): { readonly name: string; readonly binary: string } | null {
+  if (platform === "darwin" && architecture === "arm64") {
+    return {
+      name: "@node-llama-cpp/mac-arm64-metal",
+      binary: join("bins", "mac-arm64-metal", "llama-addon.node"),
+    };
+  }
+  if (platform === "darwin" && architecture === "x64") {
+    return {
+      name: "@node-llama-cpp/mac-x64",
+      binary: join("bins", "mac-x64", "llama-addon.node"),
+    };
+  }
+  if (platform === "linux" && architecture === "arm64") {
+    return {
+      name: "@node-llama-cpp/linux-arm64",
+      binary: join("bins", "linux-arm64", "llama-addon.node"),
+    };
+  }
+  if (platform === "linux" && architecture === "arm") {
+    return {
+      name: "@node-llama-cpp/linux-armv7l",
+      binary: join("bins", "linux-armv7l", "llama-addon.node"),
+    };
+  }
+  if (platform === "linux" && architecture === "x64") {
+    return {
+      name: "@node-llama-cpp/linux-x64",
+      binary: join("bins", "linux-x64", "llama-addon.node"),
+    };
+  }
+  if (platform === "win32" && architecture === "arm64") {
+    return {
+      name: "@node-llama-cpp/win-arm64",
+      binary: join("bins", "win-arm64", "llama-addon.node"),
+    };
+  }
+  if (platform === "win32" && architecture === "x64") {
+    return {
+      name: "@node-llama-cpp/win-x64",
+      binary: join("bins", "win-x64", "llama-addon.node"),
+    };
+  }
+  return null;
+}
+
+function inspectSearchReadiness(
+  dependencies: readonly DependencyReport[],
+  packageRoot: string,
+  runtime: SearchReadinessReport["runtime"],
+  platform: NodeJS.Platform,
+  architecture: NodeJS.Architecture,
+  currentBunVersion: string,
+  exists: (path: string) => boolean,
+  readText: (path: string) => string,
+  realpath: (path: string) => string,
+): SearchReadinessReport {
+  const qmd = dependencies.find(({ name }) => name === "@tobilu/qmd");
+  const qmdStatus = qmd?.status ?? "unavailable";
+  const runtimeStatus: CapabilityStatus = runtime === "bun" && currentBunVersion !== expectedBunVersion
+    ? "partial"
+    : "ready";
+  const installedQmdDirectory = installedDependencyDirectory("@tobilu/qmd", packageRoot, readText)?.directory;
+  const qmdDirectory = installedQmdDirectory === undefined
+    ? packageRoot
+    : canonicalDirectory(installedQmdDirectory, realpath);
+
+  let sqlite: SearchReadinessReport["semanticPrerequisites"]["sqlite"];
+  if (runtime === "bun" && platform === "darwin") {
+    const selectedLibraryPath = homebrewSqliteLibraryPaths.find((path) => exists(path)) ?? null;
+    sqlite = {
+      provider: "homebrew",
+      expectedVersion: null,
+      installedVersion: null,
+      searchedLibraryPaths: homebrewSqliteLibraryPaths,
+      selectedLibraryPath,
+      nativeBindingPresent: null,
+      status: selectedLibraryPath === null ? "unavailable" : "ready",
+    };
+  } else if (runtime === "bun") {
+    sqlite = {
+      provider: "bun-built-in",
+      expectedVersion: null,
+      installedVersion: null,
+      searchedLibraryPaths: [],
+      selectedLibraryPath: null,
+      nativeBindingPresent: null,
+      status: "ready",
+    };
+  } else {
+    const installed = installedPackageVersion("better-sqlite3", qmdDirectory, readText);
+    const nativeBindingPresent = installed === null
+      ? false
+      : exists(join(installed.directory, "build", "Release", "better_sqlite3.node"));
+    sqlite = {
+      provider: "better-sqlite3",
+      expectedVersion: expectedBetterSqliteVersion,
+      installedVersion: installed?.version ?? null,
+      searchedLibraryPaths: [],
+      selectedLibraryPath: null,
+      nativeBindingPresent,
+      status: installed === null
+        ? "unavailable"
+        : installed.version === expectedBetterSqliteVersion && nativeBindingPresent
+          ? "ready"
+          : "partial",
+    };
+  }
+
+  const sqliteVecPackage = installedPackageVersion("sqlite-vec", qmdDirectory, readText);
+  const nativeDefinition = nativeSqliteVecPackage(platform, architecture);
+  const nativePackage = nativeDefinition === null
+    ? null
+    : installedPackageVersion(nativeDefinition.name, qmdDirectory, readText);
+  const nativeBinaryPresent = nativeDefinition === null || nativePackage === null
+    ? null
+    : exists(join(nativePackage.directory, nativeDefinition.binary));
+  const sqliteVecStatus: CapabilityStatus = nativeDefinition === null || sqliteVecPackage === null || nativePackage === null
+    ? "unavailable"
+    : sqliteVecPackage.version === expectedSqliteVecVersion
+      && nativePackage.version === expectedSqliteVecVersion
+      && nativeBinaryPresent === true
+      ? "ready"
+      : "partial";
+  const nodeLlamaCpp = installedPackageVersion("node-llama-cpp", qmdDirectory, readText);
+  const canonicalNodeLlamaCppDirectory = nodeLlamaCpp === null
+    ? qmdDirectory
+    : canonicalDirectory(nodeLlamaCpp.directory, realpath);
+  const nativeEmbeddingDefinition = nativeNodeLlamaCppPackage(platform, architecture);
+  const nativeEmbeddingPackage = nativeEmbeddingDefinition === null
+    ? null
+    : installedPackageVersion(nativeEmbeddingDefinition.name, canonicalNodeLlamaCppDirectory, readText);
+  const nativeEmbeddingBinaryPresent = nativeEmbeddingDefinition === null || nativeEmbeddingPackage === null
+    ? null
+    : exists(join(nativeEmbeddingPackage.directory, nativeEmbeddingDefinition.binary));
+  const embeddingRuntimeStatus: CapabilityStatus = nodeLlamaCpp === null
+    ? "unavailable"
+    : nativeEmbeddingDefinition === null || nativeEmbeddingPackage === null
+      ? "partial"
+      : nodeLlamaCpp.version === expectedNodeLlamaCppVersion
+        && nativeEmbeddingPackage.version === expectedNodeLlamaCppVersion
+        && nativeEmbeddingBinaryPresent === true
+        ? "ready"
+        : "partial";
+  const keywordStatus = capabilityStatus([
+    qmdStatus,
+    runtimeStatus,
+    ...(runtime === "node" ? [sqlite.status] : []),
+  ]);
+
+  return {
+    runtime,
+    platform,
+    architecture,
+    keywordOnly: {
+      status: keywordStatus,
+      modelRequired: false,
+    },
+    semanticPrerequisites: {
+      status: capabilityStatus([keywordStatus, sqlite.status, sqliteVecStatus, embeddingRuntimeStatus]),
+      sqlite,
+      sqliteVec: {
+        expectedVersion: expectedSqliteVecVersion,
+        installedVersion: sqliteVecPackage?.version ?? null,
+        nativePackageName: nativeDefinition?.name ?? null,
+        nativeInstalledVersion: nativePackage?.version ?? null,
+        nativeBinaryPresent,
+        status: sqliteVecStatus,
+      },
+      embeddingRuntime: {
+        expectedVersion: expectedNodeLlamaCppVersion,
+        installedVersion: nodeLlamaCpp?.version ?? null,
+        nativePackageName: nativeEmbeddingDefinition?.name ?? null,
+        nativeInstalledVersion: nativeEmbeddingPackage?.version ?? null,
+        nativeBinaryPresent: nativeEmbeddingBinaryPresent,
+        status: embeddingRuntimeStatus,
+      },
+      embeddingModel: {
+        cacheStatus: "not-inspected",
+      },
+    },
+  };
 }
 
 function reportDependency(
@@ -391,9 +679,12 @@ export async function inspectClipEnvironment(options: DoctorOptions = {}): Promi
   const packageRoot = resolve(options.packageRoot ?? findKbPackageRoot());
   const homeDirectory = options.homeDirectory ?? homedir();
   const platform = options.platform ?? process.platform;
+  const architecture = options.architecture ?? process.arch;
+  const runtime = options.runtime ?? (process.versions.bun === undefined ? "node" : "bun");
   const exists = options.exists ?? existsSync;
   const readText = options.readText ?? ((path: string) => readFileSync(path, "utf8"));
-  const which = options.which ?? ((name: string) => Bun.which(name));
+  const realpath = options.realpath ?? realpathSync;
+  const which = options.which ?? ((name: string) => typeof Bun === "undefined" ? null : Bun.which(name));
   const run = options.run ?? runDiagnosticCommand;
   const rootManifest = readJsonRecord(join(packageRoot, "package.json"), readText);
   const dependencies = dependencyNames.map((name) => reportDependency(name, packageRoot, rootManifest, readText));
@@ -483,7 +774,18 @@ export async function inspectClipEnvironment(options: DoctorOptions = {}): Promi
   ];
 
   const warnings: string[] = [];
-  const currentBunVersion = options.currentBunVersion ?? Bun.version;
+  const currentBunVersion = options.currentBunVersion ?? (typeof Bun === "undefined" ? "not running under Bun" : Bun.version);
+  const search = inspectSearchReadiness(
+    dependencies,
+    packageRoot,
+    runtime,
+    platform,
+    architecture,
+    currentBunVersion,
+    exists,
+    readText,
+    realpath,
+  );
   if (currentBunVersion !== expectedBunVersion) {
     warnings.push(`Use Bun ${expectedBunVersion}; current runtime is ${currentBunVersion}.`);
   }
@@ -524,9 +826,36 @@ export async function inspectClipEnvironment(options: DoctorOptions = {}): Promi
   } else if (tesseractVersion === null) {
     warnings.push("Tesseract was found, but its version could not be verified; kb pdf can attempt OCR with a degraded tool report.");
   }
+  if (search.keywordOnly.status !== "ready") {
+    warnings.push("QMD keyword-only search is not ready; exact Markdown search remains available.");
+  }
+  const keywordFallback = search.keywordOnly.status === "ready"
+    ? " Keyword-only QMD search remains available."
+    : "";
+  if (
+    runtime === "bun"
+    && platform === "darwin"
+    && search.semanticPrerequisites.sqlite.status !== "ready"
+  ) {
+    warnings.push(`Install Homebrew SQLite with \`brew install sqlite\`; semantic and hybrid vector retrieval are unavailable.${keywordFallback}`);
+  } else if (runtime === "node" && search.semanticPrerequisites.sqlite.status !== "ready") {
+    warnings.push(`Reinstall @hraness/kb with Node so better-sqlite3 ${expectedBetterSqliteVersion} and its native binding are available.${keywordFallback}`);
+  }
+  if (search.semanticPrerequisites.sqliteVec.status !== "ready") {
+    const nativePackage = search.semanticPrerequisites.sqliteVec.nativePackageName;
+    warnings.push(nativePackage === null
+      ? `sqlite-vec ${expectedSqliteVecVersion} has no native package for ${platform}-${architecture}; semantic and hybrid vector retrieval are unavailable.${keywordFallback}`
+      : `Reinstall @hraness/kb so sqlite-vec ${expectedSqliteVecVersion} and ${nativePackage} ${expectedSqliteVecVersion} are installed; semantic and hybrid vector retrieval are unavailable.${keywordFallback}`);
+  }
+  if (search.semanticPrerequisites.embeddingRuntime.status !== "ready") {
+    const nativePackage = search.semanticPrerequisites.embeddingRuntime.nativePackageName;
+    warnings.push(nativePackage === null
+      ? `node-llama-cpp ${expectedNodeLlamaCppVersion} has no prebuilt package for ${platform}-${architecture}; semantic and hybrid vector retrieval require a compatible local embedding runtime.${keywordFallback}`
+      : `Reinstall @hraness/kb with Bun so node-llama-cpp ${expectedNodeLlamaCppVersion} and ${nativePackage} ${expectedNodeLlamaCppVersion} with its native binary are installed; semantic and hybrid vector retrieval are not ready.${keywordFallback}`);
+  }
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: (options.now ?? (() => new Date()))().toISOString(),
     bun: {
       expectedVersion: expectedBunVersion,
@@ -541,25 +870,49 @@ export async function inspectClipEnvironment(options: DoctorOptions = {}): Promi
     browsers,
     chromeProfileNames: agentBrowser.profiles,
     tools,
+    search,
     warnings,
   };
 }
 
 function versionSummary(report: DependencyReport): string {
+  const declared = report.declaredVersion ?? "not declared";
   const installed = report.installedVersion ?? "not installed";
-  return `${report.name}: ${report.status} (installed ${installed}; expected ${report.expectedVersion})`;
+  return `${report.name}: ${report.status} (declared ${declared}; installed ${installed}; expected ${report.expectedVersion})`;
 }
 
 /** Render a stable, secret-free report suitable for a terminal. */
 export function renderDoctorReport(report: DoctorReport): string {
+  const sqlite = report.search.semanticPrerequisites.sqlite;
+  const sqliteDetail = sqlite.provider === "homebrew"
+    ? sqlite.selectedLibraryPath === null
+      ? `not found (checked ${sqlite.searchedLibraryPaths.join(", ")})`
+      : sqlite.selectedLibraryPath
+    : sqlite.provider === "better-sqlite3"
+      ? `${sqlite.installedVersion ?? "not installed"}; native binding ${sqlite.nativeBindingPresent === true ? "present" : "not found"}`
+      : "provided by Bun";
+  const sqliteVec = report.search.semanticPrerequisites.sqliteVec;
+  const nativePackage = sqliteVec.nativePackageName === null
+    ? `unsupported for ${report.search.platform}-${report.search.architecture}`
+    : `${sqliteVec.nativePackageName} ${sqliteVec.nativeInstalledVersion ?? "not installed"}; native binary ${sqliteVec.nativeBinaryPresent === true ? "present" : "not found"}`;
+  const embeddingRuntime = report.search.semanticPrerequisites.embeddingRuntime;
+  const nativeEmbeddingRuntime = embeddingRuntime.nativePackageName === null
+    ? `unsupported for ${report.search.platform}-${report.search.architecture}`
+    : `${embeddingRuntime.nativePackageName} ${embeddingRuntime.nativeInstalledVersion ?? "not installed"}; native binary ${embeddingRuntime.nativeBinaryPresent === true ? "present" : "not found"}`;
   const lines = [
-    "KB ingestion environment",
+    "KB environment",
     `Bun: ${report.bun.status} (${report.bun.currentVersion}; expected ${report.bun.expectedVersion})`,
     ...report.dependencies.map(versionSummary),
     `agent-browser derive-client: ${report.deriveClient.status}`,
     ...report.browsers.map((browser) => `${browser.name}: ${browser.status}${browser.paths.length === 0 ? "" : ` (${browser.paths.join(", ")})`}`),
     `Chrome profiles: ${report.chromeProfileNames.length === 0 ? "none discovered" : report.chromeProfileNames.join(", ")}`,
     ...report.tools.map((tool) => `${tool.name}: ${tool.status}${tool.version === null ? "" : ` (${tool.version})`}${tool.path === null ? "" : ` at ${tool.path}`}`),
+    `QMD keyword-only search: ${report.search.keywordOnly.status} (embedding model not required)`,
+    `Semantic prerequisites: ${report.search.semanticPrerequisites.status}`,
+    `SQLite extension support: ${sqlite.status} (${sqlite.provider}: ${sqliteDetail})`,
+    `sqlite-vec: ${sqliteVec.status} (installed ${sqliteVec.installedVersion ?? "not installed"}; expected ${sqliteVec.expectedVersion}; ${nativePackage})`,
+    `Embedding runtime: ${embeddingRuntime.status} (node-llama-cpp ${embeddingRuntime.installedVersion ?? "not installed"}; expected ${embeddingRuntime.expectedVersion}; ${nativeEmbeddingRuntime})`,
+    "Embedding model cache: not inspected; first semantic use may download the configured local model",
     "Cookie/keychain probe: not performed",
   ];
   if (report.warnings.length > 0) {

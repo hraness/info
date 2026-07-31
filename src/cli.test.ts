@@ -8,7 +8,17 @@ import {
   agentContextNotePath,
 } from "./agent-context.js";
 import { main, parseArguments } from "./cli.js";
+import {
+  MAX_QUERY_FILTERS,
+  MAX_QUERY_METADATA_PATH_UTF8_BYTES,
+  MAX_QUERY_TAGS,
+  MAX_QUERY_TEXT_UTF8_BYTES,
+} from "./query.js";
 import type { KnowledgeBaseSession } from "./sdk.js";
+import {
+  MAX_SEARCH_NOTE_REFERENCE_BYTES,
+  MAX_SEARCH_RELATED_SEEDS,
+} from "./sdk.js";
 import { scanVault, type ScanVaultOptions } from "./vault.js";
 
 function captureOutput(): {
@@ -143,7 +153,7 @@ describe("kb argument parsing", () => {
         filters: [{ kind: "equals", path: "status", value: "active" }],
         tags: ["agents"],
         graph: { related: ["notes/context"], depth: 2 },
-        history: "auto",
+        history: false,
         limit: 4,
         candidateLimit: 40,
         minScore: 0.2,
@@ -159,9 +169,47 @@ describe("kb argument parsing", () => {
       ok: false,
       message: "--min-score must be a number from 0 through 1",
     });
+    expect(parseArguments(["search", "query", "--limit", "101"])).toEqual({
+      ok: false,
+      message: "--limit must be an integer from 1 through 100",
+    });
+    expect(parseArguments(["search", "query", "--candidate-limit", "501"])).toEqual({
+      ok: false,
+      message: "--candidate-limit must be an integer from 1 through 500",
+    });
+    expect(parseArguments(["search", "query", "--candidate-limit", "9"])).toEqual({
+      ok: false,
+      message: "Search candidate limit must be at least the result limit.",
+    });
+    expect(parseArguments([
+      "search",
+      "query",
+      "--limit",
+      "10",
+      "--candidate-limit",
+      "9",
+    ])).toEqual({
+      ok: false,
+      message: "Search candidate limit must be at least the result limit.",
+    });
+    expect(parseArguments([
+      "search",
+      "query",
+      "--mode",
+      "exact",
+      "--min-score",
+      "0.2",
+    ])).toEqual({
+      ok: false,
+      message: "Search minimum score applies only to hybrid, keyword, or semantic mode.",
+    });
     expect(parseArguments(["search", "query", "--require-history"])).toMatchObject({
       ok: true,
       value: { kind: "search", history: "required" },
+    });
+    expect(parseArguments(["search", "query", "--history"])).toMatchObject({
+      ok: true,
+      value: { kind: "search", history: "auto" },
     });
     expect(parseArguments([
       "search",
@@ -171,6 +219,30 @@ describe("kb argument parsing", () => {
     ])).toEqual({
       ok: false,
       message: "--no-history and --require-history cannot be used together",
+    });
+    expect(parseArguments(["search", "query", "--history", "--no-history"]))
+      .toEqual({
+        ok: false,
+        message: "--history and --no-history cannot be used together",
+      });
+    expect(parseArguments(["search", "query", "--history", "--require-history"]))
+      .toEqual({
+        ok: false,
+        message: "--history and --require-history cannot be used together",
+      });
+    expect(parseArguments([
+      "search",
+      "🧠".repeat((16 * 1_024 / 4) + 1),
+    ])).toEqual({
+      ok: false,
+      message: "Search query must be at most 16,384 UTF-8 bytes.",
+    });
+    expect(parseArguments([
+      "search",
+      Array.from({ length: 65 }, (_, index) => `term${index}`).join(" "),
+    ])).toEqual({
+      ok: false,
+      message: "Search query may contain at most 64 unique normalized terms.",
     });
   });
 
@@ -235,6 +307,66 @@ describe("kb argument parsing", () => {
         depth: 3,
         limit: 25,
       },
+    });
+  });
+
+  test("rejects unbounded metadata query options during argument parsing", () => {
+    const tags = Array.from(
+      { length: MAX_QUERY_TAGS + 1 },
+      () => ["--tag", "agents"],
+    ).flat();
+    expect(parseArguments(["list", ...tags])).toEqual({
+      ok: false,
+      message: `Query tags may contain at most ${MAX_QUERY_TAGS} entries.`,
+    });
+
+    const filters = Array.from(
+      { length: MAX_QUERY_FILTERS + 1 },
+      () => ["--has", "status"],
+    ).flat();
+    expect(parseArguments(["search", "memory", ...filters])).toEqual({
+      ok: false,
+      message: `Query filters may contain at most ${MAX_QUERY_FILTERS} entries.`,
+    });
+
+    expect(parseArguments([
+      "list",
+      "--sort",
+      `meta.${"x".repeat(MAX_QUERY_METADATA_PATH_UTF8_BYTES + 1)}`,
+    ])).toEqual({
+      ok: false,
+      message: "Query sort metadata path must be at most 1,024 UTF-8 bytes.",
+    });
+    expect(parseArguments([
+      "search",
+      "memory",
+      "--where",
+      `status=${"x".repeat(MAX_QUERY_TEXT_UTF8_BYTES + 1)}`,
+    ])).toEqual({
+      ok: false,
+      message: "Query filter 1 string value must be at most 16,384 UTF-8 bytes.",
+    });
+
+    const related = Array.from(
+      { length: MAX_SEARCH_RELATED_SEEDS + 1 },
+      () => ["--related", "notes/memory"],
+    ).flat();
+    expect(parseArguments(["search", "memory", ...related])).toEqual({
+      ok: false,
+      message: `Hybrid search accepts at most ${MAX_SEARCH_RELATED_SEEDS} explicit related-note seeds.`,
+    });
+    expect(parseArguments([
+      "search",
+      "memory",
+      "--related",
+      "x".repeat(MAX_SEARCH_NOTE_REFERENCE_BYTES + 1),
+    ])).toEqual({
+      ok: false,
+      message: "Search related-note seed 1 must be at most 16,384 UTF-8 bytes.",
+    });
+    expect(parseArguments(["search", "memory", "--related", " "])).toEqual({
+      ok: false,
+      message: "Search related-note seed 1 must not be empty.",
     });
   });
 
@@ -499,6 +631,27 @@ describe("kb argument parsing", () => {
 });
 
 describe("kb vault commands", () => {
+  test("rejects invalid search bounds before opening the knowledge base", async () => {
+    let opens = 0;
+    const openKnowledgeBase = (): Promise<KnowledgeBaseSession> => {
+      opens += 1;
+      return Promise.reject(new Error("must not open"));
+    };
+    const invalid = [
+      ["search", "query", "--limit", "101"],
+      ["search", "query", "--candidate-limit", "501"],
+      ["search", "query", "--candidate-limit", "9"],
+      ["search", "query", "--limit", "10", "--candidate-limit", "9"],
+      ["search", "query", "--mode", "exact", "--min-score", "0.2"],
+    ] as const;
+    for (const arguments_ of invalid) {
+      const output = captureOutput();
+      expect(await main(arguments_, output.output, { openKnowledgeBase })).toBe(2);
+      expect(output.stderr()).toStartWith("error:");
+    }
+    expect(opens).toBe(0);
+  });
+
   test("initializes, refreshes, checks, graphs, and derives backlinks without editing notes", async () => {
     const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-"));
     const vault = join(temporary, "vault");
@@ -1068,7 +1221,7 @@ describe("kb vault commands", () => {
           filters: [],
           tags: [],
           graph: {},
-          history: "auto",
+          history: false,
           limit: 3,
           minScore: 0.2,
         },

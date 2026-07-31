@@ -12,7 +12,7 @@ import {
   inspectClipEnvironment,
   renderAdapterCapabilities,
   renderDoctorReport
-} from "./index-m6gx7374.js";
+} from "./index-wty076xc.js";
 import {
   acquireBrowser,
   acquireCookieHttp,

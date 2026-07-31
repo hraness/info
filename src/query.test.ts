@@ -1,7 +1,17 @@
 import { describe, expect, test } from "bun:test";
 
 import { analyzeVault, parseNote } from "./graph.js";
-import { metadataAtPath, queryVault } from "./query.js";
+import {
+  MAX_QUERY_FILTERS,
+  MAX_QUERY_METADATA_PATH_SEGMENTS,
+  MAX_QUERY_METADATA_PATH_UTF8_BYTES,
+  MAX_QUERY_OPTIONS_UTF8_BYTES,
+  MAX_QUERY_TAGS,
+  MAX_QUERY_TEXT_UTF8_BYTES,
+  metadataAtPath,
+  queryVault,
+  validateQueryOptions,
+} from "./query.js";
 
 function fixture() {
   const notes = [
@@ -71,6 +81,13 @@ describe("metadata lookup", () => {
     });
     expect(metadataAtPath(alpha.metadata, "owner.missing")).toEqual({ found: false });
     expect(metadataAtPath(alpha.metadata, "owner..name")).toEqual({ found: false });
+  });
+
+  test("preserves exact-key precedence while rejecting ambiguous normalized keys", () => {
+    const metadata = { Owner: "Alice", owner: "Bob" };
+
+    expect(metadataAtPath(metadata, "owner")).toEqual({ found: true, value: "Bob" });
+    expect(metadataAtPath(metadata, "OWNER")).toEqual({ found: false });
   });
 });
 
@@ -151,5 +168,81 @@ describe("vault metadata queries", () => {
       "notes/zeta.md",
       "notes/missing.md",
     ]);
+  });
+
+  test("prepares compound metadata sort values once per row", () => {
+    let reads = 0;
+    const notes = ["delta", "alpha", "charlie", "bravo"].map((name, index) => {
+      const note = parseNote(`notes/${name}.md`, `# ${name}\n`);
+      const sortable: Record<string, string> = {};
+      Object.defineProperty(sortable, "value", {
+        enumerable: true,
+        get: () => {
+          reads += 1;
+          return String(4 - index);
+        },
+      });
+      return { ...note, metadata: { sortable } };
+    });
+
+    const rows = queryVault(notes, analyzeVault(notes), {
+      sort: { kind: "metadata", path: "sortable" },
+    });
+
+    expect(rows).toHaveLength(notes.length);
+    expect(reads).toBe(notes.length);
+  });
+
+  test("rejects metadata query work outside fixed count, path, and text budgets", () => {
+    const exists = { kind: "exists", path: "status" } as const;
+    expect(() => validateQueryOptions({
+      filters: Array.from({ length: MAX_QUERY_FILTERS + 1 }, () => exists),
+    })).toThrow(`at most ${MAX_QUERY_FILTERS} entries`);
+    expect(() => validateQueryOptions({
+      tags: Array.from({ length: MAX_QUERY_TAGS + 1 }, () => "tag"),
+    })).toThrow(`at most ${MAX_QUERY_TAGS} entries`);
+    expect(() => validateQueryOptions({
+      filters: [{ kind: "exists", path: "x".repeat(MAX_QUERY_METADATA_PATH_UTF8_BYTES + 1) }],
+    })).toThrow(`${MAX_QUERY_METADATA_PATH_UTF8_BYTES.toLocaleString("en-US")} UTF-8 bytes`);
+    expect(() => validateQueryOptions({
+      sort: {
+        kind: "metadata",
+        path: "x".repeat(MAX_QUERY_METADATA_PATH_UTF8_BYTES + 1),
+      },
+    })).toThrow("Query sort metadata path");
+    expect(() => validateQueryOptions({
+      filters: [{
+        kind: "exists",
+        path: Array.from({ length: MAX_QUERY_METADATA_PATH_SEGMENTS + 1 }, () => "x"),
+      }],
+    })).toThrow(`at most ${MAX_QUERY_METADATA_PATH_SEGMENTS} segments`);
+    expect(() => validateQueryOptions({
+      filters: [{
+        kind: "equals",
+        path: "status",
+        value: "x".repeat(MAX_QUERY_TEXT_UTF8_BYTES + 1),
+      }],
+    })).toThrow(`${MAX_QUERY_TEXT_UTF8_BYTES.toLocaleString("en-US")} UTF-8 bytes`);
+    expect(() => validateQueryOptions({
+      tags: Array.from(
+        { length: Math.floor(MAX_QUERY_OPTIONS_UTF8_BYTES / MAX_QUERY_TEXT_UTF8_BYTES) + 1 },
+        () => "x".repeat(MAX_QUERY_TEXT_UTF8_BYTES),
+      ),
+    })).toThrow(`${MAX_QUERY_OPTIONS_UTF8_BYTES.toLocaleString("en-US")} UTF-8 bytes`);
+  });
+
+  test("rejects oversized options before inspecting graph or note data", () => {
+    const notes = [parseNote("notes/alpha.md", "# Alpha\n")];
+    const analysis = analyzeVault(notes);
+    const guardedAnalysis = {
+      ...analysis,
+      get noteConnections(): never {
+        throw new Error("query inspected the graph before validating options");
+      },
+    };
+
+    expect(() => queryVault(notes, guardedAnalysis, {
+      tags: Array.from({ length: MAX_QUERY_TAGS + 1 }, () => "tag"),
+    })).toThrow(`at most ${MAX_QUERY_TAGS} entries`);
   });
 });

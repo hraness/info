@@ -5,6 +5,9 @@ import {
   gitHistoryForNotes,
   indexGitHistory,
   searchGitHistory,
+  validateGitHistoryForNotesOptions,
+  validateGitHistoryForNotesRequest,
+  validateSearchGitHistoryOptions,
   type GitHistoryDependencies,
   type GitHistoryForNotesOptions,
   type GitHistoryForNotesResult,
@@ -27,6 +30,7 @@ import {
   buildGraphContext,
   fuseRankedCandidates,
   searchExactVault,
+  validateSearchQuery,
   type ExactMatchEvidence,
   type ExactSearchHit,
   type GraphContext,
@@ -47,10 +51,16 @@ import {
   type VaultSnapshot,
 } from "./vault.js";
 
-const MAX_SEARCH_RESULTS = 100;
+export const MAX_SEARCH_RESULTS = 100;
+export const MAX_SEARCH_CANDIDATES = 500;
+export const DEFAULT_SEARCH_RESULTS = 10;
 const MAX_READ_BYTES = 64 * 1_024;
 const DEFAULT_CONTEXT_BYTES = 24 * 1_024;
 const MAX_CONTEXT_BYTES = 64 * 1_024;
+const DEFAULT_SEARCH_HISTORY_NOTES = 5;
+const MAX_SEARCH_HISTORY_NOTES = 20;
+export const MAX_SEARCH_RELATED_SEEDS = 5;
+export const MAX_SEARCH_NOTE_REFERENCE_BYTES = 16 * 1_024;
 
 export type KnowledgeBaseSearchMode = "exact" | SemanticSearchMode;
 
@@ -219,17 +229,19 @@ function errorMessage(error: unknown): string {
 function utf8Prefix(value: string, maximumBytes: number): {
   readonly value: string;
   readonly truncated: boolean;
+  readonly bytes: number;
 } {
-  if (Buffer.byteLength(value) <= maximumBytes) return { value, truncated: false };
   let bytes = 0;
-  let prefix = "";
+  let end = 0;
   for (const character of value) {
-    const width = Buffer.byteLength(character);
-    if (bytes + width > maximumBytes) break;
-    prefix += character;
+    const width = Buffer.byteLength(character, "utf8");
+    if (bytes + width > maximumBytes) {
+      return { value: value.slice(0, end), truncated: true, bytes };
+    }
     bytes += width;
+    end += character.length;
   }
-  return { value: prefix, truncated: true };
+  return { value, truncated: false, bytes };
 }
 
 function unavailableHistory(
@@ -272,39 +284,117 @@ function checkedSearchMode(value: unknown): KnowledgeBaseSearchMode {
   return mode;
 }
 
+type CheckedGraphOptions = {
+  readonly related: readonly string[];
+  readonly depth: number;
+  readonly neighborsPerSeed: number;
+  readonly limit: number;
+};
+
+function checkedGraphOptions(value: unknown): CheckedGraphOptions | null {
+  if (value === false) return null;
+  if (value !== undefined && (typeof value !== "object" || value === null || Array.isArray(value))) {
+    throw new TypeError("Search graph options must be false or an options object.");
+  }
+  const options = (value ?? {}) as KnowledgeBaseGraphOptions;
+  const related: unknown = options.related ?? [];
+  if (!Array.isArray(related)) {
+    throw new TypeError("Search related-note seeds must be an array.");
+  }
+  if (related.length > MAX_SEARCH_RELATED_SEEDS) {
+    throw new RangeError(
+      `Hybrid search accepts at most ${MAX_SEARCH_RELATED_SEEDS} explicit related-note seeds.`,
+    );
+  }
+  const checkedRelated: string[] = [];
+  for (const [index, seed] of (related as readonly unknown[]).entries()) {
+    if (typeof seed !== "string") {
+      throw new TypeError(`Search related-note seed ${index + 1} must be a string.`);
+    }
+    if (seed.trim() === "") {
+      throw new TypeError(`Search related-note seed ${index + 1} must not be empty.`);
+    }
+    if (Buffer.byteLength(seed, "utf8") > MAX_SEARCH_NOTE_REFERENCE_BYTES) {
+      throw new RangeError(
+        `Search related-note seed ${index + 1} must be at most `
+          + `${MAX_SEARCH_NOTE_REFERENCE_BYTES.toLocaleString("en-US")} UTF-8 bytes.`,
+      );
+    }
+    checkedRelated.push(seed);
+  }
+  return Object.freeze({
+    related: Object.freeze(checkedRelated),
+    depth: checkedLimit(options.depth, 1, 2, "Graph context depth"),
+    neighborsPerSeed: checkedLimit(
+      options.neighborsPerSeed,
+      3,
+      20,
+      "Graph neighbors per seed",
+    ),
+    limit: checkedLimit(options.limit, 20, 100, "Graph context limit"),
+  });
+}
+
+function resolvedGraphSeeds(notes: readonly Note[], seeds: readonly string[]): readonly string[] {
+  return seeds.map((seed) => {
+    const lookup = lookupNote(notes, seed);
+    if (lookup.kind === "missing") {
+      throw new Error(`Graph context seed ${JSON.stringify(seed)} was not found.`);
+    }
+    if (lookup.kind === "ambiguous") {
+      throw new Error(
+        `Graph context seed ${JSON.stringify(seed)} is ambiguous: `
+          + lookup.candidates.map(({ path }) => path).join(", "),
+      );
+    }
+    return lookup.note.id;
+  });
+}
+
 type CheckedHistoryRequest =
   | { readonly enabled: false }
   | {
       readonly enabled: true;
       readonly required: boolean;
-      readonly options: KnowledgeBaseHistoryOptions;
+      readonly noteLimit: number;
+      readonly options: Required<GitHistoryForNotesOptions>;
     };
 
 function checkedHistoryRequest(value: unknown): CheckedHistoryRequest {
-  if (value === false) return { enabled: false };
-  if (value === undefined || value === "auto") {
-    return { enabled: true, required: false, options: {} };
-  }
-  if (value === "required") {
-    return { enabled: true, required: true, options: {} };
-  }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (value === undefined || value === false) return { enabled: false };
+  let options: KnowledgeBaseHistoryOptions;
+  let required: boolean;
+  if (value === "auto") {
+    options = {};
+    required = false;
+  } else if (value === "required") {
+    options = {};
+    required = true;
+  } else if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(
       'Search history must be false, "auto", "required", or an options object.',
     );
-  }
-  const options = value as KnowledgeBaseHistoryOptions;
-  if (
-    options.policy !== undefined
-    && options.policy !== "auto"
-    && options.policy !== "required"
-  ) {
-    throw new Error('Search history policy must be "auto" or "required".');
+  } else {
+    options = value;
+    if (
+      options.policy !== undefined
+      && options.policy !== "auto"
+      && options.policy !== "required"
+    ) {
+      throw new Error('Search history policy must be "auto" or "required".');
+    }
+    required = options.policy === "required";
   }
   return {
     enabled: true,
-    required: options.policy === "required",
-    options,
+    required,
+    noteLimit: checkedLimit(
+      options.noteLimit,
+      DEFAULT_SEARCH_HISTORY_NOTES,
+      MAX_SEARCH_HISTORY_NOTES,
+      "Git history note limit",
+    ),
+    options: validateGitHistoryForNotesOptions(options),
   };
 }
 
@@ -410,58 +500,57 @@ export async function openKnowledgeBase(
   ): Promise<KnowledgeBaseSearchResult> => {
     assertOpen();
     const startedAt = performance.now();
-    const query = searchOptions.query.trim();
-    if (query === "") throw new Error("Search query must not be empty.");
+    const { query } = validateSearchQuery(searchOptions.query);
     const mode = checkedSearchMode(searchOptions.mode);
+    const minScore = searchOptions.minScore;
     if (
-      searchOptions.minScore !== undefined
+      minScore !== undefined
       && (
-        !Number.isFinite(searchOptions.minScore)
-        || searchOptions.minScore < 0
-        || searchOptions.minScore > 1
+        !Number.isFinite(minScore)
+        || minScore < 0
+        || minScore > 1
       )
     ) {
       throw new RangeError("Search minimum score must be a number from 0 through 1.");
     }
-    if (mode === "exact" && searchOptions.minScore !== undefined) {
+    if (mode === "exact" && minScore !== undefined) {
       throw new Error("Search minimum score applies only to hybrid, keyword, or semantic mode.");
     }
-    const limit = checkedLimit(searchOptions.limit, 10, MAX_SEARCH_RESULTS, "Search limit");
+    const limit = checkedLimit(
+      searchOptions.limit,
+      DEFAULT_SEARCH_RESULTS,
+      MAX_SEARCH_RESULTS,
+      "Search limit",
+    );
+    const filters = searchOptions.filters ?? [];
+    const tags = searchOptions.tags ?? [];
+    const filtered = filters.length > 0 || tags.length > 0;
     const candidateLimit = checkedLimit(
       searchOptions.candidateLimit,
-      Math.max(40, limit * 4),
-      500,
+      filtered ? MAX_SEARCH_CANDIDATES : Math.max(40, limit * 4),
+      MAX_SEARCH_CANDIDATES,
       "Search candidate limit",
     );
     if (candidateLimit < limit) {
       throw new RangeError("Search candidate limit must be at least the result limit.");
     }
     const historyRequest = checkedHistoryRequest(searchOptions.history);
-    const historyNoteLimit = historyRequest.enabled
-      ? checkedLimit(
-          historyRequest.options.noteLimit,
-          5,
-          20,
-          "Git history note limit",
-        )
-      : null;
-    const historyIndexPromise = !historyRequest.enabled
-      ? null
-      : gitIndex().then(
-          (index) => ({ status: "indexed", index } as const),
-          (error: unknown) => ({ status: "failed", error } as const),
-        );
+    const graphOptions = checkedGraphOptions(searchOptions.graph);
+    const explicitSeeds = graphOptions === null
+      ? []
+      : resolvedGraphSeeds(snapshot.notes, graphOptions.related);
+    const historyNoteLimit = historyRequest.enabled ? historyRequest.noteLimit : null;
     const allowedIds = new Set(queryVault(snapshot.notes, snapshot.analysis, {
-      filters: searchOptions.filters ?? [],
-      tags: searchOptions.tags ?? [],
+      filters,
+      tags,
     }).map(({ id }) => id));
     const includeExact = mode === "hybrid" || mode === "exact";
     const exact = includeExact
       ? searchExactVault(snapshot.notes, snapshot.analysis, {
           query,
-          filters: searchOptions.filters ?? [],
-          tags: searchOptions.tags ?? [],
-          limit: Math.min(500, candidateLimit),
+          filters,
+          tags,
+          limit: Math.min(MAX_SEARCH_CANDIDATES, candidateLimit),
         })
       : [];
     const exactById = new Map(exact.map((hit, index) => [hit.id, { hit, rank: index + 1 }]));
@@ -472,52 +561,77 @@ export async function openKnowledgeBase(
     let model: string | null = null;
     const selectedQmdMode = qmdMode(mode);
     if (selectedQmdMode !== null) {
-      try {
-        const session = await semantic();
-        model = session.model;
-        const semanticLimit = Math.min(MAX_SEARCH_RESULTS, candidateLimit);
-        const result = await session.search({
-          query,
-          mode: selectedQmdMode,
-          limit: semanticLimit,
-          candidateLimit,
-          ...(searchOptions.minScore === undefined
-            ? {}
-            : { minScore: searchOptions.minScore }),
-        });
-        let acceptedRank = 0;
-        for (const hit of result.results) {
-          const note = notesByPath.get(hit.path);
-          if (note === undefined || !allowedIds.has(note.id) || semanticById.has(note.id)) continue;
-          acceptedRank += 1;
-          semanticById.set(note.id, { hit, rank: acceptedRank });
+      if (allowedIds.size === 0) {
+        diagnostics.push({ lane: "qmd", status: "ready", results: 0 });
+      } else {
+        try {
+          const session = await semantic();
+          model = session.model;
+          const semanticLimit = candidateLimit;
+          const result = await session.search({
+            query,
+            mode: selectedQmdMode,
+            limit: semanticLimit,
+            candidateLimit,
+            ...(minScore === undefined
+              ? {}
+              : { minScore }),
+          });
+          let acceptedRank = 0;
+          let discardedCandidates = result.rawWindow?.discarded ?? 0;
+          for (const hit of result.results) {
+            const note = notesByPath.get(hit.path);
+            if (note === undefined || semanticById.has(note.id)) {
+              discardedCandidates += 1;
+              continue;
+            }
+            if (!allowedIds.has(note.id)) {
+              discardedCandidates += 1;
+              continue;
+            }
+            acceptedRank += 1;
+            semanticById.set(note.id, { hit, rank: acceptedRank });
+          }
+          const embeddingFailures = result.embedding?.failures?.length ?? 0;
+          const embeddingErrors = result.embedding?.errors ?? 0;
+          const embeddingDegraded = embeddingErrors > 0 || embeddingFailures > 0;
+          const requestedEligible = Math.min(limit, allowedIds.size);
+          const incompleteCandidateWindow = discardedCandidates > 0
+            && semanticById.size < requestedEligible;
+          const messages: string[] = [];
+          if (embeddingDegraded) {
+            messages.push(
+              `QMD embedding reported ${embeddingErrors} error(s)`
+                + ` and ${embeddingFailures} retained failure record(s).`,
+            );
+          }
+          if (incompleteCandidateWindow) {
+            messages.push(
+              `QMD's bounded ${semanticLimit}-candidate retrieval discarded `
+                + `${discardedCandidates} row(s) during live reconciliation or metadata filtering `
+                + `and accepted ${semanticById.size} of ${requestedEligible} eligible requested `
+                + "result(s); this bounded reconciliation cannot certify a complete eligible result set.",
+            );
+          }
+          diagnostics.push({
+            lane: "qmd",
+            status: embeddingDegraded || incompleteCandidateWindow ? "degraded" : "ready",
+            results: semanticById.size,
+            ...(messages.length === 0 ? {} : { message: messages.join(" ") }),
+          });
+        } catch (error: unknown) {
+          diagnostics.push({
+            lane: "qmd",
+            status: "unavailable",
+            results: 0,
+            message: errorMessage(error),
+          });
         }
-        const embeddingFailures = result.embedding?.failures?.length ?? 0;
-        const embeddingErrors = result.embedding?.errors ?? 0;
-        const embeddingDegraded = embeddingErrors > 0 || embeddingFailures > 0;
-        diagnostics.push({
-          lane: "qmd",
-          status: embeddingDegraded ? "degraded" : "ready",
-          results: semanticById.size,
-          ...(embeddingDegraded
-            ? {
-                message: `QMD embedding reported ${embeddingErrors} error(s)`
-                  + ` and ${embeddingFailures} retained failure record(s).`,
-              }
-            : {}),
-        });
-      } catch (error: unknown) {
-        diagnostics.push({
-          lane: "qmd",
-          status: "unavailable",
-          results: 0,
-          message: errorMessage(error),
-        });
       }
     }
     const lanes = [
       ...(includeExact
-        ? [{ name: "exact", weight: 2, ids: exact.map(({ id }) => id) }]
+        ? [{ name: "exact", weight: 1, ids: exact.map(({ id }) => id) }]
         : []),
       ...(selectedQmdMode === null
         ? []
@@ -574,22 +688,15 @@ export async function openKnowledgeBase(
         contributions: candidate.contributions,
       };
     });
-    const graphOptions = searchOptions.graph === false ? null : searchOptions.graph ?? {};
-    const explicitSeeds = graphOptions?.related ?? [];
-    if (explicitSeeds.length > 5) {
-      throw new RangeError("Hybrid search accepts at most 5 explicit related-note seeds.");
-    }
     let graph: GraphContext | null = null;
     if (graphOptions !== null) {
       try {
         graph = buildGraphContext(snapshot.notes, snapshot.analysis, {
           seeds: [...explicitSeeds, ...results.slice(0, 5).map(({ id }) => id)],
           primaryIds: results.map(({ id }) => id),
-          ...(graphOptions.depth === undefined ? {} : { depth: graphOptions.depth }),
-          ...(graphOptions.neighborsPerSeed === undefined
-            ? {}
-            : { neighborsPerSeed: graphOptions.neighborsPerSeed }),
-          ...(graphOptions.limit === undefined ? {} : { limit: graphOptions.limit }),
+          depth: graphOptions.depth,
+          neighborsPerSeed: graphOptions.neighborsPerSeed,
+          limit: graphOptions.limit,
         });
         diagnostics.push({
           lane: "graph",
@@ -609,10 +716,13 @@ export async function openKnowledgeBase(
     let history: GitHistoryForNotesResult | null = null;
     if (
       historyRequest.enabled
-      && historyIndexPromise !== null
       && historyNoteLimit !== null
+      && results.length > 0
     ) {
-      const outcome = await historyIndexPromise;
+      const outcome = await gitIndex().then(
+        (index) => ({ status: "indexed", index } as const),
+        (error: unknown) => ({ status: "failed", error } as const),
+      );
       let index: GitHistoryIndexResult;
       if (outcome.status === "failed") {
         if (historyRequest.required) throw outcome.error;
@@ -629,17 +739,7 @@ export async function openKnowledgeBase(
       history = gitHistoryForNotes(
         index,
         results.slice(0, historyNoteLimit).map(({ id }) => id),
-        {
-          ...(historyRequest.options.commitsPerNote === undefined
-            ? {}
-            : { commitsPerNote: historyRequest.options.commitsPerNote }),
-          ...(historyRequest.options.cochangedPathsPerCommit === undefined
-            ? {}
-            : {
-                cochangedPathsPerCommit:
-                  historyRequest.options.cochangedPathsPerCommit,
-              }),
-        },
+        historyRequest.options,
       );
       const limitedCommits = history.status === "ready"
         ? history.limitedCommits ?? []
@@ -701,11 +801,19 @@ export async function openKnowledgeBase(
     search,
     history: async (noteIds, historyOptions = {}) => {
       assertOpen();
-      return gitHistoryForNotes(await gitIndex(), noteIds, historyOptions);
+      const request = validateGitHistoryForNotesRequest(noteIds, historyOptions);
+      return gitHistoryForNotes(await gitIndex(), request.noteIds, request.options);
     },
     searchHistory: async (historyOptions) => {
       assertOpen();
-      return searchGitHistory(await gitIndex(), historyOptions);
+      const request = validateSearchGitHistoryOptions(historyOptions);
+      return searchGitHistory(await gitIndex(), {
+        query: request.query,
+        ...(request.allowedNoteIds === null ? {} : { allowedNoteIds: request.allowedNoteIds }),
+        limit: request.limit,
+        commitsPerHit: request.commitsPerHit,
+        cochangedPathsPerCommit: request.cochangedPathsPerCommit,
+      });
     },
     close: () => {
       if (closePromise !== undefined) return closePromise;
@@ -721,7 +829,35 @@ export async function openKnowledgeBase(
   };
 }
 
-/** Render a bounded Markdown handoff that preserves paths, ranks, and evidence. */
+type Utf8ContextWriter = {
+  readonly append: (value: string, final?: boolean) => boolean;
+  readonly result: () => { readonly content: string; readonly truncated: boolean };
+};
+
+function utf8ContextWriter(maximumBytes: number): Utf8ContextWriter {
+  const chunks: string[] = [];
+  let bytes = 0;
+  let truncated = false;
+  return {
+    append: (value, final = false) => {
+      if (truncated) return false;
+      const remaining = maximumBytes - bytes;
+      const prefix = utf8Prefix(value, remaining);
+      if (prefix.value !== "") chunks.push(prefix.value);
+      bytes += prefix.bytes;
+      if (prefix.truncated || (!final && bytes === maximumBytes)) {
+        // At least the final newline remains at an exact non-final boundary,
+        // so no later field is needed to prove that the result is partial.
+        truncated = true;
+        return false;
+      }
+      return true;
+    },
+    result: () => ({ content: chunks.join(""), truncated }),
+  };
+}
+
+/** Render a bounded Markdown handoff without evaluating fields past its byte budget. */
 export function packSearchContext(
   result: KnowledgeBaseSearchResult,
   options: { readonly maxBytes?: number } = {},
@@ -732,33 +868,76 @@ export function packSearchContext(
     MAX_CONTEXT_BYTES,
     "Context byte limit",
   );
-  const sections = [
-    `# Knowledge-base context\n\nQuery: ${result.query}\nMode: ${result.mode}\n`,
-    ...result.results.map((hit) => [
-      `## ${hit.rank}. ${hit.title}`,
-      `Path: ${hit.path}${hit.line === undefined ? "" : `:${hit.line}`}`,
-      `Evidence: ${hit.evidence.map((item) => `${item.kind}#${item.rank}`).join(", ")}`,
-      hit.snippet,
-    ].join("\n\n")),
-    ...(result.graph?.related.length === 0 || result.graph === null
-      ? []
-      : [
-          "## Related graph context\n\n"
-            + result.graph.related.map((hit) =>
-              `- ${hit.path} (${hit.evidence.map(({ kind }) => kind).join(", ")})`).join("\n"),
-        ]),
-    ...(result.history?.status !== "ready"
-      ? []
-      : [
-          "## Git provenance\n\n"
-            + ((result.history.limitedCommits?.length ?? 0) === 0
-              ? ""
-              : `> Partial: ${limitedHistoryMessage(result.history.limitedCommits ?? [])}\n\n`)
-            + result.history.notes.flatMap((note) => note.commits.map((commit) =>
-              `- ${note.path}: ${commit.committedAt} ${commit.hash.slice(0, 12)} ${commit.subject}`))
-              .join("\n"),
-        ]),
-  ];
-  const packed = utf8Prefix(`${sections.join("\n\n")}\n`, maximumBytes);
-  return { content: packed.value, truncated: packed.truncated };
+  const writer = utf8ContextWriter(maximumBytes);
+  const append = (value: string): boolean => writer.append(value);
+  if (!append("# Knowledge-base context\n\nQuery: ")) return writer.result();
+  if (!append(result.query)) return writer.result();
+  if (!append("\nMode: ")) return writer.result();
+  if (!append(result.mode)) return writer.result();
+  if (!append("\n")) return writer.result();
+
+  for (const hit of result.results) {
+    if (!append("\n\n## ")) return writer.result();
+    if (!append(String(hit.rank))) return writer.result();
+    if (!append(". ")) return writer.result();
+    if (!append(hit.title)) return writer.result();
+    if (!append("\n\nPath: ")) return writer.result();
+    if (!append(hit.path)) return writer.result();
+    if (hit.line !== undefined) {
+      if (!append(":")) return writer.result();
+      if (!append(String(hit.line))) return writer.result();
+    }
+    if (!append("\n\nEvidence: ")) return writer.result();
+    for (const [index, item] of hit.evidence.entries()) {
+      if (index > 0 && !append(", ")) return writer.result();
+      if (!append(item.kind)) return writer.result();
+      if (!append("#")) return writer.result();
+      if (!append(String(item.rank))) return writer.result();
+    }
+    if (!append("\n\n")) return writer.result();
+    if (!append(hit.snippet)) return writer.result();
+  }
+
+  const graph = result.graph;
+  if (graph !== null && graph.related.length > 0) {
+    if (!append("\n\n## Related graph context")) return writer.result();
+    for (const [hitIndex, hit] of graph.related.entries()) {
+      if (!append(hitIndex === 0 ? "\n\n- " : "\n- ")) return writer.result();
+      if (!append(hit.path)) return writer.result();
+      if (!append(" (")) return writer.result();
+      for (const [index, evidence] of hit.evidence.entries()) {
+        if (index > 0 && !append(", ")) return writer.result();
+        if (!append(evidence.kind)) return writer.result();
+      }
+      if (!append(")")) return writer.result();
+    }
+  }
+
+  const history = result.history;
+  if (history?.status === "ready") {
+    if (!append("\n\n## Git provenance\n\n")) return writer.result();
+    const limitedCommits = history.limitedCommits ?? [];
+    if (limitedCommits.length > 0) {
+      if (!append("> Partial: ")) return writer.result();
+      if (!append(limitedHistoryMessage(limitedCommits))) return writer.result();
+      if (!append("\n\n")) return writer.result();
+    }
+    let commitIndex = 0;
+    for (const note of history.notes) {
+      for (const commit of note.commits) {
+        if (commitIndex > 0 && !append("\n")) return writer.result();
+        if (!append("- ")) return writer.result();
+        if (!append(note.path)) return writer.result();
+        if (!append(": ")) return writer.result();
+        if (!append(commit.committedAt)) return writer.result();
+        if (!append(" ")) return writer.result();
+        if (!append(commit.hash.slice(0, 12))) return writer.result();
+        if (!append(" ")) return writer.result();
+        if (!append(commit.subject)) return writer.result();
+        commitIndex += 1;
+      }
+    }
+  }
+  writer.append("\n", true);
+  return writer.result();
 }

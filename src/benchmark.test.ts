@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   createRepresentativeRetrievalFixture,
+  createSyntheticRankFusionFixture,
   evaluateRanking,
   evaluateRetrievalBenchmark,
   type RetrievalBenchmarkCase,
@@ -36,7 +37,7 @@ describe("retrieval metrics", () => {
 
 describe("bounded benchmark evaluation", () => {
   test("is deterministic across case, system, and judgment input order", () => {
-    const fixture = createRepresentativeRetrievalFixture();
+    const fixture = createSyntheticRankFusionFixture();
     const reordered = fixture.toReversed().map((benchmarkCase) => ({
       ...benchmarkCase,
       judgments: benchmarkCase.judgments.toReversed(),
@@ -71,10 +72,10 @@ describe("bounded benchmark evaluation", () => {
   });
 });
 
-describe("representative hybrid regression fixture", () => {
+describe("synthetic rank-fusion regression fixture", () => {
   test("shows aggregate complementarity without requiring either lane to win every class", () => {
     const report = evaluateRetrievalBenchmark(
-      createRepresentativeRetrievalFixture(),
+      createSyntheticRankFusionFixture(),
       { cutoff: 3 },
     );
     const overall = Object.fromEntries(
@@ -98,5 +99,10 @@ describe("representative hybrid regression fixture", () => {
     expect(classMetrics("conceptual", "semantic-like")?.ndcgAtK)
       .toBeGreaterThan(classMetrics("conceptual", "exact")?.ndcgAtK ?? 1);
     expect(report.cases).toHaveLength(6);
+  });
+
+  test("retains the representative fixture name as a compatibility alias", () => {
+    expect(createRepresentativeRetrievalFixture)
+      .toBe(createSyntheticRankFusionFixture);
   });
 });

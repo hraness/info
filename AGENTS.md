@@ -1,6 +1,6 @@
 # Contents
 
-- `src/` – deterministic Markdown graph analysis, typed metadata and exact queries, local hybrid retrieval, bounded Git provenance, code-mode sessions and DAG workflows, retrieval benchmarks, safe single-note authoring, percolation, scoped repository-context routing and audits, structural navigation, initialization, CLI, capture, and diagnostic code with colocated tests.
+- `src/` – deterministic Markdown graph analysis, typed metadata and exact queries, local hybrid retrieval, bounded Git provenance, code-mode sessions and DAG workflows, retrieval metric regressions, safe single-note authoring, percolation, scoped repository-context routing and audits, structural navigation, initialization, CLI, capture, and diagnostic code with colocated tests.
 - `src/workflows/` – reusable code-mode decision-context, change-explanation, and plan-radar workflows with bounded parallel execution.
 - `dist/` – committed Bun-targeted ESM entrypoints plus the compiled Defuddle worker.
 - `skills/save-url-kb/` – reusable agent workflow for bounded, auditable source capture.
@@ -34,5 +34,5 @@
 - Treat capture inputs and outputs as hostile. Keep network, browser, subprocess, byte, item, depth, path, credential, and terminal boundaries bounded and covered by named regressions.
 - Keep security-sensitive runtime forks pinned to immutable commits and exercise their behavior through the standalone install gate.
 - Pair concrete behavior tests with property tests for parsing, resolution, ordering, path confinement, and round-trip laws.
-- Run the labeled retrieval benchmark when changing rank fusion or defaults, then run `bun run check` before handing off a change. The check must leave committed `dist/` and `bun.lock` unchanged.
+- Run `bun test src/benchmark.test.ts src/search.test.ts src/sdk.test.ts` when changing rank fusion or retrieval defaults. The six-case synthetic rank-fusion fixture is a deterministic regression, not a retrieval-quality or performance benchmark. Run `bun run check` before handing off a change; it must leave committed `dist/` and `bun.lock` unchanged.
 - Treat a `v*` tag as a release request, not a completed release. Before tagging, confirm repository-level immutable releases are enabled; use a strictly increasing stable package version, keep the tag equal to `v<package.json version>` on `main`, and let the read-only verification job complete before its write-scoped publisher creates the Release. Do not create the next tag until that workflow and Release are verified because GitHub concurrency is not a durable queue. After tagging, verify the matching non-draft immutable Release is Latest.

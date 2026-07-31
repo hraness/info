@@ -51,17 +51,26 @@ import {
   type PercolationResult,
 } from "./percolate.js";
 import {
+  MAX_QUERY_FILTERS,
+  MAX_QUERY_TAGS,
   queryVault,
+  validateQueryOptions,
   type MetadataFilter,
   type QueryDirection,
   type QueryRow,
   type QuerySort,
 } from "./query.js";
+import { validateSearchQuery } from "./search.js";
 import {
   indexSemanticVault,
   type SemanticIndexResult,
 } from "./semantic.js";
 import {
+  DEFAULT_SEARCH_RESULTS,
+  MAX_SEARCH_CANDIDATES,
+  MAX_SEARCH_NOTE_REFERENCE_BYTES,
+  MAX_SEARCH_RELATED_SEEDS,
+  MAX_SEARCH_RESULTS,
   openKnowledgeBase,
   type KnowledgeBaseGraphOptions,
   type KnowledgeBaseSearchMode,
@@ -135,7 +144,7 @@ Usage:
   kb percolate [note] [--root <directory>] [--min-support <count>] [--limit <count>] [--json]
   kb list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
   kb index [--root <directory>] [--database <path>] [--force] [--json]
-  kb search <query> [--root <directory>] [--repo <repository>] [--database <path>] [--mode <hybrid|exact|keyword|semantic>] [--where <path=value>] [--has <path>] [--tag <tag>] [--related <note>] [--graph-depth <1|2>] [--no-graph] [--no-history | --require-history] [--limit <count>] [--candidate-limit <count>] [--min-score <score>] [--json]
+  kb search <query> [--root <directory>] [--repo <repository>] [--database <path>] [--mode <hybrid|exact|keyword|semantic>] [--where <path=value>] [--has <path>] [--tag <tag>] [--related <note>] [--graph-depth <1|2>] [--no-graph] [--history | --no-history | --require-history] [--limit <count>] [--candidate-limit <count>] [--min-score <score>] [--json]
   kb context <repository-path> [--root <vault>] [--repo <repository>] [--kind <auto|file|directory>] [--json]
   kb agents identity <repository-scope> [--json]
   kb agents check [--root <vault>] [--repo <repository>] [--json]
@@ -450,9 +459,22 @@ function parseListCommand(arguments_: readonly string[]): ParseResult {
       if (value === null) return { ok: false, message: `${argument} requires a value` };
       if (argument === "--root") root = value;
       else if (argument === "--index") index = value;
-      else if (argument === "--tag") tags.push(value);
-      else if (argument === "--has") {
+      else if (argument === "--tag") {
+        if (tags.length >= MAX_QUERY_TAGS) {
+          return {
+            ok: false,
+            message: `Query tags may contain at most ${MAX_QUERY_TAGS} entries.`,
+          };
+        }
+        tags.push(value);
+      } else if (argument === "--has") {
         if (value.trim() === "") return { ok: false, message: "--has requires a metadata path" };
+        if (filters.length >= MAX_QUERY_FILTERS) {
+          return {
+            ok: false,
+            message: `Query filters may contain at most ${MAX_QUERY_FILTERS} entries.`,
+          };
+        }
         filters.push({ kind: "exists", path: value });
       } else if (argument === "--where") {
         const equals = value.indexOf("=");
@@ -460,6 +482,12 @@ function parseListCommand(arguments_: readonly string[]): ParseResult {
         if (path === "") return { ok: false, message: "--where requires path=value" };
         const scalar = metadataScalar(value.slice(equals + 1));
         if (!scalar.ok) return scalar;
+        if (filters.length >= MAX_QUERY_FILTERS) {
+          return {
+            ok: false,
+            message: `Query filters may contain at most ${MAX_QUERY_FILTERS} entries.`,
+          };
+        }
         filters.push({ kind: "equals", path, value: scalar.value });
       } else if (argument === "--sort") {
         const parsed = querySort(value);
@@ -488,6 +516,20 @@ function parseListCommand(arguments_: readonly string[]): ParseResult {
     };
   }
 
+  try {
+    validateQueryOptions({
+      filters,
+      tags,
+      sort,
+      direction,
+      ...(limit === undefined ? {} : { limit }),
+    });
+  } catch (error: unknown) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
   return {
     ok: true,
     value: {
@@ -516,6 +558,7 @@ function parseSemanticCommand(command: "index" | "search", arguments_: readonly 
   let minScore: number | undefined;
   let graphDepth: number | undefined;
   let noGraph = false;
+  let history = false;
   let noHistory = false;
   let requireHistory = false;
   const filters: MetadataFilter[] = [];
@@ -540,6 +583,10 @@ function parseSemanticCommand(command: "index" | "search", arguments_: readonly 
     }
     if (argument === "--no-history" && command === "search") {
       noHistory = true;
+      continue;
+    }
+    if (argument === "--history" && command === "search") {
+      history = true;
       continue;
     }
     if (argument === "--require-history" && command === "search") {
@@ -579,13 +626,50 @@ function parseSemanticCommand(command: "index" | "search", arguments_: readonly 
         if (path === "") return { ok: false, message: "--where requires path=value" };
         const scalar = metadataScalar(value.slice(equals + 1));
         if (!scalar.ok) return scalar;
+        if (filters.length >= MAX_QUERY_FILTERS) {
+          return {
+            ok: false,
+            message: `Query filters may contain at most ${MAX_QUERY_FILTERS} entries.`,
+          };
+        }
         filters.push({ kind: "equals", path, value: scalar.value });
       } else if (argument === "--has") {
         if (value.trim() === "") return { ok: false, message: "--has requires a metadata path" };
+        if (filters.length >= MAX_QUERY_FILTERS) {
+          return {
+            ok: false,
+            message: `Query filters may contain at most ${MAX_QUERY_FILTERS} entries.`,
+          };
+        }
         filters.push({ kind: "exists", path: value });
       } else if (argument === "--tag") {
+        if (tags.length >= MAX_QUERY_TAGS) {
+          return {
+            ok: false,
+            message: `Query tags may contain at most ${MAX_QUERY_TAGS} entries.`,
+          };
+        }
         tags.push(value);
       } else if (argument === "--related") {
+        if (related.length >= MAX_SEARCH_RELATED_SEEDS) {
+          return {
+            ok: false,
+            message: `Hybrid search accepts at most ${MAX_SEARCH_RELATED_SEEDS} explicit related-note seeds.`,
+          };
+        }
+        if (Buffer.byteLength(value, "utf8") > MAX_SEARCH_NOTE_REFERENCE_BYTES) {
+          return {
+            ok: false,
+            message: `Search related-note seed ${related.length + 1} must be at most `
+              + `${MAX_SEARCH_NOTE_REFERENCE_BYTES.toLocaleString("en-US")} UTF-8 bytes.`,
+          };
+        }
+        if (value.trim() === "") {
+          return {
+            ok: false,
+            message: `Search related-note seed ${related.length + 1} must not be empty.`,
+          };
+        }
         related.push(value);
       } else if (argument === "--min-score") {
         const parsed = Number(value);
@@ -595,13 +679,23 @@ function parseSemanticCommand(command: "index" | "search", arguments_: readonly 
         minScore = parsed;
       } else {
         const parsed = Number(value);
-        if (!Number.isSafeInteger(parsed) || parsed < 1) {
-          return { ok: false, message: `${argument} must be a positive integer` };
+        if (argument === "--limit" || argument === "--candidate-limit") {
+          const maximum = argument === "--limit"
+            ? MAX_SEARCH_RESULTS
+            : MAX_SEARCH_CANDIDATES;
+          if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum) {
+            return {
+              ok: false,
+              message: `${argument} must be an integer from 1 through ${maximum}`,
+            };
+          }
+          if (argument === "--limit") limit = parsed;
+          else candidateLimit = parsed;
+        } else if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 2) {
+          return { ok: false, message: "--graph-depth must be 1 or 2" };
+        } else {
+          graphDepth = parsed;
         }
-        if (argument === "--limit") limit = parsed;
-        else if (argument === "--candidate-limit") candidateLimit = parsed;
-        else if (parsed <= 2) graphDepth = parsed;
-        else return { ok: false, message: "--graph-depth must be 1 or 2" };
       }
       cursor += 1;
       continue;
@@ -623,8 +717,42 @@ function parseSemanticCommand(command: "index" | "search", arguments_: readonly 
       message: "--no-history and --require-history cannot be used together",
     };
   }
-  const query = positional.join(" ").trim();
-  if (query === "") return { ok: false, message: "search requires a query" };
+  if (history && noHistory) {
+    return {
+      ok: false,
+      message: "--history and --no-history cannot be used together",
+    };
+  }
+  if (history && requireHistory) {
+    return {
+      ok: false,
+      message: "--history and --require-history cannot be used together",
+    };
+  }
+  if (candidateLimit !== undefined && candidateLimit < (limit ?? DEFAULT_SEARCH_RESULTS)) {
+    return {
+      ok: false,
+      message: "Search candidate limit must be at least the result limit.",
+    };
+  }
+  if (mode === "exact" && minScore !== undefined) {
+    return {
+      ok: false,
+      message: "Search minimum score applies only to hybrid, keyword, or semantic mode.",
+    };
+  }
+  const rawQuery = positional.join(" ");
+  if (rawQuery.trim() === "") return { ok: false, message: "search requires a query" };
+  let query: string;
+  try {
+    query = validateSearchQuery(rawQuery).query;
+    validateQueryOptions({ filters, tags });
+  } catch (error: unknown) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
   return {
     ok: true,
     value: {
@@ -641,7 +769,7 @@ function parseSemanticCommand(command: "index" | "search", arguments_: readonly 
             ...(related.length === 0 ? {} : { related }),
             ...(graphDepth === undefined ? {} : { depth: graphDepth }),
           },
-      history: noHistory ? false : requireHistory ? "required" : "auto",
+      history: requireHistory ? "required" : history ? "auto" : false,
       ...(limit === undefined ? {} : { limit }),
       ...(candidateLimit === undefined ? {} : { candidateLimit }),
       ...(minScore === undefined ? {} : { minScore }),

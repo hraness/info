@@ -3,11 +3,21 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { GitHistoryIndex } from "./git.js";
 import {
+  MAX_GIT_HISTORY_NOTES,
+  MAX_GIT_NOTE_ID_UTF8_BYTES,
+  type GitHistoryIndex,
+} from "./git.js";
+import { MAX_QUERY_FILTERS } from "./query.js";
+import {
+  MAX_SEARCH_RELATED_SEEDS,
   openKnowledgeBase,
   packSearchContext,
 } from "./sdk.js";
+import {
+  MAX_SEARCH_QUERY_BYTES,
+  MAX_SEARCH_QUERY_TERMS,
+} from "./search.js";
 import type {
   SemanticSearchHit,
   SemanticSearchResult,
@@ -130,14 +140,9 @@ describe("knowledge-base session", () => {
     let searches = 0;
     let closes = 0;
     let gitIndexes = 0;
-    const coldLaneStarts = new Set<string>();
-    let releaseColdLanes: (() => void) | undefined;
-    const coldLaneBarrier = new Promise<void>((resolve) => {
-      releaseColdLanes = resolve;
-    });
+    const coldLaneStarts: string[] = [];
     const startColdLane = (lane: string): void => {
-      coldLaneStarts.add(lane);
-      if (coldLaneStarts.size === 2) releaseColdLanes?.();
+      coldLaneStarts.push(lane);
     };
     try {
       const kb = await openKnowledgeBase(
@@ -147,11 +152,10 @@ describe("knowledge-base session", () => {
             scans += 1;
             return await scanVault(requestedRoot, options);
           },
-          openSemanticSearchSession: async () => {
+          openSemanticSearchSession: () => {
             opens += 1;
             startColdLane("qmd");
-            await coldLaneBarrier;
-            return fakeSemanticSession(
+            return Promise.resolve(fakeSemanticSession(
               root,
               (options) => {
                 searches += 1;
@@ -175,13 +179,12 @@ describe("knowledge-base session", () => {
                 closes += 1;
                 return Promise.resolve();
               },
-            );
+            ));
           },
-          indexGitHistory: async (options): Promise<GitHistoryIndex> => {
+          indexGitHistory: (options): Promise<GitHistoryIndex> => {
             gitIndexes += 1;
             startColdLane("git");
-            await coldLaneBarrier;
-            return {
+            return Promise.resolve({
               status: "ready",
               repository: temporary,
               root,
@@ -199,7 +202,7 @@ describe("knowledge-base session", () => {
                   changedPaths: [`kb/${note.path}`, "packages/browser.ts"],
                 }],
               })),
-            };
+            });
           },
         },
       );
@@ -207,6 +210,7 @@ describe("knowledge-base session", () => {
         query: "Alpha Switch",
         filters: [{ kind: "equals", path: "status", value: "active" }],
         tags: ["capture"],
+        history: "auto",
       });
       expect(result.results.map(({ id }) => id)).toEqual([
         "notes/exact",
@@ -237,7 +241,7 @@ describe("knowledge-base session", () => {
         status: "ready",
         results: 2,
       });
-      expect(coldLaneStarts).toEqual(new Set(["git", "qmd"]));
+      expect(coldLaneStarts).toEqual(["qmd", "git"]);
       const boundedRequiredHistory = await kb.search({
         query: "Alpha Switch",
         mode: "exact",
@@ -536,23 +540,158 @@ describe("knowledge-base session", () => {
 
   test("rejects malformed and unbounded search history policies before retrieval", async () => {
     const { temporary, root } = await fixture();
+    let semanticOpens = 0;
+    let gitIndexes = 0;
     try {
-      const kb = await openKnowledgeBase({ root });
-      expect(kb.search({
-        query: "Alpha Switch",
-        mode: "exact",
-        history: { policy: "sometimes" as never },
-      })).rejects.toThrow('Search history policy must be "auto" or "required"');
-      expect(kb.search({
-        query: "Alpha Switch",
-        mode: "exact",
-        history: true as never,
-      })).rejects.toThrow('Search history must be false, "auto", "required"');
-      expect(kb.search({
-        query: "Alpha Switch",
-        mode: "exact",
-        history: { noteLimit: 21 },
-      })).rejects.toThrow("Git history note limit must be an integer from 1 through 20");
+      const kb = await openKnowledgeBase(
+        { root, repository: temporary },
+        {
+          openSemanticSearchSession: () => {
+            semanticOpens += 1;
+            return Promise.reject(new Error("must not open"));
+          },
+          indexGitHistory: () => {
+            gitIndexes += 1;
+            return Promise.reject(new Error("must not index"));
+          },
+        },
+      );
+      const invalid = [
+        [{ policy: "sometimes" as never }, 'Search history policy must be "auto" or "required"'],
+        [true as never, 'Search history must be false, "auto", "required"'],
+        [{ noteLimit: 21 }, "Git history note limit must be an integer from 1 through 20"],
+        [{ commitsPerNote: 0 }, "Per-note commit limit must be an integer from 1 through 50"],
+        [{ commitsPerNote: 51 }, "Per-note commit limit must be an integer from 1 through 50"],
+        [{ cochangedPathsPerCommit: -1 }, "Cochanged-path limit must be an integer from 0 through 100"],
+        [{ cochangedPathsPerCommit: 101 }, "Cochanged-path limit must be an integer from 0 through 100"],
+      ] as const;
+      for (const [history, message] of invalid) {
+        expect(kb.search({
+          query: "Alpha Switch",
+          history,
+        })).rejects.toThrow(message);
+      }
+      expect({ semanticOpens, gitIndexes }).toEqual({ semanticOpens: 0, gitIndexes: 0 });
+      await kb.close();
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects invalid direct Git requests before indexing", async () => {
+    const { temporary, root } = await fixture();
+    let gitIndexes = 0;
+    try {
+      const kb = await openKnowledgeBase(
+        { root, repository: temporary },
+        {
+          indexGitHistory: () => {
+            gitIndexes += 1;
+            return Promise.reject(new Error("must not index"));
+          },
+        },
+      );
+      expect(kb.history(
+        Array.from({ length: MAX_GIT_HISTORY_NOTES + 1 }, () => "duplicate"),
+      )).rejects.toThrow(`At most ${MAX_GIT_HISTORY_NOTES} note IDs`);
+      expect(kb.history([
+        "x".repeat(MAX_GIT_NOTE_ID_UTF8_BYTES + 1),
+      ])).rejects.toThrow(
+        `${MAX_GIT_NOTE_ID_UTF8_BYTES.toLocaleString("en-US")} UTF-8 bytes`,
+      );
+      expect(kb.history(
+        ["notes/exact"],
+        { commitsPerNote: 0 },
+      )).rejects.toThrow("Per-note commit limit must be an integer from 1 through 50");
+      expect(kb.searchHistory({ query: "\n" })).rejects.toThrow("one to 500 characters");
+      expect(kb.searchHistory({
+        query: "memory",
+        allowedNoteIds: Array.from(
+          { length: MAX_GIT_HISTORY_NOTES + 1 },
+          () => "duplicate",
+        ),
+      })).rejects.toThrow(`at most ${MAX_GIT_HISTORY_NOTES} allowed note IDs`);
+      expect(kb.searchHistory({
+        query: "memory",
+        limit: 101,
+      })).rejects.toThrow("Git search limit must be an integer from 1 through 100");
+      expect(kb.searchHistory({
+        query: "memory",
+        commitsPerHit: 51,
+      })).rejects.toThrow("Per-note commit limit must be an integer from 1 through 50");
+      expect(kb.searchHistory({
+        query: "memory",
+        cochangedPathsPerCommit: 101,
+      })).rejects.toThrow("Cochanged-path limit must be an integer from 0 through 100");
+      expect(gitIndexes).toBe(0);
+      await kb.close();
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("uses validated Git snapshots after asynchronous indexing", async () => {
+    const { temporary, root } = await fixture();
+    let releaseIndex: ((index: GitHistoryIndex) => void) | undefined;
+    const pendingIndex = new Promise<GitHistoryIndex>((resolve) => {
+      releaseIndex = resolve;
+    });
+    let indexes = 0;
+    try {
+      const kb = await openKnowledgeBase(
+        { root, repository: temporary },
+        {
+          indexGitHistory: () => {
+            indexes += 1;
+            return pendingIndex;
+          },
+        },
+      );
+      const noteIds = ["notes/exact"];
+      const historyOptions = { commitsPerNote: 1 };
+      const allowedNoteIds = ["notes/exact"];
+      const searchOptions = {
+        query: "capture",
+        allowedNoteIds,
+        limit: 1,
+      };
+      const history = kb.history(noteIds, historyOptions);
+      const search = kb.searchHistory(searchOptions);
+      expect(indexes).toBe(1);
+
+      noteIds[0] = "notes/missing";
+      historyOptions.commitsPerNote = 0;
+      searchOptions.query = "\n";
+      allowedNoteIds[0] = "notes/missing";
+      releaseIndex?.({
+        status: "ready",
+        repository: temporary,
+        root,
+        vaultPrefix: "kb",
+        head: "a".repeat(40),
+        scannedCommits: 1,
+        notes: [{
+          id: "notes/exact",
+          path: "notes/exact.md",
+          repositoryPath: "kb/notes/exact.md",
+          commits: [{
+            hash: "a".repeat(40),
+            committedAt: "2026-07-31T00:00:00.000Z",
+            subject: "Preserve capture evidence",
+            changedPaths: ["kb/notes/exact.md"],
+          }],
+        }],
+      });
+
+      expect(await history).toMatchObject({
+        status: "ready",
+        notes: [{ id: "notes/exact", commits: [{ subject: "Preserve capture evidence" }] }],
+      });
+      expect(await search).toMatchObject({
+        status: "ready",
+        query: "capture",
+        hits: [{ id: "notes/exact" }],
+      });
       await kb.close();
     } finally {
       await rm(temporary, { recursive: true, force: true });
@@ -655,6 +794,438 @@ describe("knowledge-base session", () => {
         history: false,
       })).rejects.toThrow("applies only to hybrid, keyword, or semantic");
       expect(seen).toHaveLength(3);
+      await kb.close();
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("overfetches selective QMD searches and exposes an exhausted candidate window", async () => {
+    const { temporary, root } = await fixture();
+    let opens = 0;
+    const notePaths = Array.from({ length: 101 }, (_, index) =>
+      `notes/filter-${String(index).padStart(3, "0")}.md`);
+    try {
+      await Promise.all(notePaths.map((path, index) => writeFile(
+        join(root, path),
+        [
+          "---",
+          "tags: [selective]",
+          `status: ${index === 100 ? "active" : "archived"}`,
+          "---",
+          `# Filter ${index}`,
+          "",
+          `Candidate ${index} remains available to QMD.`,
+          "",
+        ].join("\n"),
+        "utf8",
+      )));
+      const hits = notePaths.map((path, index) =>
+        semanticHit(path, `Filter ${index}`, `Semantic candidate ${index}.`));
+      const seen: SemanticSessionSearchOptions[] = [];
+      const kb = await openKnowledgeBase(
+        { root },
+        {
+          openSemanticSearchSession: () => {
+            opens += 1;
+            return Promise.resolve(fakeSemanticSession(
+              root,
+              (options) => {
+                seen.push(options);
+                const ranked = options.query === "all eligible recovered"
+                  ? [hits[100]!, ...hits.slice(0, 99)]
+                  : hits;
+                const staleRawWindow = options.query === "stale raw window";
+                const exhaustedRawWindow = options.query === "deduped exhausted window";
+                const validUnderfilledWindow = options.query === "valid underfilled window";
+                const rawLimit = options.limit ?? 10;
+                return Promise.resolve({
+                  root,
+                  database: join(root, "qmd.sqlite"),
+                  model: recommendedEmbeddingModel,
+                  mode: options.mode ?? "semantic",
+                  query: options.query,
+                  update,
+                  embedding: null,
+                  ...(staleRawWindow || exhaustedRawWindow || validUnderfilledWindow
+                    ? {
+                        rawWindow: {
+                          requested: rawLimit,
+                          returned: staleRawWindow ? rawLimit : 1,
+                          discarded: validUnderfilledWindow ? 0 : staleRawWindow ? rawLimit : 1,
+                          thresholdRejected: 0,
+                          exhausted: !staleRawWindow,
+                        },
+                      }
+                    : {}),
+                  results: staleRawWindow || exhaustedRawWindow
+                    ? []
+                    : validUnderfilledWindow
+                      ? [hits[100]!]
+                      : ranked.slice(0, rawLimit),
+                });
+              },
+              () => Promise.resolve(),
+            ));
+          },
+        },
+      );
+
+      const noEligible = await kb.search({
+        query: "nothing eligible",
+        mode: "semantic",
+        filters: [{ kind: "equals", path: "status", value: "missing" }],
+        tags: ["selective"],
+        graph: false,
+      });
+      expect(opens).toBe(0);
+      expect(noEligible.partial).toBe(false);
+      expect(noEligible.diagnostics.lanes).toContainEqual({
+        lane: "qmd",
+        status: "ready",
+        results: 0,
+      });
+
+      const recovered = await kb.search({
+        query: "rank 101",
+        mode: "semantic",
+        filters: [{ kind: "equals", path: "status", value: "active" }],
+        tags: ["selective"],
+        limit: 1,
+        graph: false,
+      });
+      expect(recovered.results.map(({ id }) => id)).toEqual(["notes/filter-100"]);
+      expect(recovered.partial).toBe(false);
+      expect(seen[0]).toMatchObject({ limit: 500, candidateLimit: 500 });
+
+      const exhausted = await kb.search({
+        query: "rank 101",
+        mode: "semantic",
+        filters: [{ kind: "equals", path: "status", value: "active" }],
+        tags: ["selective"],
+        limit: 1,
+        candidateLimit: 100,
+        graph: false,
+      });
+      expect(exhausted.results).toEqual([]);
+      expect(exhausted.partial).toBe(true);
+      expect(exhausted.diagnostics.lanes).toContainEqual({
+        lane: "qmd",
+        status: "degraded",
+        results: 0,
+        message: "QMD's bounded 100-candidate retrieval discarded 100 row(s) during live reconciliation or metadata filtering and accepted 0 of 1 eligible requested result(s); this bounded reconciliation cannot certify a complete eligible result set.",
+      });
+
+      const staleRawWindow = await kb.search({
+        query: "stale raw window",
+        mode: "semantic",
+        filters: [{ kind: "equals", path: "status", value: "active" }],
+        tags: ["selective"],
+        limit: 1,
+        candidateLimit: 100,
+        graph: false,
+      });
+      expect(staleRawWindow.results).toEqual([]);
+      expect(staleRawWindow.partial).toBe(true);
+      expect(staleRawWindow.diagnostics.lanes).toContainEqual({
+        lane: "qmd",
+        status: "degraded",
+        results: 0,
+        message: "QMD's bounded 100-candidate retrieval discarded 100 row(s) during live reconciliation or metadata filtering and accepted 0 of 1 eligible requested result(s); this bounded reconciliation cannot certify a complete eligible result set.",
+      });
+
+      const dedupedExhaustedWindow = await kb.search({
+        query: "deduped exhausted window",
+        mode: "semantic",
+        filters: [{ kind: "equals", path: "status", value: "active" }],
+        tags: ["selective"],
+        limit: 1,
+        candidateLimit: 100,
+        graph: false,
+      });
+      expect(dedupedExhaustedWindow.results).toEqual([]);
+      expect(dedupedExhaustedWindow.partial).toBe(true);
+      expect(dedupedExhaustedWindow.diagnostics.lanes).toContainEqual({
+        lane: "qmd",
+        status: "degraded",
+        results: 0,
+        message: "QMD's bounded 100-candidate retrieval discarded 1 row(s) during live reconciliation or metadata filtering and accepted 0 of 1 eligible requested result(s); this bounded reconciliation cannot certify a complete eligible result set.",
+      });
+
+      const validUnderfilledWindow = await kb.search({
+        query: "valid underfilled window",
+        mode: "semantic",
+        limit: 10,
+        candidateLimit: 100,
+        graph: false,
+      });
+      expect(validUnderfilledWindow.results.map(({ id }) => id))
+        .toEqual(["notes/filter-100"]);
+      expect(validUnderfilledWindow.partial).toBe(false);
+      expect(validUnderfilledWindow.diagnostics.lanes).toContainEqual({
+        lane: "qmd",
+        status: "ready",
+        results: 1,
+      });
+
+      const allEligibleRecovered = await kb.search({
+        query: "all eligible recovered",
+        mode: "semantic",
+        filters: [{ kind: "equals", path: "status", value: "active" }],
+        tags: ["selective"],
+        limit: 10,
+        candidateLimit: 100,
+        graph: false,
+      });
+      expect(allEligibleRecovered.results.map(({ id }) => id))
+        .toEqual(["notes/filter-100"]);
+      expect(allEligibleRecovered.partial).toBe(false);
+      await kb.close();
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("uses neutral fusion without crowding QMD rank one out of the default slate", async () => {
+    const { temporary, root } = await fixture();
+    try {
+      const exactPaths = Array.from({ length: 10 }, (_, index) =>
+        `notes/fusion-${String(index).padStart(2, "0")}.md`);
+      await Promise.all([
+        ...exactPaths.map((path, index) => writeFile(
+          join(root, path),
+          `# Fusion ${index}\n\nShared retrieval phrase.\n`,
+          "utf8",
+        )),
+        writeFile(
+          join(root, "notes", "zz-semantic.md"),
+          "# Semantic only\n\nMeaning without the literal words.\n",
+          "utf8",
+        ),
+      ]);
+      const kb = await openKnowledgeBase(
+        { root },
+        {
+          openSemanticSearchSession: () => Promise.resolve(fakeSemanticSession(
+            root,
+            (options) => Promise.resolve({
+              root,
+              database: join(root, "qmd.sqlite"),
+              model: recommendedEmbeddingModel,
+              mode: options.mode ?? "semantic",
+              query: options.query,
+              update,
+              embedding: null,
+              results: [
+                semanticHit("notes/zz-semantic.md", "Semantic only", "Semantic rank one."),
+                semanticHit(exactPaths[9]!, "Fusion 9", "Both lanes agree."),
+              ],
+            }),
+            () => Promise.resolve(),
+          )),
+        },
+      );
+      const result = await kb.search({
+        query: "shared retrieval phrase",
+        graph: false,
+      });
+      expect(result.results).toHaveLength(10);
+      expect(result.results[0]?.id).toBe("notes/fusion-09");
+      expect(result.results.find(({ id }) => id === "notes/fusion-09")?.evidence)
+        .toHaveLength(2);
+      expect(result.results.find(({ id }) => id === "notes/zz-semantic")?.evidence)
+        .toEqual([expect.objectContaining({ kind: "qmd", rank: 1 })]);
+      await kb.close();
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects bounded query violations before semantic or Git work", async () => {
+    const { temporary, root } = await fixture();
+    let semanticOpens = 0;
+    let gitIndexes = 0;
+    try {
+      const kb = await openKnowledgeBase(
+        { root, repository: temporary },
+        {
+          openSemanticSearchSession: () => {
+            semanticOpens += 1;
+            return Promise.reject(new Error("must not open"));
+          },
+          indexGitHistory: () => {
+            gitIndexes += 1;
+            return Promise.reject(new Error("must not index"));
+          },
+        },
+      );
+      expect(kb.search({
+        query: "🧠".repeat(Math.floor(MAX_SEARCH_QUERY_BYTES / 4) + 1),
+        history: "required",
+      })).rejects.toThrow("UTF-8 bytes");
+      expect(kb.search({
+        query: Array.from(
+          { length: MAX_SEARCH_QUERY_TERMS + 1 },
+          (_, index) => `term${index}`,
+        ).join(" "),
+        history: "required",
+      })).rejects.toThrow("unique normalized terms");
+      const filters = Array.from(
+        { length: MAX_QUERY_FILTERS + 1 },
+        () => ({ kind: "exists", path: "status" }) as const,
+      );
+      expect(() => kb.list({ filters })).toThrow(`at most ${MAX_QUERY_FILTERS} entries`);
+      expect(kb.search({
+        query: "Alpha Switch",
+        filters,
+        history: "required",
+      })).rejects.toThrow(`at most ${MAX_QUERY_FILTERS} entries`);
+      expect(kb.search({
+        query: "Alpha Switch",
+        graph: {
+          related: Array.from(
+            { length: MAX_SEARCH_RELATED_SEEDS + 1 },
+            () => "notes/exact",
+          ),
+        },
+        history: "required",
+      })).rejects.toThrow(`at most ${MAX_SEARCH_RELATED_SEEDS} explicit related-note seeds`);
+      expect(kb.search({
+        query: "Alpha Switch",
+        graph: { depth: 3 },
+        history: "required",
+      })).rejects.toThrow("Graph context depth");
+      expect(kb.search({
+        query: "Alpha Switch",
+        graph: { related: ["notes/missing"] },
+        history: "required",
+      })).rejects.toThrow('Graph context seed "notes/missing" was not found');
+      expect({ semanticOpens, gitIndexes }).toEqual({ semanticOpens: 0, gitIndexes: 0 });
+      await kb.close();
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("uses validated search option snapshots after QMD opens", async () => {
+    const { temporary, root } = await fixture();
+    let releaseSemantic: ((session: SemanticSearchSession) => void) | undefined;
+    const pendingSemantic = new Promise<SemanticSearchSession>((resolve) => {
+      releaseSemantic = resolve;
+    });
+    const seen: SemanticSessionSearchOptions[] = [];
+    try {
+      const kb = await openKnowledgeBase(
+        { root },
+        { openSemanticSearchSession: () => pendingSemantic },
+      );
+      const related = ["notes/exact"];
+      const graph = { related, depth: 1, neighborsPerSeed: 3, limit: 20 };
+      const options = {
+        query: "browser memory",
+        mode: "semantic" as const,
+        minScore: 0.25,
+        graph,
+        history: false as const,
+      };
+      const result = kb.search(options);
+
+      options.minScore = 2;
+      graph.depth = 3;
+      graph.neighborsPerSeed = 21;
+      graph.limit = 101;
+      related[0] = "notes/missing";
+      releaseSemantic?.(fakeSemanticSession(
+        root,
+        (searchOptions) => {
+          seen.push(searchOptions);
+          return Promise.resolve({
+            root,
+            database: join(root, "qmd.sqlite"),
+            model: recommendedEmbeddingModel,
+            mode: searchOptions.mode ?? "semantic",
+            query: searchOptions.query,
+            update,
+            embedding: null,
+            results: [semanticHit(
+              "notes/semantic.md",
+              "Browser Memory",
+              "The live semantic result remains available.",
+            )],
+          });
+        },
+        () => Promise.resolve(),
+      ));
+
+      const settled = await result;
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.minScore).toBe(0.25);
+      expect(settled.results[0]?.id).toBe("notes/semantic");
+      expect(settled.graph).not.toBeNull();
+      expect(settled.diagnostics.lanes).toContainEqual({
+        lane: "graph",
+        status: "ready",
+        results: settled.graph?.related.length ?? 0,
+      });
+      await kb.close();
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps search history opt-in and avoids indexing when no primary result exists", async () => {
+    const { temporary, root } = await fixture();
+    let indexes = 0;
+    try {
+      const kb = await openKnowledgeBase(
+        { root, repository: temporary },
+        {
+          indexGitHistory: (options): Promise<GitHistoryIndex> => {
+            indexes += 1;
+            return Promise.resolve({
+              status: "ready",
+              repository: temporary,
+              root,
+              vaultPrefix: "kb",
+              head: "a".repeat(40),
+              scannedCommits: 0,
+              notes: options.notes.map((note) => ({
+                id: note.id,
+                path: note.path,
+                repositoryPath: `kb/${note.path}`,
+                commits: [],
+              })),
+            });
+          },
+        },
+      );
+      const omitted = await kb.search({
+        query: "Alpha Switch",
+        mode: "exact",
+        graph: false,
+      });
+      expect(omitted.history).toBeNull();
+      expect(indexes).toBe(0);
+
+      const emptyRequired = await kb.search({
+        query: "definitely absent unique phrase",
+        mode: "exact",
+        graph: false,
+        history: "required",
+      });
+      expect(emptyRequired.results).toEqual([]);
+      expect(emptyRequired.history).toBeNull();
+      expect(emptyRequired.partial).toBe(false);
+      expect(indexes).toBe(0);
+
+      const explicit = await kb.search({
+        query: "Alpha Switch",
+        mode: "exact",
+        graph: false,
+        history: "auto",
+      });
+      expect(explicit.history).toMatchObject({ status: "ready" });
+      expect(indexes).toBe(1);
       await kb.close();
     } finally {
       await rm(temporary, { recursive: true, force: true });
@@ -851,6 +1422,44 @@ describe("knowledge-base session", () => {
       expect(Buffer.byteLength(packed.content)).toBeLessThanOrEqual(180);
       expect(packed.content).toContain("Knowledge-base context");
       expect(packed.truncated).toBe(true);
+
+      const first = exact.results[0];
+      expect(first).toBeDefined();
+      let unreadTitleReads = 0;
+      let graphReads = 0;
+      let historyReads = 0;
+      const lazyResult = {
+        ...exact,
+        results: [
+          { ...first!, snippet: "🧠".repeat(1_000) },
+          {
+            ...first!,
+            get title() {
+              unreadTitleReads += 1;
+              return "Must remain unread";
+            },
+          },
+        ],
+        get graph() {
+          graphReads += 1;
+          return exact.graph;
+        },
+        get history() {
+          historyReads += 1;
+          return exact.history;
+        },
+      };
+      const lazyPacked = packSearchContext(lazyResult, { maxBytes: 180 });
+      expect(Buffer.byteLength(lazyPacked.content)).toBeLessThanOrEqual(180);
+      expect(Buffer.from(lazyPacked.content, "utf8").toString("utf8"))
+        .toBe(lazyPacked.content);
+      expect(lazyPacked.content).not.toContain("�");
+      expect(lazyPacked.truncated).toBe(true);
+      expect({ unreadTitleReads, graphReads, historyReads }).toEqual({
+        unreadTitleReads: 0,
+        graphReads: 0,
+        historyReads: 0,
+      });
       expect(kb.search({
         query: "context",
         mode: "exact",

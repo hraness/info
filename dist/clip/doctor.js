@@ -2,11 +2,14 @@
 import {
   adapterCapabilities,
   expectedBunVersion,
+  expectedNodeLlamaCppVersion,
+  expectedQmdVersion,
+  expectedSqliteVecVersion,
   inspectClipEnvironment,
   renderAdapterCapabilities,
   renderDoctorReport,
   runDiagnosticCommand
-} from "../index-m6gx7374.js";
+} from "../index-wty076xc.js";
 import"../index-qx5jr97w.js";
 import"../index-hgve9rh2.js";
 import"../index-ey9rycsn.js";
@@ -21,6 +24,9 @@ export {
   renderDoctorReport,
   renderAdapterCapabilities,
   inspectClipEnvironment,
+  expectedSqliteVecVersion,
+  expectedQmdVersion,
+  expectedNodeLlamaCppVersion,
   expectedBunVersion,
   adapterCapabilities
 };
