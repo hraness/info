@@ -225,9 +225,9 @@ function normalizedSubject(value) {
   }
   return [...value.normalize("NFC").trim()].slice(0, 1000).join("");
 }
-function parseGitHistoryOutput(output, expectedMarker = commitMarker) {
+function parseGitHistoryRecords(output, expectedMarker, changedPathPolicy, pathBudget) {
   if (output === "")
-    return [];
+    return Object.freeze([]);
   if (expectedMarker === "" || expectedMarker.includes("\x00")) {
     throw new GitHistoryError("malformed", "Git history record marker is invalid.");
   }
@@ -235,9 +235,8 @@ function parseGitHistoryOutput(output, expectedMarker = commitMarker) {
     throw new GitHistoryError("malformed", "Git history output was not valid UTF-8.");
   }
   const tokens = output.split("\x00");
-  const commits = [];
+  const records = [];
   let index = 0;
-  let pathObservations = 0;
   while (index < tokens.length) {
     let marker = tokens[index] ?? "";
     marker = marker.replace(/^\r?\n/u, "");
@@ -255,8 +254,13 @@ function parseGitHistoryOutput(output, expectedMarker = commitMarker) {
       throw new GitHistoryError("malformed", "Git history output contained an incomplete commit record.");
     }
     index += 4;
+    const parsedTimestamp = commitTime(timestamp);
+    const parsedSubject = normalizedSubject(subject);
     const changedPaths = [];
     const seenPaths = new Set;
+    let firstPath = true;
+    let limited = false;
+    let observedPathRecords = 0;
     while (index < tokens.length) {
       const token = tokens[index] ?? "";
       const possibleMarker = token.replace(/^\r?\n/u, "");
@@ -267,33 +271,81 @@ function parseGitHistoryOutput(output, expectedMarker = commitMarker) {
 ` || token === `\r
 `)
         continue;
-      const rawPath = changedPaths.length === 0 ? token.replace(/^\r?\n/u, "") : token;
+      const rawPath = firstPath ? token.replace(/^\r?\n/u, "") : token;
       if (rawPath === "")
         continue;
+      firstPath = false;
       const path = checkedRepositoryPath(rawPath, "Git changed path");
-      if (seenPaths.has(path))
+      observedPathRecords += 1;
+      pathBudget.observed += 1;
+      if (pathBudget.observed > MAX_GIT_PATH_OBSERVATIONS) {
+        throw new GitHistoryError("budget", `Git history exceeded the ${MAX_GIT_PATH_OBSERVATIONS} changed-path observation limit.`);
+      }
+      if (changedPathPolicy.kind === "select") {
+        if (!changedPathPolicy.paths.has(path) || seenPaths.has(path))
+          continue;
+        seenPaths.add(path);
+        changedPaths.push(path);
+        if (changedPaths.length > MAX_GIT_HISTORY_NOTES) {
+          throw new GitHistoryError("budget", `Git history selected more than ${MAX_GIT_HISTORY_NOTES} live-note paths in one commit.`);
+        }
+        continue;
+      }
+      if (!limited && seenPaths.has(path))
+        continue;
+      if (limited)
         continue;
       seenPaths.add(path);
       changedPaths.push(path);
-      pathObservations += 1;
       if (changedPaths.length > MAX_GIT_PATHS_PER_COMMIT) {
-        throw new GitHistoryError("budget", `A Git commit exceeded the ${MAX_GIT_PATHS_PER_COMMIT} changed-path limit.`);
-      }
-      if (pathObservations > MAX_GIT_PATH_OBSERVATIONS) {
-        throw new GitHistoryError("budget", `Git history exceeded the ${MAX_GIT_PATH_OBSERVATIONS} changed-path observation limit.`);
+        if (changedPathPolicy.kind === "reject") {
+          throw new GitHistoryError("budget", `A Git commit exceeded the ${MAX_GIT_PATHS_PER_COMMIT} changed-path limit.`);
+        }
+        limited = true;
+        changedPaths.length = 0;
+        seenPaths.clear();
       }
     }
-    commits.push({
-      hash,
-      timestamp: commitTime(timestamp),
-      subject: normalizedSubject(subject),
-      changedPaths: Object.freeze(changedPaths)
+    records.push(limited ? {
+      status: "limited",
+      limit: Object.freeze({
+        hash,
+        timestamp: parsedTimestamp,
+        subject: parsedSubject,
+        reason: "changed-path-limit",
+        pathLimit: MAX_GIT_PATHS_PER_COMMIT,
+        observedPathRecords
+      })
+    } : {
+      status: "complete",
+      commit: Object.freeze({
+        hash,
+        timestamp: parsedTimestamp,
+        subject: parsedSubject,
+        changedPaths: Object.freeze(changedPaths)
+      })
     });
-    if (commits.length > MAX_GIT_HISTORY_COMMITS) {
+    if (records.length > MAX_GIT_HISTORY_COMMITS) {
       throw new GitHistoryError("budget", `Git history exceeded the ${MAX_GIT_HISTORY_COMMITS} commit limit.`);
     }
   }
-  return Object.freeze(commits);
+  return Object.freeze(records);
+}
+function parseGitHistoryOutput(output, expectedMarker = commitMarker) {
+  return Object.freeze(parseGitHistoryRecords(output, expectedMarker, { kind: "reject" }, { observed: 0 }).map((record) => {
+    if (record.status === "limited") {
+      throw new GitHistoryError("budget", `A Git commit exceeded the ${MAX_GIT_PATHS_PER_COMMIT} changed-path limit.`);
+    }
+    return record.commit;
+  }));
+}
+function parseSelectedGitHistoryOutput(output, expectedMarker, paths, pathBudget) {
+  return Object.freeze(parseGitHistoryRecords(output, expectedMarker, { kind: "select", paths }, pathBudget).map((record) => {
+    if (record.status === "limited") {
+      throw new GitHistoryError("malformed", "Git live-note history was unexpectedly limited.");
+    }
+    return record.commit;
+  }));
 }
 function historyArguments(hashes, marker) {
   return [
@@ -309,35 +361,35 @@ function historyArguments(hashes, marker) {
     "--"
   ];
 }
-function logArguments(maxCommits, vaultPrefix, marker) {
+function logArguments(maxCommits, vaultPrefix, marker, revision) {
   return [
     "--literal-pathspecs",
     "log",
     "--no-color",
     "--no-decorate",
+    "--no-renames",
+    "--diff-merges=first-parent",
     "--first-parent",
     `--max-count=${maxCommits}`,
     `--format=${marker}%x00%H%x00%ct%x00%s%x00`,
+    "--name-only",
     "-z",
-    "HEAD",
+    revision,
     "--",
     vaultPrefix === "" ? "." : vaultPrefix
   ];
 }
-function parseCommitMetadata(output, marker) {
-  return parseGitHistoryOutput(output, marker).map(({ hash, timestamp, subject }) => ({
-    hash,
-    timestamp,
-    subject
-  }));
-}
-function freezeCommit(commit) {
+function freezeCommit(commit, changedPathDetailsLimited) {
   return Object.freeze({
     hash: commit.hash,
     committedAt: new Date(commit.timestamp * 1000).toISOString(),
     subject: commit.subject,
-    changedPaths: commit.changedPaths
+    changedPaths: commit.changedPaths,
+    ...changedPathDetailsLimited ? { changedPathDetailsLimited: true } : {}
   });
+}
+function recordHash(record) {
+  return record.status === "complete" ? record.commit.hash : record.limit.hash;
 }
 async function confinedNotes(notes, repository, root, vaultPrefix) {
   if (notes.length > MAX_GIT_HISTORY_NOTES) {
@@ -435,20 +487,52 @@ async function indexGitHistory(options, dependencies = {}) {
     });
   }
   const marker = `${commitMarker}-${randomUUID()}`;
-  const metadataResult = await checkedCommand(provider, repository, logArguments(maxCommits, vaultPrefix, marker), budget, true, "Git vault history");
+  const pathBudget = { observed: 0 };
+  const metadataResult = await checkedCommand(provider, repository, logArguments(maxCommits, vaultPrefix, marker, head), budget, true, "Git vault history");
   if (metadataResult.status === "unavailable") {
     throw new GitHistoryError("unavailable", metadataResult.reason);
   }
-  const metadata = parseCommitMetadata(metadataResult.stdout, marker);
-  const detailsResult = metadata.length === 0 ? null : await checkedCommand(provider, repository, historyArguments(metadata.map(({ hash }) => hash), marker), budget, true, "Git commit path history");
+  const noteIdByRepositoryPath = new Map(liveNotes.map(({ id, repositoryPath }) => [repositoryPath, id]));
+  const vaultCommits = parseSelectedGitHistoryOutput(metadataResult.stdout, marker, new Set(noteIdByRepositoryPath.keys()), pathBudget);
+  const detailsResult = vaultCommits.length === 0 ? null : await checkedCommand(provider, repository, historyArguments(vaultCommits.map(({ hash }) => hash), marker), budget, true, "Git commit path history");
   if (detailsResult?.status === "unavailable") {
     throw new GitHistoryError("unavailable", detailsResult.reason);
   }
-  const details = detailsResult === null ? [] : parseGitHistoryOutput(detailsResult.stdout, marker);
-  if (details.length !== metadata.length || details.some((commit, index) => commit.hash !== metadata[index]?.hash)) {
+  const detailRecords = detailsResult === null ? [] : parseGitHistoryRecords(detailsResult.stdout, marker, { kind: "limit" }, pathBudget);
+  if (detailRecords.length !== vaultCommits.length || detailRecords.some((record, index) => recordHash(record) !== vaultCommits[index]?.hash)) {
     throw new GitHistoryError("malformed", "Git returned inconsistent vault and changed-path histories.");
   }
-  const commits = details.map(freezeCommit);
+  const commits = [];
+  const limitedCommits = [];
+  detailRecords.forEach((detailRecord, index) => {
+    const vaultCommit = vaultCommits[index];
+    if (detailRecord.status === "complete") {
+      commits.push(freezeCommit(detailRecord.commit, false));
+      return;
+    }
+    const affectedNoteIds = Object.freeze(vaultCommit.changedPaths.map((path) => {
+      const noteId = noteIdByRepositoryPath.get(path);
+      if (noteId === undefined) {
+        throw new GitHistoryError("malformed", "Git selected a path outside the live-note set.");
+      }
+      return noteId;
+    }));
+    commits.push(freezeCommit({
+      hash: detailRecord.limit.hash,
+      timestamp: detailRecord.limit.timestamp,
+      subject: detailRecord.limit.subject,
+      changedPaths: vaultCommit.changedPaths
+    }, true));
+    limitedCommits.push(Object.freeze({
+      hash: detailRecord.limit.hash,
+      committedAt: new Date(detailRecord.limit.timestamp * 1000).toISOString(),
+      subject: detailRecord.limit.subject,
+      reason: detailRecord.limit.reason,
+      pathLimit: detailRecord.limit.pathLimit,
+      observedPathRecords: detailRecord.limit.observedPathRecords,
+      affectedNoteIds
+    }));
+  });
   const commitsByPath = new Map;
   for (const commit of commits) {
     for (const path of commit.changedPaths) {
@@ -469,9 +553,20 @@ async function indexGitHistory(options, dependencies = {}) {
     root,
     vaultPrefix,
     head,
-    scannedCommits: commits.length,
-    notes: Object.freeze(indexedNotes)
+    scannedCommits: detailRecords.length,
+    notes: Object.freeze(indexedNotes),
+    ...limitedCommits.length === 0 ? {} : { limitedCommits: Object.freeze(limitedCommits) }
   });
+}
+function limitedCommitsForNotes(limitedCommits, noteIds, commitHashes) {
+  if (limitedCommits === undefined || limitedCommits.length === 0)
+    return Object.freeze([]);
+  return Object.freeze(limitedCommits.flatMap((commit) => {
+    if (commitHashes !== null && !commitHashes.has(commit.hash))
+      return [];
+    const affectedNoteIds = Object.freeze(commit.affectedNoteIds.filter((id) => noteIds.has(id)));
+    return affectedNoteIds.length === 0 ? [] : [Object.freeze({ ...commit, affectedNoteIds })];
+  }));
 }
 function noteOptions(options) {
   return {
@@ -484,7 +579,8 @@ function noteCommit(commit, notePath, cochangedPathsPerCommit) {
     hash: commit.hash,
     committedAt: commit.committedAt,
     subject: commit.subject,
-    cochangedPaths: Object.freeze(commit.changedPaths.filter((path) => path !== notePath).slice(0, cochangedPathsPerCommit))
+    cochangedPaths: Object.freeze(commit.changedPaths.filter((path) => path !== notePath).slice(0, cochangedPathsPerCommit)),
+    ...commit.changedPathDetailsLimited === true ? { cochangeDetailsLimited: true } : {}
   });
 }
 function gitHistoryForNotes(index, noteIds, options = {}) {
@@ -500,7 +596,15 @@ function gitHistoryForNotes(index, noteIds, options = {}) {
     path: note.path,
     commits: Object.freeze(note.commits.slice(0, selected.commitsPerNote).map((commit) => noteCommit(commit, note.repositoryPath, selected.cochangedPathsPerCommit)))
   }));
-  return Object.freeze({ status: "ready", head: index.head, notes: Object.freeze(notes) });
+  const returnedNoteIds = new Set(notes.map(({ id }) => id));
+  const returnedCommitHashes = new Set(notes.flatMap(({ commits }) => commits.map(({ hash }) => hash)));
+  const limitedCommits = limitedCommitsForNotes(index.limitedCommits, returnedNoteIds, returnedCommitHashes);
+  return Object.freeze({
+    status: "ready",
+    head: index.head,
+    notes: Object.freeze(notes),
+    ...limitedCommits.length === 0 ? {} : { limitedCommits }
+  });
 }
 function normalizedSearch(value) {
   return value.normalize("NFC").toLocaleLowerCase("en-US");
@@ -574,11 +678,14 @@ function searchGitHistory(index, options) {
     }));
   }
   hits.sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
+  const searchableNoteIds = new Set(index.notes.flatMap(({ id }) => allowed === null || allowed.has(id) ? [id] : []));
+  const limitedCommits = limitedCommitsForNotes(index.limitedCommits, searchableNoteIds, null);
   return Object.freeze({
     status: "ready",
     head: index.head,
     query: options.query.trim(),
-    hits: Object.freeze(hits.slice(0, limit))
+    hits: Object.freeze(hits.slice(0, limit)),
+    ...limitedCommits.length === 0 ? {} : { limitedCommits }
   });
 }
 

@@ -21,7 +21,7 @@ import {
 import {
   openKnowledgeBase,
   packSearchContext
-} from "./index-g7s5qk6t.js";
+} from "./index-e2p9924f.js";
 import {
   MAX_NOTE_UTF8_BYTES,
   MAX_SCANNED_NOTES,
@@ -51,7 +51,7 @@ import {
   parseGitHistoryOutput,
   runGitCommand,
   searchGitHistory
-} from "./index-tb103fj6.js";
+} from "./index-7w7gqq0f.js";
 import {
   DEFAULT_PERCOLATION_LIMIT,
   DEFAULT_PERCOLATION_MIN_SUPPORT,

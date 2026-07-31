@@ -10,6 +10,8 @@ import {
   gitHistoryForNotes,
   indexGitHistory,
   MAX_GIT_HISTORY_COMMITS,
+  MAX_GIT_PATH_OBSERVATIONS,
+  MAX_GIT_PATHS_PER_COMMIT,
   parseGitHistoryOutput,
   searchGitHistory,
   type GitCommandProvider,
@@ -17,6 +19,8 @@ import {
 
 const temporaryRoots: string[] = [];
 const hashA = "a".repeat(40);
+const hashB = "b".repeat(40);
+const hashC = "c".repeat(40);
 
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -59,6 +63,53 @@ async function rejected(promise: Promise<unknown>): Promise<unknown> {
     return error;
   }
   throw new Error("Expected promise to reject.");
+}
+
+type InjectedHistoryRecord = {
+  readonly hash: string;
+  readonly subject: string;
+  readonly paths: readonly string[];
+};
+
+function historyOutput(marker: string, records: readonly InjectedHistoryRecord[]): string {
+  return `${records.flatMap((record) => [
+    marker,
+    record.hash,
+    "1600000000",
+    record.subject,
+    ...record.paths,
+  ]).join("\0")}\0`;
+}
+
+function historyMarker(arguments_: readonly string[]): string {
+  const format = arguments_.find((argument) => argument.startsWith("--format="));
+  const marker = format?.slice("--format=".length).split("%x00")[0];
+  if (marker === undefined || marker === "") throw new Error("Missing injected history marker.");
+  return marker;
+}
+
+function injectedHistoryProvider(
+  repository: string,
+  head: string,
+  vaultRecords: readonly InjectedHistoryRecord[],
+  detailRecords: readonly InjectedHistoryRecord[],
+): GitCommandProvider {
+  return (request) => {
+    if (request.arguments.includes("--show-toplevel")) {
+      return Promise.resolve({ status: "ok", stdout: `${repository}\n` });
+    }
+    if (request.arguments.includes("--verify")) {
+      return Promise.resolve({ status: "ok", stdout: `${head}\n` });
+    }
+    const marker = historyMarker(request.arguments);
+    return Promise.resolve({
+      status: "ok",
+      stdout: historyOutput(
+        marker,
+        request.arguments.includes("log") ? vaultRecords : detailRecords,
+      ),
+    });
+  };
 }
 
 function initializeRepository(): {
@@ -216,6 +267,171 @@ describe("Git history indexing", () => {
     expect(indexed.notes[1]?.commits).toEqual([]);
   });
 
+  test("localizes an oversized commit while preserving its note provenance and later commits", async () => {
+    const fixture = initializeRepository();
+    const unaffectedContent = "# Unaffected\n";
+    write(fixture.repository, "kb/notes/unaffected.md", unaffectedContent);
+    const options = {
+      ...fixture,
+      notes: [...fixture.notes, parseNote("notes/unaffected.md", unaffectedContent)],
+    };
+    const vaultRecords = [
+      {
+        hash: hashC,
+        subject: "Normal memory follow-up",
+        paths: ["kb/notes/memory.md"],
+      },
+      {
+        hash: hashA,
+        subject: "Large repository rename",
+        paths: [
+          ...Array.from(
+            { length: MAX_GIT_PATHS_PER_COMMIT },
+            (_, index) => `kb/removed/note-${index}.md`,
+          ),
+          "kb/notes/memory.md",
+          "kb/notes/retrieval.md",
+        ],
+      },
+      {
+        hash: hashB,
+        subject: "Normal retrieval update",
+        paths: ["kb/notes/retrieval.md"],
+      },
+    ];
+    const detailRecords = [
+      {
+        ...vaultRecords[0]!,
+        paths: ["kb/notes/memory.md", "src/memory.ts"],
+      },
+      {
+        ...vaultRecords[1]!,
+        paths: vaultRecords[1]!.paths,
+      },
+      {
+        ...vaultRecords[2]!,
+        paths: ["kb/notes/retrieval.md", "src/retrieval.ts"],
+      },
+    ];
+    const indexed = await indexGitHistory(options, {
+      runGit: injectedHistoryProvider(
+        fixture.repository,
+        hashC,
+        vaultRecords,
+        detailRecords,
+      ),
+    });
+
+    expect(indexed.status).toBe("ready");
+    if (indexed.status !== "ready") return;
+    expect(indexed.scannedCommits).toBe(3);
+    expect(indexed.limitedCommits).toEqual([{
+      hash: hashA,
+      committedAt: "2020-09-13T12:26:40.000Z",
+      subject: "Large repository rename",
+      reason: "changed-path-limit",
+      pathLimit: MAX_GIT_PATHS_PER_COMMIT,
+      observedPathRecords: MAX_GIT_PATHS_PER_COMMIT + 2,
+      affectedNoteIds: ["notes/memory", "notes/retrieval"],
+    }]);
+    expect(indexed.notes[0]?.commits[1]).toMatchObject({
+      hash: hashA,
+      changedPaths: ["kb/notes/memory.md", "kb/notes/retrieval.md"],
+      changedPathDetailsLimited: true,
+    });
+    expect(indexed.notes[0]?.commits[0]).not.toHaveProperty("changedPathDetailsLimited");
+
+    const memory = gitHistoryForNotes(indexed, ["notes/memory"]);
+    expect(memory).toMatchObject({
+      status: "ready",
+      notes: [{
+        id: "notes/memory",
+        commits: [
+          { hash: hashC },
+          { hash: hashA, cochangeDetailsLimited: true },
+        ],
+      }],
+      limitedCommits: [{ hash: hashA, affectedNoteIds: ["notes/memory"] }],
+    });
+    const newestMemory = gitHistoryForNotes(indexed, ["notes/memory"], {
+      commitsPerNote: 1,
+    });
+    expect(newestMemory).toMatchObject({ status: "ready", notes: [{ commits: [{ hash: hashC }] }] });
+    expect(newestMemory).not.toHaveProperty("limitedCommits");
+    const unaffected = gitHistoryForNotes(indexed, ["notes/unaffected"]);
+    expect(unaffected).not.toHaveProperty("limitedCommits");
+    expect(searchGitHistory(indexed, {
+      query: "anything",
+      allowedNoteIds: ["notes/unaffected"],
+    })).not.toHaveProperty("limitedCommits");
+    expect(Object.isFrozen(indexed.limitedCommits)).toBeTrue();
+    expect(Object.isFrozen(indexed.limitedCommits?.[0]?.affectedNoteIds)).toBeTrue();
+  });
+
+  test("keeps the aggregate path-observation budget hard after localizing a commit", async () => {
+    const fixture = initializeRepository();
+    const halfBudget = MAX_GIT_PATH_OBSERVATIONS / 2;
+    const vaultRecords = [{
+      hash: hashA,
+      subject: "Unbounded repository rewrite",
+      paths: [
+        "kb/notes/memory.md",
+        ...Array.from(
+          { length: halfBudget - 1 },
+          (_, index) => `kb/removed/path-${index}.md`,
+        ),
+      ],
+    }];
+    const detailRecords = [{
+      ...vaultRecords[0]!,
+      paths: [
+        "kb/notes/memory.md",
+        ...Array.from(
+          { length: halfBudget },
+          (_, index) => `bulk/path-${index}`,
+        ),
+      ],
+    }];
+
+    expect(await rejected(indexGitHistory(fixture, {
+      runGit: injectedHistoryProvider(
+        fixture.repository,
+        hashA,
+        vaultRecords,
+        detailRecords,
+      ),
+    }))).toMatchObject({ kind: "budget" });
+  });
+
+  test("keeps validating paths after a commit crosses its local detail limit", async () => {
+    const fixture = initializeRepository();
+    const vaultRecords = [{
+      hash: hashA,
+      subject: "Malformed repository rewrite",
+      paths: ["kb/notes/memory.md"],
+    }];
+    const detailRecords = [{
+      ...vaultRecords[0]!,
+      paths: [
+        "kb/notes/memory.md",
+        ...Array.from(
+          { length: MAX_GIT_PATHS_PER_COMMIT },
+          (_, index) => `bulk/path-${index}`,
+        ),
+        "../escape.md",
+      ],
+    }];
+
+    expect(await rejected(indexGitHistory(fixture, {
+      runGit: injectedHistoryProvider(
+        fixture.repository,
+        hashA,
+        vaultRecords,
+        detailRecords,
+      ),
+    }))).toMatchObject({ kind: "malformed" });
+  });
+
   test("passes direct bounded argv to an injectable provider", async () => {
     const fixture = initializeRepository();
     const requests: Parameters<GitCommandProvider>[0][] = [];
@@ -239,11 +455,14 @@ describe("Git history indexing", () => {
 
     const indexed = await indexGitHistory(fixture, { runGit: provider });
     expect(indexed.status).toBe("ready");
+    if (indexed.status !== "ready") return;
     expect(requests.length).toBe(4);
     expect(requests.every(({ cwd, timeoutMs, maxOutputBytes }) =>
       cwd === fixture.repository && timeoutMs > 0 && maxOutputBytes > 0)).toBeTrue();
     expect(requests[2]?.arguments).toContain("--");
     expect(requests[2]?.arguments[0]).toBe("--literal-pathspecs");
+    expect(requests[2]?.arguments).toContain(indexed.head);
+    expect(requests[2]?.arguments).not.toContain("HEAD");
     expect(requests[3]?.arguments.at(-1)).toBe("--");
     expect(requests.flatMap(({ arguments: argv }) => argv)).not.toContain("sh");
   });
@@ -328,6 +547,28 @@ describe("Git history indexing", () => {
   });
 
   test("rejects malformed records, traversal paths, and unbounded options", async () => {
+    const atPathLimit = historyOutput("KB-GIT-HISTORY-V1", [{
+      hash: hashA,
+      subject: "At the boundary",
+      paths: Array.from(
+        { length: MAX_GIT_PATHS_PER_COMMIT },
+        (_, index) => `paths/${index}`,
+      ),
+    }]);
+    expect(parseGitHistoryOutput(atPathLimit)[0]?.changedPaths).toHaveLength(
+      MAX_GIT_PATHS_PER_COMMIT,
+    );
+    const repeatedPathRecords = historyOutput("KB-GIT-HISTORY-V1", [{
+      hash: hashA,
+      subject: "Repeated paths",
+      paths: Array.from(
+        { length: MAX_GIT_PATH_OBSERVATIONS + 1 },
+        () => "paths/repeated.md",
+      ),
+    }]);
+    expect(() => parseGitHistoryOutput(repeatedPathRecords)).toThrow(
+      `${MAX_GIT_PATH_OBSERVATIONS} changed-path observation limit`,
+    );
     expect(() => parseGitHistoryOutput(
       ["KB-GIT-HISTORY-V1", hashA, "1600000000", "subject", "\n../escape.md", ""].join("\0"),
     )).toThrow(GitHistoryError);

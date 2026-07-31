@@ -8,13 +8,13 @@ import {
 } from "./index-awz7cev4.js";
 import {
   openKnowledgeBase
-} from "./index-g7s5qk6t.js";
+} from "./index-e2p9924f.js";
 import {
   indexSemanticVault,
   refreshVault,
   scanVault
 } from "./index-hfdajx5y.js";
-import"./index-tb103fj6.js";
+import"./index-7w7gqq0f.js";
 import {
   MAX_PERCOLATION_MENTIONS,
   MAX_PERCOLATION_MENTION_PAIRS,
@@ -902,7 +902,8 @@ function renderKnowledgeBaseSearch(result) {
     lines.push(`  Related graph context: ${result.graph?.related.length ?? 0}`);
   }
   if (result.history?.status === "ready") {
-    lines.push(`  Git provenance: ${result.history.notes.length} notes at ${safe(result.history.head.slice(0, 12))}`);
+    const limited = result.history.limitedCommits?.length ?? 0;
+    lines.push(`  Git provenance: ${result.history.notes.length} notes at ${safe(result.history.head.slice(0, 12))}` + (limited === 0 ? "" : `; ${limited} commit${limited === 1 ? "" : "s"} with incomplete co-change paths`));
   }
   return `${lines.join(`
 `)}

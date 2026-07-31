@@ -348,6 +348,135 @@ describe("knowledge-base session", () => {
     }
   });
 
+  test("localizes incomplete Git detail across automatic and required history policies", async () => {
+    const { temporary, root } = await fixture();
+    let indexes = 0;
+    try {
+      const kb = await openKnowledgeBase(
+        { root, repository: temporary },
+        {
+          indexGitHistory: (options): Promise<GitHistoryIndex> => {
+            indexes += 1;
+            const limitedHash = "c".repeat(40);
+            const head = "e".repeat(40);
+            return Promise.resolve({
+              status: "ready",
+              repository: temporary,
+              root,
+              vaultPrefix: "kb",
+              head,
+              scannedCommits: 2,
+              notes: options.notes.map((note) => ({
+                id: note.id,
+                path: note.path,
+                repositoryPath: `kb/${note.path}`,
+                commits: note.id === "notes/exact"
+                  ? [
+                      {
+                        hash: head,
+                        committedAt: "2026-07-30T13:00:00.000Z",
+                        subject: "Normal note update",
+                        changedPaths: [`kb/${note.path}`],
+                      },
+                      {
+                        hash: limitedHash,
+                        committedAt: "2026-07-30T12:00:00.000Z",
+                        subject: "Large repository rename",
+                        changedPaths: [`kb/${note.path}`],
+                        changedPathDetailsLimited: true,
+                      },
+                    ]
+                  : [{
+                      hash: "d".repeat(40),
+                      committedAt: "2026-07-30T13:00:00.000Z",
+                      subject: "Normal note update",
+                      changedPaths: [`kb/${note.path}`],
+                    }],
+              })),
+              limitedCommits: [{
+                hash: limitedHash,
+                committedAt: "2026-07-30T12:00:00.000Z",
+                subject: "Large repository rename",
+                reason: "changed-path-limit",
+                pathLimit: 2_000,
+                observedPathRecords: 3_142,
+                affectedNoteIds: ["notes/exact"],
+              }],
+            });
+          },
+        },
+      );
+
+      const automatic = await kb.search({
+        query: "Alpha Switch",
+        mode: "exact",
+        graph: false,
+        history: "auto",
+      });
+      expect(automatic.history).toMatchObject({
+        status: "ready",
+        notes: [{
+          id: "notes/exact",
+          commits: [
+            { subject: "Normal note update" },
+            { subject: "Large repository rename", cochangeDetailsLimited: true },
+          ],
+        }],
+        limitedCommits: [{ hash: "c".repeat(40), observedPathRecords: 3_142 }],
+      });
+      expect(automatic.partial).toBe(true);
+      expect(automatic.diagnostics.lanes).toContainEqual({
+        lane: "git",
+        status: "degraded",
+        results: 1,
+        message: "1 Git commit exceeded the 2,000 changed-path detail limit; co-change evidence is incomplete.",
+      });
+      expect(packSearchContext(automatic, { maxBytes: 4_000 }).content).toContain(
+        "> Partial: 1 Git commit exceeded the 2,000 changed-path detail limit",
+      );
+
+      expect(kb.search({
+        query: "Alpha Switch",
+        mode: "exact",
+        graph: false,
+        history: "required",
+      })).rejects.toThrow("Required Git history is incomplete");
+      const boundedRequired = await kb.search({
+        query: "Alpha Switch",
+        mode: "exact",
+        graph: false,
+        history: { policy: "required", noteLimit: 1, commitsPerNote: 1 },
+      });
+      expect(boundedRequired.partial).toBe(false);
+      expect(boundedRequired.history).not.toHaveProperty("limitedCommits");
+      expect(kb.search({
+        query: "Alpha Switch",
+        mode: "exact",
+        graph: false,
+        history: { policy: "required", noteLimit: 1, commitsPerNote: 2 },
+      })).rejects.toThrow("Required Git history is incomplete");
+
+      const unaffected = await kb.search({
+        query: "Browser Memory",
+        mode: "exact",
+        graph: false,
+        history: "required",
+      });
+      expect(unaffected.partial).toBe(false);
+      expect(unaffected.history).toMatchObject({ status: "ready" });
+      expect(unaffected.history).not.toHaveProperty("limitedCommits");
+      expect(await kb.history(["notes/exact"])).toMatchObject({
+        status: "ready",
+        limitedCommits: [{ hash: "c".repeat(40) }],
+      });
+      expect(await kb.history(["notes/semantic"])).not.toHaveProperty("limitedCommits");
+      expect(indexes).toBe(1);
+      await kb.close();
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
   test("degrades optional Git index errors but rejects both required forms", async () => {
     const { temporary, root } = await fixture();
     let indexes = 0;

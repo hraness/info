@@ -262,9 +262,15 @@ along with a bounded neighborhood around the strongest results. These graph
 neighbors remain a separate context collection. They do not enter primary text
 rank or become authored edges. When a repository root is supplied, bounded Git
 history can likewise explain when a note changed and which paths changed with
-it. Optional Git failure returns an explicit unavailable diagnostic and marks
-the search partial. `history: "required"` or an options object with
-`policy: "required"` rejects instead. Git evidence is provenance and
+it. A commit that exceeds the per-commit changed-path detail limit retains its
+hash, subject, time, and vault-local note associations while its co-change set
+is marked incomplete. Later commits continue indexing. Automatic history
+returns the usable provenance with a degraded diagnostic only when the selected
+notes are affected. Optional Git failure returns an explicit unavailable
+diagnostic. Both cases mark the search partial. `history: "required"` or an
+options object with `policy: "required"` rejects unavailable or incomplete
+selected-note provenance instead. Aggregate process time, output, commit, and
+path-observation limits remain hard failures. Git evidence is provenance and
 historical recall, not a recency boost.
 
 ## Code mode shares one bounded snapshot

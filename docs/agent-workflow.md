@@ -108,9 +108,12 @@ Graph neighbors and Git provenance are returned separately from the primary
 rank. Use `--related <note>` to seed a bounded explicit neighborhood,
 `--no-graph` when it is unnecessary, and `--no-history` outside a Git
 repository. Use `--require-history` when a result without Git provenance is not
-usable; the command then fails instead of returning a partial Git lane. These
-views explain a result; they do not create links or establish that a claim is
-correct.
+usable; the command then fails instead of returning an unavailable or
+incomplete Git lane. Automatic history keeps normal commits usable when one
+commit exceeds its changed-path detail limit. The affected note retains that
+commit's identity and vault-local association, while diagnostics and packed
+context identify the incomplete co-change evidence. These views explain a
+result; they do not create links or establish that a claim is correct.
 
 For several related operations, open one read-only SDK session and reuse its
 single vault scan:

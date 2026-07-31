@@ -9,7 +9,7 @@ import {
   gitHistoryForNotes,
   indexGitHistory,
   searchGitHistory
-} from "./index-tb103fj6.js";
+} from "./index-7w7gqq0f.js";
 import {
   buildGraphContext,
   fuseRankedCandidates,
@@ -72,6 +72,11 @@ function unavailableHistory(root, reason) {
     vaultPrefix: "",
     reason
   };
+}
+function limitedHistoryMessage(commits) {
+  const count = commits.length;
+  const limit = commits[0]?.pathLimit ?? 0;
+  return `${count} Git commit${count === 1 ? "" : "s"} exceeded the ${limit.toLocaleString("en-US")} changed-path detail limit; co-change evidence is incomplete.`;
 }
 function qmdMode(mode) {
   return mode === "exact" ? null : mode;
@@ -340,10 +345,19 @@ async function openKnowledgeBase(options, dependencies = {}) {
           cochangedPathsPerCommit: historyRequest.options.cochangedPathsPerCommit
         }
       });
-      diagnostics.push(history.status === "ready" ? {
+      const limitedCommits = history.status === "ready" ? history.limitedCommits ?? [] : [];
+      if (historyRequest.required && limitedCommits.length > 0) {
+        throw new GitHistoryError("budget", `Required Git history is incomplete: ${limitedHistoryMessage(limitedCommits)}`);
+      }
+      diagnostics.push(history.status === "ready" && limitedCommits.length === 0 ? {
         lane: "git",
         status: "ready",
         results: history.notes.length
+      } : history.status === "ready" ? {
+        lane: "git",
+        status: "degraded",
+        results: history.notes.length,
+        message: limitedHistoryMessage(limitedCommits)
       } : {
         lane: "git",
         status: "unavailable",
@@ -423,7 +437,9 @@ Mode: ${result.mode}
     ...result.history?.status !== "ready" ? [] : [
       `## Git provenance
 
-` + result.history.notes.flatMap((note) => note.commits.map((commit) => `- ${note.path}: ${commit.committedAt} ${commit.hash.slice(0, 12)} ${commit.subject}`)).join(`
+` + ((result.history.limitedCommits?.length ?? 0) === 0 ? "" : `> Partial: ${limitedHistoryMessage(result.history.limitedCommits ?? [])}
+
+`) + result.history.notes.flatMap((note) => note.commits.map((commit) => `- ${note.path}: ${commit.committedAt} ${commit.hash.slice(0, 12)} ${commit.subject}`)).join(`
 `)
     ]
   ];

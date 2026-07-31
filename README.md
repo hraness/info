@@ -14,7 +14,7 @@ history are authoritative; the QMD search database, graph views, catalog, and
 Git index are derived and replaceable.
 
 ```sh
-bun add --global github:hraness/kb#v0.11.0
+bun add --global github:hraness/kb#v0.11.1
 ```
 
 [article](https://crclte.com/articles/a-durable-knowledge-base-is-a-write-path)
@@ -146,6 +146,8 @@ The default search adds [QMD, a local search engine for Markdown](<https://githu
 
 Backlinks, typed relations, and Git history answer different questions, so they stay outside the primary text rank. A search result can include a bounded graph neighborhood and recent commits for the returned notes as separate evidence. Git can also search commit messages and changed paths directly. This helps an agent distinguish why a note is relevant from how it is connected or when it changed.
 
+Git indexing bounds each commit's changed-path detail. If a repository-wide rename crosses that limit, KB retains the commit identity and its vault-local note associations, marks co-change paths incomplete for affected notes, and continues with later commits. Automatic search returns that usable lane as partial; `--require-history` rejects incomplete selected-note provenance.
+
 A vector score does not mean that a passage is current, correct, or supported by its sources. Use hybrid search to find candidates, metadata to narrow them, links and Git provenance to inspect context, and the Markdown plus cited captures to verify the answer. QMD remains optional and local. Deleting its database does not delete knowledge.
 
 ### Let concepts and relationships percolate
@@ -239,7 +241,7 @@ Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
 Install hraness/kb and its bundled Agent Skills from
-https://github.com/hraness/kb at the immutable v0.11.0 tag. Follow the repository
+https://github.com/hraness/kb at the immutable v0.11.1 tag. Follow the repository
 README, install the `kb` CLI, copy or link the skills I need into this agent
 runner's configured skills directory, and verify the installation with
 `kb doctor` and `kb --help`. Do not initialize or modify a vault until I ask.
@@ -249,10 +251,10 @@ The repository and packed package carry the same skill directories, so an agent
 can inspect the tagged instructions before placing them in its runner-specific
 discovery path.
 
-Install the CLI from the immutable `v0.11.0` tag:
+Install the CLI from the immutable `v0.11.1` tag:
 
 ```sh
-bun add --global github:hraness/kb#v0.11.0
+bun add --global github:hraness/kb#v0.11.1
 kb --help
 ```
 
@@ -261,7 +263,7 @@ For programmatic use, declare the same pinned source in a project:
 ```json
 {
   "dependencies": {
-    "@hraness/kb": "github:hraness/kb#v0.11.0"
+    "@hraness/kb": "github:hraness/kb#v0.11.1"
   }
 }
 ```
@@ -337,7 +339,7 @@ question deliberately.
 | `kb percolate [note] --root <directory>` | Report evidence-backed recurring-concept and missing-relationship candidates without writing notes. |
 | `kb list --root <directory>` | Filter typed, nested frontmatter and tags; sort by metadata, title, path, or graph counts. `kb notes` is an alias. |
 | `kb index --root <directory>` | Build or incrementally refresh the optional local QMD embedding index. |
-| `kb search <query> --root <directory>` | Combine live exact matches with local QMD keyword and vector retrieval. Use `--mode exact\|keyword\|semantic`, metadata and tag filters, bounded graph context, or separate Git provenance. `--require-history` fails when Git provenance is unavailable; `--no-history` skips it. |
+| `kb search <query> --root <directory>` | Combine live exact matches with local QMD keyword and vector retrieval. Use `--mode exact\|keyword\|semantic`, metadata and tag filters, bounded graph context, or separate Git provenance. `--require-history` fails when selected-note provenance is unavailable or incomplete; `--no-history` skips it. |
 | `kb context <repository-path> --root <vault> --repo <repository>` | List inherited guides root to nearest and reciprocal context hubs nearest to root. Use `--kind auto\|file\|directory` to control how the target path is interpreted. |
 | `kb agents identity <repository-scope>` | Derive the normalized scope, canonical hub ID and path, owning guide path, and exact reciprocal marker without writing files. |
 | `kb agents check --root <vault> --repo <repository>` | Validate context identities, exact scopes, reciprocal markers, real guide paths, collisions, confinement, and guide shape. Unmapped guides remain valid. |

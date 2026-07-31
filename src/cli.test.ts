@@ -1078,6 +1078,87 @@ describe("kb vault commands", () => {
     expect(searchOutput.stdout()).toContain("notes/memory.md:4");
   });
 
+  test("renders usable but incomplete Git provenance in text and JSON search output", async () => {
+    const result = {
+      query: "agent memory",
+      mode: "exact" as const,
+      results: [],
+      graph: null,
+      history: {
+        status: "ready" as const,
+        head: "a".repeat(40),
+        notes: [{ id: "notes/memory", path: "notes/memory.md", commits: [] }],
+        limitedCommits: [{
+          hash: "b".repeat(40),
+          committedAt: "2026-07-30T12:00:00.000Z",
+          subject: "Large repository rename",
+          reason: "changed-path-limit" as const,
+          pathLimit: 2_000,
+          observedPathRecords: 3_142,
+          affectedNoteIds: ["notes/memory"],
+        }],
+      },
+      partial: true,
+      diagnostics: {
+        notes: 1,
+        model: null,
+        elapsedMs: 2,
+        lanes: [{
+          lane: "git" as const,
+          status: "degraded" as const,
+          results: 1,
+          message: "1 Git commit exceeded the 2,000 changed-path detail limit; co-change evidence is incomplete.",
+        }],
+      },
+    };
+    const openKnowledgeBase = (): Promise<KnowledgeBaseSession> => Promise.resolve({
+      root: "/vault",
+      repository: ".",
+      noteCount: 1,
+      grep: () => [],
+      list: () => [],
+      read: () => { throw new Error("not used"); },
+      links: () => { throw new Error("not used"); },
+      backlinks: () => { throw new Error("not used"); },
+      search: () => Promise.resolve(result),
+      history: () => Promise.resolve(result.history),
+      searchHistory: () => { throw new Error("not used"); },
+      close: () => Promise.resolve(),
+    });
+
+    const textOutput = captureOutput();
+    expect(await main([
+      "search",
+      "agent memory",
+      "--root",
+      "vault",
+      "--repo",
+      ".",
+      "--mode",
+      "exact",
+    ], textOutput.output, { openKnowledgeBase })).toBe(0);
+    expect(textOutput.stdout()).toContain("[partial]");
+    expect(textOutput.stdout()).toContain("1 commit with incomplete co-change paths");
+
+    const jsonOutput = captureOutput();
+    expect(await main([
+      "search",
+      "agent memory",
+      "--root",
+      "vault",
+      "--repo",
+      ".",
+      "--mode",
+      "exact",
+      "--json",
+    ], jsonOutput.output, { openKnowledgeBase })).toBe(0);
+    expect(parseJsonObject(jsonOutput.stdout())).toMatchObject({
+      partial: true,
+      history: { limitedCommits: [{ observedPathRecords: 3_142 }] },
+      diagnostics: { lanes: [{ lane: "git", status: "degraded" }] },
+    });
+  });
+
   test("reports broken links as check failures and sanitizes thrown terminal text", async () => {
     const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-"));
     try {

@@ -1048,7 +1048,13 @@ function renderKnowledgeBaseSearch(result: KnowledgeBaseSearchResult): string {
     lines.push(`  Related graph context: ${result.graph?.related.length ?? 0}`);
   }
   if (result.history?.status === "ready") {
-    lines.push(`  Git provenance: ${result.history.notes.length} notes at ${safe(result.history.head.slice(0, 12))}`);
+    const limited = result.history.limitedCommits?.length ?? 0;
+    lines.push(
+      `  Git provenance: ${result.history.notes.length} notes at ${safe(result.history.head.slice(0, 12))}`
+      + (limited === 0
+        ? ""
+        : `; ${limited} commit${limited === 1 ? "" : "s"} with incomplete co-change paths`),
+    );
   }
   return `${lines.join("\n")}\n`;
 }

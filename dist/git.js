@@ -12,7 +12,7 @@ import {
   parseGitHistoryOutput,
   runGitCommand,
   searchGitHistory
-} from "./index-tb103fj6.js";
+} from "./index-7w7gqq0f.js";
 export {
   searchGitHistory,
   runGitCommand,
