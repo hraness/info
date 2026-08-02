@@ -37,10 +37,6 @@ Search alone cannot preserve agent memory. The system also needs a write path in
 
 [hraness/kb](<https://hraness.com/kb>) implements that split as repository-adjacent Markdown and Git. Exact lookup, metadata filters, local search, explicit links, and Git provenance help an agent find and inspect the files without making application code depend on the knowledge system.
 
-![Four icon cards show sources flowing into durable memory, linked ideas, and search for reuse by future coding-agent sessions.](<https://hraness.com/engineering/diagrams/a-durable-knowledge-base-is-a-write-path.light.webp>)
-
-*hraness/kb turns source material into memory that agents can link and find again.*
-
 ### The pattern converged across agent tools
 
 [Devin's 2024 release history](<https://docs.devin.ai/release-notes/2024>) records Knowledge that could be recalled across future sessions and Repo Knowledge produced by scanning repositories. Its [2025 release history](<https://docs.devin.ai/release-notes/2025>) records DeepWiki in April, codebase intelligence inside Devin in May, and a DeepWiki Model Context Protocol server later that month.
