@@ -19,6 +19,7 @@ function fixture() {
       "aliases: [Agent memory]",
       "tags: [agents, retrieval]",
       "status: current",
+      "repository_scopes: [packages/kb]",
       "relations:",
       "  supports: notes/evidence",
       "---",
@@ -32,6 +33,7 @@ function fixture() {
       "---",
       "tags: [agents, context]",
       "status: current",
+      "repository_scopes: [packages/KB]",
       "---",
       "# Repository context",
       "",
@@ -73,7 +75,7 @@ describe("live exact search", () => {
     expect(prose[0]).toMatchObject({
       id: "notes/write-path",
       identity: false,
-      line: 11,
+      line: 12,
     });
     expect(prose[0]?.snippet).toContain("chat disappears");
   });
@@ -100,6 +102,22 @@ describe("live exact search", () => {
       filters: [{ kind: "equals", path: "status", value: "current" }],
     });
     expect(results.map(({ id }) => id)).toEqual(["notes/write-path"]);
+  });
+
+  test("applies exact repository-scope filtering before ranking", () => {
+    const { notes, analysis } = fixture();
+    expect(searchExactVault(notes, analysis, {
+      query: "agent",
+      repositoryScopes: ["packages/kb"],
+    }).map(({ id }) => id)).toEqual(["notes/write-path"]);
+    expect(searchExactVault(notes, analysis, {
+      query: "agent",
+      repositoryScopes: ["packages/KB"],
+    }).map(({ id }) => id)).toEqual(["notes/repository-context"]);
+    expect(() => searchExactVault(notes, analysis, {
+      query: "agent",
+      repositoryScopes: ["packages//kb"],
+    })).toThrow("exact NFC-normalized POSIX form");
   });
 
   test("requires useful query coverage and does not reward repetition in long notes", () => {

@@ -12,7 +12,7 @@ import {
   inspectClipEnvironment,
   renderAdapterCapabilities,
   renderDoctorReport
-} from "./index-wty076xc.js";
+} from "./index-0kv488m1.js";
 import {
   acquireBrowser,
   acquireCookieHttp,
@@ -20,7 +20,7 @@ import {
   acquireFile,
   acquireHttp,
   assertSafePersistentProfile
-} from "./index-qx5jr97w.js";
+} from "./index-s3vk4e6j.js";
 import {
   CONTENT_REWRITE_TRUNCATION_WARNING,
   buildClipMarkdown,
@@ -32,6 +32,9 @@ import {
   rewriteContentWithStatus,
   slugify
 } from "./index-hgve9rh2.js";
+import {
+  startNetworkProxy
+} from "./index-7qhzw38d.js";
 import {
   abortCaptureBundle,
   beginCaptureBundle,
@@ -58,9 +61,6 @@ import {
   renderCookieHeader,
   renderNetscapeCookieJar
 } from "./index-84x0vjjp.js";
-import {
-  startNetworkProxy
-} from "./index-7qhzw38d.js";
 import {
   decodeBytes,
   safeFetch

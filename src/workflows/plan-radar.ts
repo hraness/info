@@ -1,5 +1,9 @@
 import type { GitHistoryForNotesResult } from "../git.js";
-import type { QueryRow } from "../query.js";
+import type { MetadataFilter, QueryRow } from "../query.js";
+import {
+  activePlanStatuses,
+  type PlanStatus,
+} from "../repository-memory";
 import {
   type KnowledgeBaseSearchResult,
   type KnowledgeBaseSession,
@@ -8,7 +12,9 @@ import { defineWorkflow } from "../workflow.js";
 
 export type PlanRadarInput = {
   readonly query: string;
-  readonly status?: string;
+  /** Omit for all active statuses; terminal statuses request an explicit historical view. */
+  readonly status?: PlanStatus;
+  readonly repositoryScopes?: readonly string[];
   readonly resultLimit?: number;
 };
 
@@ -25,6 +31,15 @@ type PlanRadarResults = {
   readonly assemble: PlanRadarOutput;
 };
 
+function planFilters(status: PlanStatus | undefined): readonly MetadataFilter[] {
+  return [
+    { kind: "equals", path: "type", value: "plan" },
+    status === undefined
+      ? { kind: "one-of", path: "status", values: activePlanStatuses }
+      : { kind: "equals", path: "status", value: status },
+  ];
+}
+
 /** Combine exact plan state with semantic matches, backlinks, and recent provenance. */
 export const planRadarWorkflow = defineWorkflow<
   PlanRadarInput,
@@ -37,10 +52,8 @@ export const planRadarWorkflow = defineWorkflow<
     {
       id: "plans",
       run: ({ input, kb }) => kb.list({
-        filters: [
-          { kind: "equals", path: "type", value: "plan" },
-          { kind: "equals", path: "status", value: input.status ?? "in-progress" },
-        ],
+        filters: planFilters(input.status),
+        repositoryScopes: input.repositoryScopes ?? [],
         sort: { kind: "builtin", field: "inbound" },
         direction: "desc",
         limit: 100,
@@ -51,7 +64,8 @@ export const planRadarWorkflow = defineWorkflow<
       resource: "qmd",
       run: ({ input, kb }) => kb.search({
         query: input.query,
-        filters: [{ kind: "equals", path: "type", value: "plan" }],
+        filters: planFilters(input.status),
+        repositoryScopes: input.repositoryScopes ?? [],
         history: false,
         ...(input.resultLimit === undefined ? {} : { limit: input.resultLimit }),
       }),

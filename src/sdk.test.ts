@@ -74,6 +74,7 @@ async function fixture(): Promise<{
       "title: Alpha Switch",
       "tags: [capture]",
       "status: active",
+      "repository_scopes: [packages/kb]",
       "---",
       "# Alpha Switch",
       "",
@@ -91,6 +92,7 @@ async function fixture(): Promise<{
       "title: Browser Memory",
       "tags: [capture]",
       "status: active",
+      "repository_scopes: [packages/KB]",
       "---",
       "# Browser Memory",
       "",
@@ -106,6 +108,7 @@ async function fixture(): Promise<{
       "title: Old Capture",
       "tags: [capture]",
       "status: archived",
+      "repository_scopes: [packages/kb]",
       "---",
       "# Old Capture",
       "",
@@ -135,6 +138,7 @@ function fakeSemanticSession(
 describe("knowledge-base session", () => {
   test("shares one scan and semantic session while fusing, filtering, and enriching", async () => {
     const { temporary, root } = await fixture();
+    const embeddingModelFile = join(temporary, "verified-model.gguf");
     let scans = 0;
     let opens = 0;
     let searches = 0;
@@ -146,14 +150,15 @@ describe("knowledge-base session", () => {
     };
     try {
       const kb = await openKnowledgeBase(
-        { root, repository: temporary },
+        { root, repository: temporary, embeddingModelFile },
         {
           scanVault: async (requestedRoot, options) => {
             scans += 1;
             return await scanVault(requestedRoot, options);
           },
-          openSemanticSearchSession: () => {
+          openSemanticSearchSession: (options) => {
             opens += 1;
+            expect(options.embeddingModelFile).toBe(embeddingModelFile);
             startColdLane("qmd");
             return Promise.resolve(fakeSemanticSession(
               root,
@@ -227,7 +232,7 @@ describe("knowledge-base session", () => {
       expect(result.graph?.linksAmongResults).toContainEqual({
         source: "notes/exact.md",
         target: "notes/semantic.md",
-        line: 10,
+        line: 11,
       });
       expect(result.history?.status).toBe("ready");
       if (result.history?.status === "ready") {
@@ -283,6 +288,57 @@ describe("knowledge-base session", () => {
       await Promise.all([kb.close(), kb.close()]);
       expect(closes).toBe(1);
       expect(() => kb.list()).toThrow("session is closed");
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("applies exact repository scopes consistently to list, exact, and QMD lanes", async () => {
+    const { temporary, root } = await fixture();
+    const seen: SemanticSessionSearchOptions[] = [];
+    try {
+      const kb = await openKnowledgeBase(
+        { root },
+        {
+          openSemanticSearchSession: () => Promise.resolve(fakeSemanticSession(
+            root,
+            (options) => {
+              seen.push(options);
+              return Promise.resolve({
+                root,
+                database: join(root, "qmd.sqlite"),
+                model: recommendedEmbeddingModel,
+                mode: options.mode ?? "semantic",
+                query: options.query,
+                update,
+                embedding: null,
+                results: [
+                  semanticHit("notes/semantic.md", "Browser Memory", "Wrong case scope."),
+                  semanticHit("notes/exact.md", "Alpha Switch", "Exact scope."),
+                ],
+              });
+            },
+            () => Promise.resolve(),
+          )),
+        },
+      );
+      expect(kb.list({ repositoryScopes: ["packages/kb"] }).map(({ id }) => id))
+        .toEqual(["notes/archived", "notes/exact"]);
+      const result = await kb.search({
+        query: "Alpha Switch",
+        repositoryScopes: ["packages/kb"],
+        graph: false,
+        history: false,
+      });
+      expect(result.results.map(({ id }) => id)).toEqual(["notes/exact"]);
+      expect(seen).toHaveLength(1);
+      expect(kb.search({
+        query: "Alpha Switch",
+        repositoryScopes: ["packages//kb"],
+        graph: false,
+        history: false,
+      })).rejects.toThrow("exact NFC-normalized POSIX form");
+      await kb.close();
     } finally {
       await rm(temporary, { recursive: true, force: true });
     }

@@ -12,6 +12,7 @@ import { join } from "node:path";
 import {
   auditAgentGuides,
   auditAgentGuideSource,
+  compareAgentGuideAudits,
   discoverAgentGuides,
 } from "./agent-guide-audit.js";
 
@@ -166,6 +167,89 @@ describe("agent guide audit", () => {
     });
 
     expect(report.advisories[0]?.kind).toBe("long-guideline");
+  });
+
+  test("reports only positive guide regressions and compares long bullets by text", () => {
+    const existingLong = "Keep this established long guideline stable across harmless line movement.";
+    const repeated = "Keep one exact rule shared by both guide scopes.";
+    const options = {
+      guidelineBulletWords: 5,
+      inheritedWords: 10_000,
+    } as const;
+    const base = auditAgentGuides([
+      guide("AGENTS.md", ["root"], [existingLong, repeated]),
+      guide("packages/AGENTS.md", ["packages"], ["A compact package rule."]),
+      guide(
+        "projects/AGENTS.md",
+        ["projects with an intentionally longer baseline description"],
+        ["A deliberately verbose project guideline that becomes shorter later."],
+      ),
+    ], options);
+    const current = auditAgentGuides([
+      guide(
+        "AGENTS.md",
+        ["root with added context"],
+        ["A short inserted rule.", existingLong, repeated],
+      ),
+      guide("packages/AGENTS.md", ["packages"], [
+        repeated,
+        "Document this newly introduced guideline with enough detail to cross the threshold.",
+      ]),
+      guide("projects/AGENTS.md", ["projects"], ["Short project rule."]),
+    ], options);
+
+    expect(current.guides.find(({ path }) => path === "AGENTS.md")
+      ?.guidelines.bullets.find(({ text }) => text === existingLong)?.line)
+      .not.toBe(base.guides.find(({ path }) => path === "AGENTS.md")
+        ?.guidelines.bullets.find(({ text }) => text === existingLong)?.line);
+
+    const comparison = compareAgentGuideAudits(base, current);
+    expect(comparison.guideWordRegressions.map(({ path }) => path)).toEqual([
+      "AGENTS.md",
+      "packages/AGENTS.md",
+    ]);
+    expect(comparison.guideWordRegressions.some(({ path }) =>
+      path === "projects/AGENTS.md")).toBe(false);
+    expect(comparison.inheritedWordRegressions.map(({ path }) => path)).toEqual([
+      "AGENTS.md",
+      "packages/AGENTS.md",
+    ]);
+    expect(comparison.newlyLongGuidelines).toEqual([{
+      path: "packages/AGENTS.md",
+      line: 8,
+      text: "Document this newly introduced guideline with enough detail to cross the threshold.",
+      words: 12,
+      suggestedWords: 5,
+    }]);
+    expect(comparison.newlyLongGuidelines.some(({ text }) => text === existingLong)).toBe(false);
+    expect(comparison.expandedDuplicateGuidelines).toEqual([{
+      text: repeated,
+      words: 9,
+      baseGuides: ["AGENTS.md"],
+      currentGuides: ["AGENTS.md", "packages/AGENTS.md"],
+      addedGuides: ["packages/AGENTS.md"],
+    }]);
+  });
+
+  test("treats a new guide as positive growth and ignores removed duplicate occurrences", () => {
+    const repeated = "Keep this exact shared rule unchanged.";
+    const base = auditAgentGuides([
+      guide("AGENTS.md", ["root"], [repeated]),
+      guide("old/AGENTS.md", ["old"], [repeated]),
+    ]);
+    const current = auditAgentGuides([
+      guide("AGENTS.md", ["root"], [repeated]),
+      guide("new/AGENTS.md", ["new"], ["A new scoped rule."]),
+    ]);
+
+    const comparison = compareAgentGuideAudits(base, current);
+    expect(comparison.guideWordRegressions.map(({ path, baseWords }) => ({
+      path,
+      baseWords,
+    }))).toEqual([{ path: "new/AGENTS.md", baseWords: 0 }]);
+    expect(comparison.inheritedWordRegressions.some(({ path }) =>
+      path === "new/AGENTS.md")).toBe(true);
+    expect(comparison.expandedDuplicateGuidelines).toEqual([]);
   });
 });
 

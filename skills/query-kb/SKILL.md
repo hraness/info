@@ -10,7 +10,7 @@ authority; search scores, metadata rows, and graph results are derived views.
 
 ## Locate the vault
 
-- Resolve `<vault>` to the directory containing the managed `index.md`, then
+- Resolve `<vault>` to the directory containing its managed or authored `index.md`, then
   set the shell-local `KB_ROOT` to that path (`KB_ROOT=kb` from a typical
   repository root, or `KB_ROOT=.` from inside the vault).
 - Resolve `<repository>` to the repository root when the question concerns a
@@ -22,18 +22,23 @@ authority; search scores, metadata rows, and graph results are derived views.
 ## Choose the retrieval lane
 
 - Repository file or directory: run `kb context` first. Read its inherited
-  guides root to nearest, then open only useful context hubs from nearest to
-  root.
+  guides root to nearest, then inspect its maintained knowledge, active plans,
+  dated research, reports, and separate historical-plan group. Open only useful
+  context hubs or records.
 - Known frontmatter field or tag such as type, status, or area: use `kb list`.
 - Known note title, path, or alias: use `kb links` or `kb backlinks`, which
   resolve note identities before returning authored relationships.
 - A whole-vault structural question or relationship audit: use `kb graph --json`,
   then inspect the smallest relevant portion of its canonical output.
 - A phrase, identity, or concept expressed with different vocabulary: use `kb search`, whose default hybrid result preserves exact and QMD evidence separately.
-- Broad orientation: read `index.md`, then follow the smallest useful link trail.
+- Direct provenance for one note or repository path: use `kb history` or
+  `kb history search` without changing authored metadata or links.
+- Recent captures awaiting maintained disposition: use the advisory `kb inbox` view.
+- Broad orientation: read `index.md`, then follow the smallest useful link trail. Use `kb catalog` when an exhaustive disposable inventory is actually needed.
 
 ```sh
 kb context src/parser.ts --root "$KB_ROOT" --repo "$KB_REPO"
+kb list --root "$KB_ROOT" --scope src/parser --where type=plan --json
 kb list --root "$KB_ROOT" --where type=plan --where status=in-progress --sort area --json
 kb list --root "$KB_ROOT" --tag retrieval --sort title --json
 kb backlinks "Plan title or path" --root "$KB_ROOT" --json
@@ -43,9 +48,16 @@ kb graph --root "$KB_ROOT" --json
 kb search "why browser capture uses the current tab" --root "$KB_ROOT" --json
 kb search "accepted ingestion plans" --root "$KB_ROOT" --where type=plan --where status=accepted --tag ingestion --json
 kb search "notes/write-path" --root "$KB_ROOT" --mode exact --no-history --json
+kb history "notes/write-path" --root "$KB_ROOT" --repo "$KB_REPO" --json
+kb history search src/parser.ts --root "$KB_ROOT" --repo "$KB_REPO" --json
+kb inbox --root "$KB_ROOT" --limit 25 --json
 ```
 
-`kb context` prints hub titles and summaries, not hub bodies. Guides remain
+`kb context` prints hub and record summaries, not their bodies. Each record
+states the exact `repository_scopes` declaration that matched, the match depth,
+and whether that declaration currently names a file, directory, or absent
+future or retired path. Current memory and terminal plans stay in separate
+groups. Guides remain
 the normative, always-loaded home for ownership, required commands,
 prohibitions, invariants, and edit gates. Scope hubs are optional pull-based
 rationale, history, examples, evidence, and links; they cannot override a guide
@@ -59,6 +71,9 @@ Missing sort values come last, with path as the deterministic tie-breaker.
 titles or file paths. Unquoted `true`, `false`, `null`, and numeric filter
 values are typed. Keep quotes inside the argument to match a string with the
 same spelling, for example `--where 'external_id="9007199254740993"'`.
+`--scope` is an exact, case-sensitive repository-scope filter rather than a
+substring or area match. Use it when the desired authored path declaration is
+known.
 
 ## Use hybrid search as discovery
 
@@ -94,6 +109,12 @@ proceed with a partial Git lane. `--no-history` remains an explicit compatibilit
 form. Graph neighbors and Git history remain separate from primary
 text rank. They explain and expand candidates without becoming authored facts,
 links, or recency boosts.
+
+`kb history <note>` returns the bounded commit history already associated with
+one resolved note. `kb history search <query-or-path>` searches the bounded Git
+projection directly and retains hashes, subjects, matched paths, co-change
+paths, and incomplete-detail diagnostics. Git co-change is historical evidence,
+not permission to write a scope or relationship.
 
 ## Reuse one snapshot in code mode
 
@@ -174,3 +195,9 @@ not write generated backlink sections into notes. If the query exposes stale
 metadata or a broken link, repair the authored Markdown and finish with
 `kb refresh --root "$KB_ROOT"` and `kb check --root "$KB_ROOT"`.
 Close any open SDK session before that repair and reopen it after validation.
+
+An authored `index.md` may declare `kb_catalog: authored`; refresh and check
+then leave it untouched. `kb catalog --root "$KB_ROOT"` renders the exhaustive
+inventory on demand. A managed vault keeps the original generated-catalog
+behavior. Neither mode changes scanning, graph analysis, semantic indexing, or
+attachment validation.

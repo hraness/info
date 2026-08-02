@@ -10,12 +10,25 @@ record, not a disposable answer or a duplicate task tracker.
 
 ## Find the plan's owner
 
-1. Resolve `<vault>` to the directory containing the managed `index.md`, then
+1. Resolve `<vault>` to the directory containing its authored or managed
+   `index.md` front door, then
    set the shell-local `KB_ROOT` to that path (`KB_ROOT=kb` from a typical
    repository root, or `KB_ROOT=.` from inside the vault). Read the vault's
    `AGENTS.md` and the nearest guide under `<vault>/plans/`. Pass that resolved
    root to every command; do not assume the starting directory is the vault.
-2. Search existing plans before creating one:
+2. When the plan owns a repository path, resolve the repository root as
+   `KB_REPO` and load that path's current memory before a whole-vault search:
+
+```sh
+kb context "<repository-path>" --root "$KB_ROOT" --repo "$KB_REPO"
+```
+
+Use `--kind file` or `--kind directory` when an absent future path cannot be
+classified from the filesystem. Read the inherited guides first, then the
+applicable maintained knowledge, active plans, dated research, reports, and
+separate historical-plan group.
+
+3. Search existing plans before creating one:
 
 ```sh
 kb list --root "$KB_ROOT" --where type=plan --sort area --json
@@ -30,9 +43,9 @@ being asked. Semantic search writes only a derived local cache; when that cache
 location is not writable, use exact search or point `XDG_CACHE_HOME` at a
 writable cache directory.
 
-3. Update an existing plan when it already owns the outcome. Create a new file
+4. Update an existing plan when it already owns the outcome. Create a new file
    only for independently executable work.
-4. Use `<vault>/plans/<descriptive-kebab-name>.md` unless the local guide already groups
+5. Use `<vault>/plans/<descriptive-kebab-name>.md` unless the local guide already groups
    plans by area. Do not reorganize older plans merely to impose a new tree.
 
 ## Write from evidence
@@ -54,10 +67,14 @@ in-scope evidence. Stop and request direction when the unknown would change the
 intended outcome, expand authority or external coordination, or choose between
 materially different products.
 
-Use small frontmatter. Start with `type: plan`, a kebab-case `area`, and one of
-`proposed`, `accepted`, `in-progress`, `blocked`, `completed`, `superseded`, or
-`cancelled`. Add `title`, `description`, `aliases`, or `tags` only when they help
-humans or structured queries.
+Use small frontmatter. Start with `type: plan`, a descriptive title and
+one-sentence description, a kebab-case `area`, and one of `proposed`,
+`accepted`, `in-progress`, `blocked`, `completed`, `superseded`, or `cancelled`.
+When the plan owns work in a code repository, add `repository_scopes` with the
+few exact canonical repository-relative files or directories it explains. Use
+no globs. A future path is valid; update an active plan deliberately when code
+moves instead of relying on inferred Git renames. Add aliases or tags only when
+they help humans or structured queries.
 
 ## Grow the same file during execution
 
@@ -67,9 +84,12 @@ humans or structured queries.
   evidence where a future reader can understand their consequence.
 - When blocked, name the exact missing condition and the safe work already
   completed.
-- On completion, summarize the result and residual limits. Link reusable current
-  understanding into `notes/` and move current operating truth into code or
-  documentation. Retain the completed plan as history.
+- When a plan becomes `completed`, `superseded`, or `cancelled`, write a
+  non-empty `## Result` and `## Durable memory`. State what shipped or why work
+  stopped in Result. In Durable memory, link each reusable conclusion to the
+  maintained note, guide, documentation, or checked code contract that now owns
+  it. When nothing warrants promotion, say so explicitly and give the reason.
+  Retain the terminal plan as history.
 - Do not create separate progress, review, or completion files for the same
   plan.
 
@@ -93,3 +113,8 @@ relationship in the plan's prose. An independently useful plan may legitimately
 remain an orphan in a new or sparse vault. Record that disposition mentally or
 in the task handoff; do not manufacture links or relations merely to improve
 graph counts.
+
+In an authored-catalog vault, refresh leaves the front door unchanged and `kb
+catalog --root "$KB_ROOT"` renders an exhaustive disposable inventory. In a
+managed vault, independent edit lanes use `kb check --root "$KB_ROOT"
+--no-catalog`; the integrating lane performs the single catalog refresh.

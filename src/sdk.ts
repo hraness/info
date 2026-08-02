@@ -84,6 +84,8 @@ export type KnowledgeBaseSearchOptions = {
   readonly mode?: KnowledgeBaseSearchMode;
   readonly filters?: QueryOptions["filters"];
   readonly tags?: readonly string[];
+  /** Match any exact, case-sensitive canonical authored repository scope. */
+  readonly repositoryScopes?: readonly string[];
   readonly limit?: number;
   readonly candidateLimit?: number;
   /** QMD-local score cutoff for hybrid, keyword, and semantic modes. */
@@ -165,6 +167,8 @@ export type OpenKnowledgeBaseOptions = {
   /** Repository root enables bounded Git history and provenance. */
   readonly repository?: string;
   readonly database?: string;
+  /** Verified local bytes for the pinned semantic model. */
+  readonly embeddingModelFile?: string;
   readonly scan?: Omit<ScanVaultOptions, "mentionScope">;
 };
 
@@ -424,6 +428,9 @@ export async function openKnowledgeBase(
       {
         root: snapshot.root,
         ...(options.database === undefined ? {} : { database: options.database }),
+        ...(options.embeddingModelFile === undefined
+          ? {}
+          : { embeddingModelFile: options.embeddingModelFile }),
       },
       {
         ...(dependencies.semantic ?? {}),
@@ -524,7 +531,8 @@ export async function openKnowledgeBase(
     );
     const filters = searchOptions.filters ?? [];
     const tags = searchOptions.tags ?? [];
-    const filtered = filters.length > 0 || tags.length > 0;
+    const repositoryScopes = searchOptions.repositoryScopes ?? [];
+    const filtered = filters.length > 0 || tags.length > 0 || repositoryScopes.length > 0;
     const candidateLimit = checkedLimit(
       searchOptions.candidateLimit,
       filtered ? MAX_SEARCH_CANDIDATES : Math.max(40, limit * 4),
@@ -543,6 +551,7 @@ export async function openKnowledgeBase(
     const allowedIds = new Set(queryVault(snapshot.notes, snapshot.analysis, {
       filters,
       tags,
+      repositoryScopes,
     }).map(({ id }) => id));
     const includeExact = mode === "hybrid" || mode === "exact";
     const exact = includeExact
@@ -550,6 +559,7 @@ export async function openKnowledgeBase(
           query,
           filters,
           tags,
+          repositoryScopes,
           limit: Math.min(MAX_SEARCH_CANDIDATES, candidateLimit),
         })
       : [];

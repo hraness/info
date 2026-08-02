@@ -7,15 +7,16 @@ views over that record.
 
 ## Orient before editing
 
-1. For a repository-path question, run `kb context` and read the returned
-   `AGENTS.md` files from root to nearest before opening any optional hubs.
+1. For a repository-path question, run `kb context`, read the returned
+   `AGENTS.md` files from root to nearest, and inspect its bounded current-memory
+   groups before opening optional hubs or running a broad search.
 2. Read `index.md`, then search filenames, frontmatter titles, aliases, and note
    text before creating a new identity.
 3. Read the notes that already own the concept or source in question.
 4. Use the narrowest view that answers the question:
    - `kb list` for exact frontmatter or tag filters.
    - `kb links <note>`, `kb backlinks <note>`, or `kb relation list <note>` for authored relationships.
-   - `kb graph` for a whole-vault structural report.
+   - `kb history` for direct note or repository-path provenance.
    - `kb search` for a fused exact, full-text, and semantic view with visible evidence.
    - `kb graph` for whole-vault diagnostics.
 
@@ -31,17 +32,20 @@ kb context src/index.ts --root kb --repo .
 ```
 
 The command lists inherited guides from the repository root toward the nearest
-scope, then verified KB hubs from the nearest scope back toward the root. It
-prints the hub title and summary, not the full body. Read every returned guide;
-they are the normative, always-loaded source for ownership, required commands,
-prohibitions, invariants, and edit gates. Open only the hubs whose summaries
-apply, then expand through a bounded command:
+scope, verified KB hubs from the nearest scope back toward the root, and
+authored records whose exact `repository_scopes` declaration contains the
+target. It keeps maintained knowledge, active plans, dated research, reports,
+and terminal plans in separate bounded groups. Every record reports why it
+matched and whether its declared path exists. It prints summaries, not bodies.
+Read every returned guide; they are the normative, always-loaded source for
+ownership, required commands, prohibitions, invariants, and edit gates. Open
+only the records whose summaries apply, then expand through a bounded command:
 
 ```sh
 kb links scopes/src--25a6634263c1 --root kb --depth 1 --limit 25
 kb backlinks scopes/src--25a6634263c1 --root kb
-kb list --root kb --where area=source --json
-kb search "why source errors retain source ranges" --root kb --json
+kb list --root kb --scope src --where area=source --json
+kb search "why source errors retain source ranges" --root kb --scope src --json
 ```
 
 Use the exact hub ID returned by `kb context`. Use `--kind file` or
@@ -52,13 +56,34 @@ A mapped scope hub carries pull-based rationale, history, examples, evidence,
 and links. It cannot override its guide or become the only home of a
 load-bearing edit rule. A guide does not need a hub.
 
+Add `repository_scopes` to a plan, maintained note, dated research record, or
+report when that record explains work under specific code paths:
+
+```yaml
+repository_scopes:
+  - src/parser
+  - tests/parser.test.ts
+```
+
+Use exact canonical repository-relative paths without globs. Directory scopes
+match descendants, while file scopes match only that file. Future paths are
+valid and appear as absent until created. Update active or maintained records
+when code moves; preserve retired paths on terminal plans when they remain
+useful history.
+
+Path-context research is a dated snapshot, not a generic note with a date. Put
+it under `projects/<domain>/market/` with `type: market-research`, `status:
+snapshot`, and a valid `as_of` date. A path-context report declares `type:
+report` and a valid `generated` date. Both need `repository_scopes`; other
+records remain searchable without appearing in those current-memory groups.
+
 ## Query before reading broadly
 
 Use typed metadata for exact selection and sorting:
 
 ```sh
 kb list --where type=plan --where status=in-progress --sort metadata.updated --order desc
-kb list --tag retrieval --sort inbound --order desc --json
+kb list --tag retrieval --scope packages/kb --sort inbound --order desc --json
 ```
 
 Filters can address nested fields with dotted paths. Repeat `--where`, `--has`, or `--tag` to require every condition. Unquoted `true`, `false`, `null`, and numeric values are typed; retain inner quotes to select a string with the same spelling, as in `--where 'external_id="9007199254740993"'`. JSON output includes the live metadata, tags, backlinks, and inbound and outbound contextual counts for each result.
@@ -119,6 +144,17 @@ commit exceeds its changed-path detail limit. The affected note retains that
 commit's identity and vault-local association, while diagnostics and packed
 context identify the incomplete co-change evidence. These views explain a
 result; they do not create links or establish that a claim is correct.
+
+Ask Git directly when text retrieval is unnecessary:
+
+```sh
+kb history notes/write-path --root kb --repo . --json
+kb history search src/parser.ts --root kb --repo . --json
+```
+
+The second command searches bounded commit subjects, note paths, and co-change
+paths. Co-change is evidence of historical association, not causation, and it
+never writes repository scopes or graph edges.
 
 For several related operations, open one read-only SDK session and reuse its
 single vault scan:
@@ -183,6 +219,34 @@ console.log(execution.output);
 await kb.close();
 ```
 
+## Evaluate retrieval changes on a frozen corpus
+
+Use a versioned evaluation manifest when a ranking, filter, graph, context, or
+history change needs empirical evidence. Author query prose, structured lane
+inputs, and 0–3 relevance judgments before inspecting the candidate run. Keep
+development and test queries distinct.
+
+```sh
+kb evaluate kb/evaluations/repository-memory-v1.json \
+  --root kb --repo . --split test \
+  --model-file /path/to/the/recommended-model.gguf \
+  --cache-state warm --json > kb/reports/repository-memory-v1.json
+```
+
+The command verifies the manifest's exact Git commit and vault tree and rejects
+dirty vault content before opening retrieval. It runs the selected built-in
+exact, keyword, semantic, hybrid, metadata, graph, path-context, and Git
+adapters through one bounded snapshot. Use repeated `--retriever` values for an
+ablation. Semantic and hybrid runs verify the file against the pinned model
+SHA-256, give those exact bytes to QMD, and verify them again after retrieval.
+The report retains the stable model URI, revision, and digest without storing
+the local path.
+
+Read per-query rankings, unavailable or degraded lanes, timings, raw resource
+counters, per-class metrics, and paired intervals together. A small frozen
+corpus is a regression and harness proof. It is not evidence about another
+vault, machine, scale, cache state, or end-to-end agent outcome.
+
 ## Preserve authority boundaries
 
 - Captured articles preserve what the source said and how it was acquired. Put later interpretation in a maintained note.
@@ -196,7 +260,16 @@ Do not silently rewrite a capture to match a later conclusion. Link the source t
 
 Before creating a plan, use `kb list --where type=plan` and search the vault for an existing artifact that owns the outcome. Prefer extending that file to creating a parallel progress log.
 
-A durable plan records an observable outcome, context, scope and non-goals, constraints, decisions, dependency-ordered work, verification, and recovery. Keep its frontmatter easy to query—at minimum `type: plan`, an area, and one status from `proposed`, `accepted`, `in-progress`, `blocked`, `completed`, `superseded`, or `cancelled`. Add dated findings, decisions, review evidence, and the final result to the same file as the work develops.
+A durable plan records an observable outcome, context, scope and non-goals,
+constraints, decisions, dependency-ordered work, verification, and recovery.
+Keep its frontmatter easy to query, including `type: plan`, a description, an
+area, applicable `repository_scopes`, and one status from `proposed`,
+`accepted`, `in-progress`, `blocked`, `completed`, `superseded`, or `cancelled`.
+Add dated findings, decisions, review evidence, and the final result to the same
+file as the work develops. Before setting a terminal status, fill `## Result`
+and `## Durable memory`: link each reusable conclusion to the maintained note,
+guide, documentation, or checked code contract that now owns it, or state that
+no durable promotion was needed.
 
 The packaged `plan-kb` Agent Skill provides the complete authoring workflow. It treats a plan as a growing implementation record, not a disposable checklist or a directory of satellite status documents.
 
@@ -269,6 +342,16 @@ absolute path. A text-bearing screenshot still needs its source-image
 reference; a useful native-text result does not hide an unprocessed image or
 page.
 
+Use the source inbox to find recent captures that have not yet been linked from
+maintained knowledge:
+
+```sh
+kb inbox --root kb --limit 25 --json
+```
+
+The inbox is advisory. A source can remain an intentional leaf; review it and
+record a disposition only when it changes maintained understanding.
+
 ## Finish every change
 
 After adding, renaming, moving, or materially revising notes:
@@ -285,10 +368,12 @@ the write and open a new session after the final check.
 
 Open the evidence cited by each percolation candidate. Promote only concepts
 likely to be reused and relationships established by the source material.
-Review broken and ambiguous links and typed relationships first. Then inspect
-orphans and high-confidence title or alias mentions in context. Add a suggested
-link only when it improves the prose. Finish with a clean `kb check` and inspect
-the resulting diff so the managed catalog is the only derived Markdown change.
+Review broken and ambiguous links, typed relationships, local attachments, and
+repository-scope advisories first. Then inspect orphans and high-confidence
+title or alias mentions in context. Add a suggested link only when it improves
+the prose. Finish with a clean `kb check`. In a managed vault, inspect the
+catalog diff; in an authored vault, refresh leaves the front door unchanged and
+`kb catalog --root .` provides an exhaustive disposable inventory.
 
 When multiple agents are editing different notes, each lane runs:
 
@@ -297,8 +382,9 @@ kb check --root . --no-catalog
 ```
 
 The integrating agent runs one final refresh and normal check after the lanes
-join. This avoids repeated merge conflicts in `index.md`; no shared graph
-database or generated fact log exists to contend on.
+join. Managed vaults serialize their one catalog write. Authored vaults declare
+`kb_catalog: authored` in `index.md` and avoid that write entirely. No shared
+graph database or generated fact log exists to contend on.
 
 If the change adds, removes, renames, or moves a scope hub, changes its
 `type` or `scope`, or edits an `kb:context` marker, also run:

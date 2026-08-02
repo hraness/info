@@ -1,10 +1,10 @@
 // @bun
 import {
+  queryVault
+} from "./index-48pz4jpc.js";
+import {
   navigateLinks
 } from "./index-d13v9ckt.js";
-import {
-  queryVault
-} from "./index-7gsmq0jt.js";
 import {
   lookupNote
 } from "./index-4962kvds.js";
@@ -261,7 +261,8 @@ function searchExactVault(notes, analysis, options) {
   const limit = checkedLimit(options.limit, 40, MAX_EXACT_RESULTS, "Exact search limit");
   const allowed = new Set(queryVault(notes, analysis, {
     filters: options.filters ?? [],
-    tags: options.tags ?? []
+    tags: options.tags ?? [],
+    repositoryScopes: options.repositoryScopes ?? []
   }).map(({ id }) => id));
   const terms = validated.terms;
   return notes.filter((note) => allowed.has(note.id)).map((note) => exactHit(note, phrase, terms)).filter((hit) => hit !== null).toSorted((left, right) => Number(right.identity) - Number(left.identity) || right.score - left.score || left.path.localeCompare(right.path)).slice(0, limit);

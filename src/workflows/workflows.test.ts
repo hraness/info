@@ -2,8 +2,9 @@ import { describe, expect, expectTypeOf, test } from "bun:test";
 
 import type { GitHistoryForNotesResult, GitHistorySearchResult } from "../git.js";
 import type { LinkNeighborhood } from "../navigation.js";
-import type { QueryRow } from "../query.js";
+import type { QueryOptions, QueryRow } from "../query.js";
 import type {
+  KnowledgeBaseSearchOptions,
   KnowledgeBaseSearchResult,
   KnowledgeBaseSession,
 } from "../sdk.js";
@@ -165,6 +166,8 @@ describe("bundled knowledge-base workflows", () => {
       backlinks: [],
     };
     let requestedIds: readonly string[] = [];
+    let listedWith: QueryOptions | undefined;
+    let searchedWith: KnowledgeBaseSearchOptions | undefined;
     const matched: KnowledgeBaseSearchResult = {
       ...emptySearch,
       results: [{
@@ -182,8 +185,14 @@ describe("bundled knowledge-base workflows", () => {
       }],
     };
     const kb = fakeSession({
-      list: () => [plan],
-      search: () => Promise.resolve(matched),
+      list: (options) => {
+        listedWith = options;
+        return [plan];
+      },
+      search: (options) => {
+        searchedWith = options;
+        return Promise.resolve(matched);
+      },
       history: (ids) => {
         requestedIds = ids;
         return Promise.resolve(unavailableHistory);
@@ -191,13 +200,69 @@ describe("bundled knowledge-base workflows", () => {
     });
     const result = await runWorkflow(planRadarWorkflow, {
       kb,
-      input: { query: "hybrid search" },
+      input: { query: "hybrid search", repositoryScopes: ["packages/kb"] },
+    });
+    const activeFilter = {
+      kind: "one-of",
+      path: "status",
+      values: ["proposed", "accepted", "in-progress", "blocked"],
+    };
+    expect(listedWith).toMatchObject({
+      filters: [
+        { kind: "equals", path: "type", value: "plan" },
+        activeFilter,
+      ],
+      repositoryScopes: ["packages/kb"],
+    });
+    expect(searchedWith).toMatchObject({
+      filters: [
+        { kind: "equals", path: "type", value: "plan" },
+        activeFilter,
+      ],
+      repositoryScopes: ["packages/kb"],
     });
     expect(requestedIds).toEqual(["plans/search"]);
     expect(result.output).toEqual({
       plans: [plan],
       matches: matched,
       history: unavailableHistory,
+    });
+  });
+
+  test("lets plan radar request terminal history with the same constraints in both lanes", async () => {
+    const requests: {
+      list: QueryOptions | undefined;
+      search: KnowledgeBaseSearchOptions | undefined;
+    } = { list: undefined, search: undefined };
+    const kb = fakeSession({
+      list: (options) => {
+        requests.list = options;
+        return [];
+      },
+      search: (options) => {
+        requests.search = options;
+        return Promise.resolve(emptySearch);
+      },
+    });
+    await runWorkflow(planRadarWorkflow, {
+      kb,
+      input: {
+        query: "retired plan",
+        status: "superseded",
+        repositoryScopes: ["projects/example"],
+      },
+    });
+    const expected = [
+      { kind: "equals", path: "type", value: "plan" },
+      { kind: "equals", path: "status", value: "superseded" },
+    ];
+    expect(requests.list).toMatchObject({
+      filters: expected,
+      repositoryScopes: ["projects/example"],
+    });
+    expect(requests.search).toMatchObject({
+      filters: expected,
+      repositoryScopes: ["projects/example"],
     });
   });
 });

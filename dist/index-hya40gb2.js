@@ -285,6 +285,98 @@ function auditAgentGuides(guideSources, options = {}) {
     advisories: advisories.toSorted((left, right) => advisorySeverity(right) - advisorySeverity(left) || advisoryTieBreakKey(left).localeCompare(advisoryTieBreakKey(right)))
   };
 }
+function longGuidelinesByIdentity(report) {
+  const guides = new Map(report.guides.map((guide) => [guide.path, guide]));
+  const guidelines = new Map;
+  for (const advisory of report.advisories) {
+    if (advisory.kind !== "long-guideline")
+      continue;
+    const bullet = guides.get(advisory.path)?.guidelines.bullets.find((candidate) => candidate.line === advisory.line);
+    if (bullet === undefined)
+      continue;
+    const identity = bullet.text;
+    const existing = guidelines.get(identity);
+    if (existing === undefined || advisory.path.localeCompare(existing.path) < 0 || advisory.path === existing.path && advisory.line < existing.line) {
+      guidelines.set(identity, {
+        path: advisory.path,
+        line: advisory.line,
+        text: bullet.text,
+        words: advisory.words,
+        suggestedWords: advisory.suggestedWords
+      });
+    }
+  }
+  return guidelines;
+}
+function guidelineGuideSets(report) {
+  const guideSets = new Map;
+  for (const guide of report.guides) {
+    for (const bullet of guide.guidelines.bullets) {
+      const paths = guideSets.get(bullet.text) ?? new Set;
+      paths.add(guide.path);
+      guideSets.set(bullet.text, paths);
+    }
+  }
+  return new Map([...guideSets].map(([text, paths]) => [
+    text,
+    [...paths].toSorted((left, right) => left.localeCompare(right))
+  ]));
+}
+function compareAgentGuideAudits(base, current) {
+  const baseGuides = new Map(base.guides.map((guide) => [guide.path, guide]));
+  const guideWordRegressions = [];
+  const inheritedWordRegressions = [];
+  for (const guide of current.guides) {
+    const baseGuide = baseGuides.get(guide.path);
+    const baseWords = baseGuide?.words ?? 0;
+    if (guide.words > baseWords) {
+      guideWordRegressions.push({
+        path: guide.path,
+        baseWords,
+        currentWords: guide.words,
+        addedWords: guide.words - baseWords
+      });
+    }
+    const baseInheritedWords = baseGuide?.inheritedWords ?? 0;
+    if (guide.inheritedWords > baseInheritedWords) {
+      inheritedWordRegressions.push({
+        path: guide.path,
+        baseWords: baseInheritedWords,
+        currentWords: guide.inheritedWords,
+        addedWords: guide.inheritedWords - baseInheritedWords,
+        guides: guide.inheritedGuidePaths
+      });
+    }
+  }
+  const baseLongGuidelines = longGuidelinesByIdentity(base);
+  const newlyLongGuidelines = [...longGuidelinesByIdentity(current)].filter(([identity]) => !baseLongGuidelines.has(identity)).map(([, guideline]) => guideline).toSorted((left, right) => left.path.localeCompare(right.path) || left.text.localeCompare(right.text) || left.line - right.line);
+  const baseGuideSets = guidelineGuideSets(base);
+  const expandedDuplicateGuidelines = [...guidelineGuideSets(current)].flatMap(([text, currentGuides]) => {
+    if (currentGuides.length < 2)
+      return [];
+    const baseGuidesForText = baseGuideSets.get(text) ?? [];
+    if (currentGuides.length <= baseGuidesForText.length)
+      return [];
+    const baseSet = new Set(baseGuidesForText);
+    const addedGuides = currentGuides.filter((path) => !baseSet.has(path));
+    if (addedGuides.length === 0)
+      return [];
+    const words = current.guides.flatMap((guide) => guide.guidelines.bullets).find((bullet) => bullet.text === text)?.words ?? 0;
+    return [{
+      text,
+      words,
+      baseGuides: baseGuidesForText,
+      currentGuides,
+      addedGuides
+    }];
+  }).toSorted((left, right) => left.text.localeCompare(right.text));
+  return {
+    guideWordRegressions: guideWordRegressions.toSorted(guideSort),
+    inheritedWordRegressions: inheritedWordRegressions.toSorted(guideSort),
+    newlyLongGuidelines,
+    expandedDuplicateGuidelines
+  };
+}
 function isWithin(root, candidate) {
   const fromRoot = relative(root, candidate);
   return fromRoot === "" || fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`) && !isAbsolute(fromRoot);
@@ -379,4 +471,4 @@ async function auditAgentGuideRepository(repositoryRoot, options = {}) {
   };
 }
 
-export { defaultAgentGuideIgnoredDirectories, auditAgentGuideSource, auditAgentGuides, discoverAgentGuides, auditAgentGuideRepository };
+export { defaultAgentGuideIgnoredDirectories, auditAgentGuideSource, auditAgentGuides, compareAgentGuideAudits, discoverAgentGuides, auditAgentGuideRepository };

@@ -18,6 +18,9 @@
       "@hraness/kb/agent-guide-audit": [
         "./src/agent-guide-audit.ts"
       ],
+      "@hraness/kb/attachments": [
+        "./src/attachments.ts"
+      ],
       "@hraness/kb/authoring": [
         "./src/authoring.ts"
       ],
@@ -63,6 +66,12 @@
       "@hraness/kb/clip/terminal": [
         "./src/clip/terminal.ts"
       ],
+      "@hraness/kb/evaluation": [
+        "./src/evaluation.ts"
+      ],
+      "@hraness/kb/evaluation-kb": [
+        "./src/evaluation-kb.ts"
+      ],
       "@hraness/kb/git": [
         "./src/git.ts"
       ],
@@ -81,6 +90,9 @@
       "@hraness/kb/query": [
         "./src/query.ts"
       ],
+      "@hraness/kb/repository-memory": [
+        "./src/repository-memory.ts"
+      ],
       "@hraness/kb/sdk": [
         "./src/sdk.ts"
       ],
@@ -89,6 +101,9 @@
       ],
       "@hraness/kb/semantic": [
         "./src/semantic.ts"
+      ],
+      "@hraness/kb/source-inbox": [
+        "./src/source-inbox.ts"
       ],
       "@hraness/kb/workflow": [
         "./src/workflow.ts"

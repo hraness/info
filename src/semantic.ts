@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdir, realpath, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { mkdir, open, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
@@ -19,9 +20,14 @@ import { scanVault, type VaultSnapshot } from "./vault.js";
 /** QMD's small local default at an immutable Hugging Face repository revision. */
 export const recommendedEmbeddingModel =
   "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf#0f741b5a6585bd53aeb15cd1372c56f2a0f65e12";
+/** SHA-256 of the immutable recommended EmbeddingGemma GGUF artifact. */
+export const recommendedEmbeddingModelSha256 =
+  "b5ce9d77a3fc4b3b39ccb5643c36777911cc4eb46a66962eadfa3f5f60490d63";
+export const MAX_EMBEDDING_MODEL_BYTES = 2 * 1_024 * 1_024 * 1_024;
 
 const semanticIndexSchema = 1;
-const qmdVersion = "2.5.3";
+export const qmdIndexerVersion =
+  "2.5.3+hraness.aa993dceb3ef8cfb71d470554ca437570f5a2b3c";
 const collectionName = "kb";
 const markdownPattern = "**/*.md";
 const ignoredPatterns = ["index.md", "**/AGENTS.md"] as const;
@@ -35,9 +41,11 @@ const collectionContext = {
   "/plans": "Decisions, constraints, execution state, and verification evidence.",
   "/riffs": "Voice-preserving first-person source thought.",
 } as const;
+const recommendedEmbeddingModelIdentity =
+  `${recommendedEmbeddingModel}@sha256:${recommendedEmbeddingModelSha256}`;
 const semanticIndexIdentity: SemanticIndexIdentity = {
   producer: { package: "@hraness/kb", schema: semanticIndexSchema },
-  indexer: { package: "@tobilu/qmd", version: qmdVersion },
+  indexer: { package: "@tobilu/qmd", version: qmdIndexerVersion },
   collection: {
     name: collectionName,
     pattern: markdownPattern,
@@ -46,7 +54,7 @@ const semanticIndexIdentity: SemanticIndexIdentity = {
     pathContexts: Object.entries(collectionContext).map(([path, context]) => ({ path, context })),
   },
   embedding: {
-    model: recommendedEmbeddingModel,
+    model: recommendedEmbeddingModelIdentity,
     chunkStrategy: embeddingChunkStrategy,
   },
 };
@@ -167,6 +175,8 @@ export type SemanticSearchResult = {
 export type SemanticSessionOptions = {
   readonly root: string;
   readonly database?: string;
+  /** Verified local bytes for the pinned model. Public results retain the stable model URI. */
+  readonly embeddingModelFile?: string;
 };
 
 export type SemanticSessionSearchOptions = Omit<
@@ -219,10 +229,63 @@ type SearchStore = {
 
 export type SemanticDependencies = {
   readonly createStore?: (options: SemanticStoreOptions) => Promise<unknown>;
+  readonly digestEmbeddingModelFile?: (path: string) => Promise<string>;
   readonly cacheHome?: string;
   readonly scanVault?: (root: string) => Promise<VaultSnapshot>;
   readonly writerLease?: SemanticWriterLeaseOptions;
 };
+
+/** Hash one bounded, regular, non-symlink model file through a stable descriptor. */
+export async function sha256EmbeddingModelFile(path: string): Promise<string> {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile()) throw new TypeError("The embedding model must be a regular file.");
+    if (metadata.size > MAX_EMBEDDING_MODEL_BYTES) {
+      throw new RangeError(
+        `The embedding model exceeds ${MAX_EMBEDDING_MODEL_BYTES.toLocaleString("en-US")} bytes.`,
+      );
+    }
+    const hash = createHash("sha256");
+    const buffer = new Uint8Array(1_024 * 1_024);
+    let observed = 0;
+    while (true) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      observed += bytesRead;
+      if (observed > MAX_EMBEDDING_MODEL_BYTES) {
+        throw new RangeError(
+          `The embedding model exceeds ${MAX_EMBEDDING_MODEL_BYTES.toLocaleString("en-US")} bytes.`,
+        );
+      }
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+    const after = await handle.stat();
+    if (after.size !== metadata.size || observed !== metadata.size) {
+      throw new Error("The embedding model changed while its digest was computed; retry.");
+    }
+    return hash.digest("hex");
+  } finally {
+    await handle.close();
+  }
+}
+
+async function verifiedEmbeddingModelSource(
+  path: string | undefined,
+  dependencies: SemanticDependencies,
+): Promise<string> {
+  if (path === undefined) return recommendedEmbeddingModel;
+  const absolutePath = resolve(path);
+  const digest = await (
+    dependencies.digestEmbeddingModelFile ?? sha256EmbeddingModelFile
+  )(absolutePath);
+  if (digest !== recommendedEmbeddingModelSha256) {
+    throw new Error(
+      "The local embedding model does not match the pinned recommended model SHA-256.",
+    );
+  }
+  return absolutePath;
+}
 
 function cacheHome(dependencies: SemanticDependencies): string {
   const configured = dependencies.cacheHome ?? process.env.XDG_CACHE_HOME;
@@ -376,13 +439,59 @@ function boundUnknownMethod(
   };
 }
 
-function parseSearchStore(value: unknown): SearchStore {
+type QmdInternalVectorBoundary = {
+  readonly pendingEmbeddingCount: () => Promise<number>;
+  readonly searchVector: (
+    query: string,
+    options: { readonly collection: string; readonly limit: number },
+  ) => Promise<readonly SemanticSearchDocument[]>;
+};
+
+function internalVectorBoundary(
+  store: Readonly<Record<string, unknown>>,
+  modelIdentity: string,
+): QmdInternalVectorBoundary | null {
+  // QMD 2.5.3's public searchVector omits its per-store LLM session and falls
+  // back to a process-global model. Its documented advanced internal boundary
+  // lets KB keep query inference on the same store-local, verified bytes while
+  // retaining a path-independent identity for derived vector rows.
+  if (store.internal === undefined) return null;
+  const internal = boundaryRecord(store.internal, "QMD store.internal");
+  const llm = boundaryRecord(internal.llm, "QMD store.internal.llm");
+  const getHashesNeedingEmbedding = boundUnknownMethod(
+    internal,
+    "getHashesNeedingEmbedding",
+    "QMD store.internal",
+  );
+  const searchVec = boundUnknownMethod(internal, "searchVec", "QMD store.internal");
+  const embed = boundUnknownMethod(llm, "embed", "QMD store.internal.llm");
+  const session = Object.freeze({ embed });
+  return {
+    pendingEmbeddingCount: async () => boundaryCount(
+      await getHashesNeedingEmbedding(modelIdentity),
+      "QMD store.internal.getHashesNeedingEmbedding result",
+    ),
+    searchVector: async (query, options) => parseSearchResults(
+      await searchVec(
+        query,
+        modelIdentity,
+        options.limit,
+        options.collection,
+        session,
+      ),
+      options.limit,
+    ),
+  };
+}
+
+function parseSearchStore(value: unknown, modelIdentity: string): SearchStore {
   const store = boundaryRecord(value, "QMD store");
   const close = boundUnknownMethod(store, "close", "QMD store");
   const embed = boundUnknownMethod(store, "embed", "QMD store");
   const searchLex = boundUnknownMethod(store, "searchLex", "QMD store");
   const searchVector = boundUnknownMethod(store, "searchVector", "QMD store");
   const update = boundUnknownMethod(store, "update", "QMD store");
+  const internalVector = internalVectorBoundary(store, modelIdentity);
   return {
     close: async () => {
       await close();
@@ -390,9 +499,17 @@ function parseSearchStore(value: unknown): SearchStore {
     embed: async (options) => parseEmbeddingResult(await embed(options)),
     searchLex: async (query, options) =>
       parseSearchResults(await searchLex(query, options), options.limit),
-    searchVector: async (query, options) =>
-      parseSearchResults(await searchVector(query, options), options.limit),
-    update: async (options) => parseUpdateResult(await update(options)),
+    searchVector: internalVector?.searchVector
+      ?? (async (query, options) =>
+        parseSearchResults(await searchVector(query, options), options.limit)),
+    update: async (options) => {
+      const result = parseUpdateResult(await update(options));
+      if (internalVector === null) return result;
+      return {
+        ...result,
+        needsEmbedding: await internalVector.pendingEmbeddingCount(),
+      };
+    },
   };
 }
 
@@ -408,16 +525,19 @@ async function closeMalformedStore(value: unknown): Promise<void> {
   }
 }
 
-async function openedSearchStore(value: unknown): Promise<SearchStore> {
+async function openedSearchStore(
+  value: unknown,
+  modelIdentity: string,
+): Promise<SearchStore> {
   try {
-    return parseSearchStore(value);
+    return parseSearchStore(value, modelIdentity);
   } catch (error: unknown) {
     await closeMalformedStore(value);
     throw error;
   }
 }
 
-function storeConfig(root: string): SemanticCollectionConfig {
+function storeConfig(root: string, embeddingModelSource: string): SemanticCollectionConfig {
   return {
     global_context: globalContext,
     collections: {
@@ -428,7 +548,7 @@ function storeConfig(root: string): SemanticCollectionConfig {
         context: collectionContext,
       },
     },
-    models: { embed: recommendedEmbeddingModel },
+    models: { embed: embeddingModelSource },
   };
 }
 
@@ -442,14 +562,15 @@ async function defaultCreateStore(options: SemanticStoreOptions): Promise<unknow
 async function openStore(
   root: string,
   database: string,
+  embeddingModelSource: string,
   dependencies: SemanticDependencies,
 ): Promise<SearchStore> {
   await mkdir(dirname(database), { recursive: true });
   const created = await (dependencies.createStore ?? defaultCreateStore)({
     dbPath: database,
-    config: storeConfig(root),
+    config: storeConfig(root, embeddingModelSource),
   });
-  return await openedSearchStore(created);
+  return await openedSearchStore(created, recommendedEmbeddingModel);
 }
 
 function databaseFor(
@@ -508,9 +629,18 @@ export async function indexSemanticVault(
       const projection = await prepareSemanticProjection(description, snapshot.notes);
       let store: SearchStore | undefined;
       try {
-        store = await openStore(projection.root, database, dependencies);
+        store = await openStore(
+          projection.root,
+          database,
+          recommendedEmbeddingModel,
+          dependencies,
+        );
         const update = await store.update({ collections: [collectionName] });
-        const embedding = await embedChanged(store, update, options.force ?? false);
+        const embedding = await embedChanged(
+          store,
+          update,
+          options.force ?? false,
+        );
         return { root, database, model: recommendedEmbeddingModel, update, embedding };
       } finally {
         try {
@@ -929,6 +1059,10 @@ export async function openSemanticSearchSession(
   options: SemanticSessionOptions,
   dependencies: SemanticDependencies = {},
 ): Promise<SemanticSearchSession> {
+  const embeddingModelSource = await verifiedEmbeddingModelSource(
+    options.embeddingModelFile,
+    dependencies,
+  );
   const root = await resolvedDirectory(options.root);
   const databaseCandidate = await resolveSemanticDatabase(
     databaseFor(root, options.database, dependencies),
@@ -959,7 +1093,12 @@ export async function openSemanticSearchSession(
         const projection = await prepareSemanticProjection(description, snapshot.notes);
         let store: SearchStore | undefined;
         try {
-          store = await openStore(projection.root, database, dependencies);
+          store = await openStore(
+            projection.root,
+            database,
+            embeddingModelSource,
+            dependencies,
+          );
           retained = { store, projection };
           const update = await store.update({ collections: [collectionName] });
           return { store, projection, update };

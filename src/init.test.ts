@@ -39,6 +39,9 @@ describe("vault initialization", () => {
     expect(planGuide).toContain("type: plan");
     expect(planGuide).toContain("verification");
     expect(planGuide).toContain("same file");
+    expect(planGuide).toContain("## Result");
+    expect(planGuide).toContain("## Durable memory");
+    expect(planGuide).toContain("no durable promotion was needed");
     expect(scopeGuide).toContain("type: agent-context");
     expect(scopeGuide).toContain("kb agents identity");
     expect(scopeGuide).toContain("kb agents check");

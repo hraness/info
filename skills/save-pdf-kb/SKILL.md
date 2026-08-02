@@ -11,9 +11,9 @@ description: >-
 
 # Save a PDF to the knowledge base
 
-Use the installed `kb` CLI. Resolve `<vault>` to the directory containing the
-managed `index.md`, then set the shell-local `KB_ROOT` to that path
-(`KB_ROOT=kb` from a typical repository root).
+Use the installed `kb` CLI. Resolve `<vault>` to the directory containing its
+authored or managed `index.md` front door, then set the shell-local `KB_ROOT`
+to that path (`KB_ROOT=kb` from a typical repository root).
 
 Check the local conversion routes, then capture the PDF:
 

@@ -3,6 +3,9 @@ import {
   classifyPlatformUrl
 } from "./index-hgve9rh2.js";
 import {
+  startNetworkProxy
+} from "./index-7qhzw38d.js";
+import {
   sanitizeArtifactUrl
 } from "./index-ey9rycsn.js";
 import {
@@ -13,9 +16,6 @@ import {
   readCookieFile,
   renderCookieHeader
 } from "./index-84x0vjjp.js";
-import {
-  startNetworkProxy
-} from "./index-7qhzw38d.js";
 import {
   assertSafeNetworkUrl,
   decodeBytes,

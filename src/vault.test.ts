@@ -186,6 +186,7 @@ describe("vault scan and refresh", () => {
     const before = readFileSync(join(root, "index.md"), "utf8");
     const result = await scanVault(root);
 
+    expect(result.catalogMode).toBe("managed");
     expect(result.index).toBe("stale");
     expect(result.notes.map(({ path }) => path)).toEqual([
       "index.md",
@@ -233,6 +234,79 @@ describe("vault scan and refresh", () => {
     expect(readdirSync(root).some((name) => name.endsWith(".tmp"))).toBe(false);
   });
 
+  test("keeps a frontmatter-declared authored index immutable during scan and refresh", async () => {
+    const root = fixture();
+    const authored = [
+      "---",
+      "title: Knowledge base",
+      "kb_catalog: authored",
+      "---",
+      "",
+      "# Knowledge base",
+      "",
+      "A hand-authored route to [[notes/alpha|Alpha]].",
+      "",
+    ].join("\n");
+    writeFileSync(join(root, "index.md"), authored, "utf8");
+
+    const scanned = await scanVault(root);
+    const refreshed = await refreshVault(root);
+
+    expect(scanned.catalogMode).toBe("authored");
+    expect(scanned.index).toBe("authored");
+    expect(refreshed.catalogMode).toBe("authored");
+    expect(refreshed.index).toBe("authored");
+    expect(refreshed.analysis.noteCount).toBe(2);
+    expect(refreshed.analysis.contextualLinks).toEqual([
+      { source: "notes/alpha.md", target: "notes/beta.md", line: 3 },
+    ]);
+    expect(readFileSync(join(root, "index.md"), "utf8")).toBe(authored);
+    expect(readdirSync(root).some((name) => name.endsWith(".tmp"))).toBe(false);
+  });
+
+  test("accepts an explicit API mode override without changing the durable declaration", async () => {
+    const root = fixture();
+
+    const authored = await scanVault(root, { catalogMode: "authored" });
+    expect(authored.catalogMode).toBe("authored");
+    expect(authored.index).toBe("authored");
+
+    writeFileSync(join(root, "index.md"), [
+      "---",
+      "kb_catalog: authored",
+      "---",
+      "",
+      "# Knowledge base",
+      "",
+      "<!-- kb:catalog:start -->",
+      "<!-- kb:catalog:end -->",
+      "",
+    ].join("\n"), "utf8");
+    const managed = await scanVault(root, { catalogMode: "managed" });
+    expect(managed.catalogMode).toBe("managed");
+    expect(managed.index).toBe("stale");
+  });
+
+  test("rejects unsupported catalog mode declarations and runtime overrides", () => {
+    const root = fixture();
+    writeFileSync(join(root, "index.md"), [
+      "---",
+      "kb_catalog: Authored",
+      "---",
+      "# Knowledge base",
+      "",
+    ].join("\n"), "utf8");
+
+    expect(scanVault(root)).rejects.toThrow(
+      'frontmatter property "kb_catalog" must be exactly "managed" or "authored"',
+    );
+    expect(scanVault(root, {
+      catalogMode: "automatic" as "managed",
+    })).rejects.toThrow(
+      'ScanVaultOptions.catalogMode must be exactly "managed" or "authored"',
+    );
+  });
+
   test("keeps orphans and mention candidates advisory in the analysis", async () => {
     const root = fixture();
     writeFileSync(join(root, "notes", "gamma.md"), "# Gamma\n\nSecond note appears here without a link.\n");
@@ -265,6 +339,34 @@ describe("vault scan and refresh", () => {
       "notes/beta.md",
     ]);
     expect(catalog).not.toContain("[[navigation/catalog|Catalog]]");
+  });
+
+  test("supports a nested authored index without treating it as graph content", async () => {
+    const root = fixture();
+    mkdirSync(join(root, "navigation"));
+    const authored = [
+      "---",
+      "kb_catalog: authored",
+      "---",
+      "",
+      "# Curated routes",
+      "",
+      "[[notes/alpha]]",
+      "",
+    ].join("\n");
+    writeFileSync(join(root, "navigation", "routes.md"), authored, "utf8");
+
+    const result = await refreshVault(root, { index: "navigation/routes.md" });
+
+    expect(result.catalogMode).toBe("authored");
+    expect(result.index).toBe("authored");
+    expect(result.analysis.noteCount).toBe(3);
+    expect(result.analysis.noteConnections.map(({ path }) => path).sort()).toEqual([
+      "index.md",
+      "notes/alpha.md",
+      "notes/beta.md",
+    ]);
+    expect(readFileSync(join(root, "navigation", "routes.md"), "utf8")).toBe(authored);
   });
 
   test("rejects a symlinked index without copying outside content into the vault", async () => {

@@ -2,18 +2,25 @@
 import {
   defineWorkflow
 } from "./index-3v2z4f0q.js";
+import {
+  activePlanStatuses
+} from "./index-06c9ctr6.js";
 
 // src/workflows/plan-radar.ts
+function planFilters(status) {
+  return [
+    { kind: "equals", path: "type", value: "plan" },
+    status === undefined ? { kind: "one-of", path: "status", values: activePlanStatuses } : { kind: "equals", path: "status", value: status }
+  ];
+}
 var planRadarWorkflow = defineWorkflow({
   id: "plan-radar",
   nodes: [
     {
       id: "plans",
       run: ({ input, kb }) => kb.list({
-        filters: [
-          { kind: "equals", path: "type", value: "plan" },
-          { kind: "equals", path: "status", value: input.status ?? "in-progress" }
-        ],
+        filters: planFilters(input.status),
+        repositoryScopes: input.repositoryScopes ?? [],
         sort: { kind: "builtin", field: "inbound" },
         direction: "desc",
         limit: 100
@@ -24,7 +31,8 @@ var planRadarWorkflow = defineWorkflow({
       resource: "qmd",
       run: ({ input, kb }) => kb.search({
         query: input.query,
-        filters: [{ kind: "equals", path: "type", value: "plan" }],
+        filters: planFilters(input.status),
+        repositoryScopes: input.repositoryScopes ?? [],
         history: false,
         ...input.resultLimit === undefined ? {} : { limit: input.resultLimit }
       })

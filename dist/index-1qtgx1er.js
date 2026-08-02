@@ -3,7 +3,7 @@ import {
   openSemanticSearchSession,
   recommendedEmbeddingModel,
   scanVault
-} from "./index-6m6y70a2.js";
+} from "./index-b4vcr4gt.js";
 import {
   GitHistoryError,
   gitHistoryForNotes,
@@ -18,14 +18,14 @@ import {
   fuseRankedCandidates,
   searchExactVault,
   validateSearchQuery
-} from "./index-ahw5amhf.js";
+} from "./index-4cknf4jw.js";
+import {
+  queryVault
+} from "./index-48pz4jpc.js";
 import {
   NavigationBudgetError,
   navigateLinks
 } from "./index-d13v9ckt.js";
-import {
-  queryVault
-} from "./index-7gsmq0jt.js";
 import {
   lookupNote
 } from "./index-4962kvds.js";
@@ -186,7 +186,8 @@ async function openKnowledgeBase(options, dependencies = {}) {
     assertOpen();
     semanticPromise ??= (dependencies.openSemanticSearchSession ?? openSemanticSearchSession)({
       root: snapshot.root,
-      ...options.database === undefined ? {} : { database: options.database }
+      ...options.database === undefined ? {} : { database: options.database },
+      ...options.embeddingModelFile === undefined ? {} : { embeddingModelFile: options.embeddingModelFile }
     }, {
       ...dependencies.semantic ?? {},
       scanVault: () => Promise.resolve(snapshot)
@@ -245,7 +246,8 @@ async function openKnowledgeBase(options, dependencies = {}) {
     const limit = checkedLimit(searchOptions.limit, DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS, "Search limit");
     const filters = searchOptions.filters ?? [];
     const tags = searchOptions.tags ?? [];
-    const filtered = filters.length > 0 || tags.length > 0;
+    const repositoryScopes = searchOptions.repositoryScopes ?? [];
+    const filtered = filters.length > 0 || tags.length > 0 || repositoryScopes.length > 0;
     const candidateLimit = checkedLimit(searchOptions.candidateLimit, filtered ? MAX_SEARCH_CANDIDATES : Math.max(40, limit * 4), MAX_SEARCH_CANDIDATES, "Search candidate limit");
     if (candidateLimit < limit) {
       throw new RangeError("Search candidate limit must be at least the result limit.");
@@ -256,13 +258,15 @@ async function openKnowledgeBase(options, dependencies = {}) {
     const historyNoteLimit = historyRequest.enabled ? historyRequest.noteLimit : null;
     const allowedIds = new Set(queryVault(snapshot.notes, snapshot.analysis, {
       filters,
-      tags
+      tags,
+      repositoryScopes
     }).map(({ id }) => id));
     const includeExact = mode === "hybrid" || mode === "exact";
     const exact = includeExact ? searchExactVault(snapshot.notes, snapshot.analysis, {
       query,
       filters,
       tags,
+      repositoryScopes,
       limit: Math.min(MAX_SEARCH_CANDIDATES, candidateLimit)
     }) : [];
     const exactById = new Map(exact.map((hit, index) => [hit.id, { hit, rank: index + 1 }]));

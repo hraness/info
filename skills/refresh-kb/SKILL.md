@@ -1,15 +1,15 @@
 ---
 name: refresh-kb
-description: Refresh and validate a hraness/kb Markdown knowledge graph after notes, concepts, typed relationships, or repository-context mappings change. Use when an agent needs to update the managed catalog, inspect graph and percolation findings, validate scope hubs and reciprocal guide markers, or complete a vault health check.
+description: Refresh and validate a hraness/kb Markdown knowledge graph after notes, concepts, typed relationships, attachments, repository scopes, or context mappings change. Use when an agent needs to maintain a managed or authored catalog, inspect graph and lifecycle findings, validate local artifacts and scope hubs, or complete a vault health check.
 ---
 
 # Refresh a knowledge base
 
-Use a refresh-review-check loop. Keep authored prose under deliberate editorial control; only the marked catalog region is tool-owned.
+Use a refresh-review-check loop. Keep authored prose under deliberate editorial control. A managed vault gives the marked catalog region to the tool; an authored vault leaves its complete front door untouched.
 
 ## 1. Locate the vault
 
-- Resolve `<vault>` to the directory containing the managed `index.md`, then
+- Resolve `<vault>` to the directory containing its managed or authored `index.md`, then
   set the shell-local `KB_ROOT` to that path (`KB_ROOT=kb` from a typical
   repository root, or `KB_ROOT=.` from inside the vault).
 - When the change concerns `scopes/` or an `kb:context` marker, resolve the
@@ -18,16 +18,18 @@ Use a refresh-review-check loop. Keep authored prose under deliberate editorial 
 - Read the vault's applicable agent instructions and note conventions before editing.
 - Preserve note voice, frontmatter, filenames, and link intent unless a reported finding justifies a specific change.
 
-## 2. Refresh the managed catalog
+## 2. Refresh derived state
 
-When several agents are still editing different notes, do not refresh the
+When several agents are still editing a managed vault, do not refresh its
 shared catalog in each lane. Validate the lane's Markdown and graph facts with:
 
 ```sh
 kb check --root "$KB_ROOT" --no-catalog
 ```
 
-The integrating agent performs the refresh once after the lanes join.
+The integrating agent performs the managed refresh once after the lanes join.
+An authored vault declares `kb_catalog: authored` in `index.md`; its refresh has
+no catalog write and is safe from that shared generated-file hotspot.
 
 Run:
 
@@ -35,7 +37,11 @@ Run:
 kb refresh --root "$KB_ROOT"
 ```
 
-This command atomically updates only the marked catalog region in `index.md` and reports graph findings. Catalog links are navigation, so they do not count as contextual graph edges.
+In managed mode this command atomically updates only the marked catalog region
+in `index.md`. In authored mode it reports the index as authored and leaves the
+file unchanged. Use `kb catalog --root "$KB_ROOT"` for a disposable exhaustive
+inventory in either mode. Catalog links are navigation, so they do not count as
+contextual graph edges.
 
 ## 3. Review the advisories
 
@@ -47,6 +53,17 @@ Open every reported source line and the relevant target notes before deciding wh
 - Treat a contextual orphan as a prompt to inspect the note, not as a demand to add a link.
 - Treat an unlinked title or alias mention as a candidate, not proof that the sentence should link.
 - Add a contextual wikilink only when it improves the meaning or navigation of the sentence.
+- Repair a missing, escaping, ambiguous, case-mismatched, symlinked, or hard-linked local image, PDF, or tldraw target. External URLs remain outside this attachment gate.
+- When a repository-owned wrapper adds lifecycle findings, treat them as
+  migration advisories: active plans should have descriptions and exact
+  `repository_scopes`, in-progress plans should retain execution evidence,
+  terminal plans should record a result and durable-memory disposition, and
+  maintained notes should declare `type: note` or `type: concept`.
+- When a repository-owned scope audit reports an absent active or maintained
+  scope, inspect it as possible stale routing. Future paths may intentionally
+  be absent; terminal records may intentionally retain retired paths. The
+  portable `kb refresh` and `kb check` commands do not impose this lifecycle
+  policy by themselves.
 
 Backlinks are derived from explicit contextual wikilinks and typed
 relationships. Mention and percolation candidates are derived analysis. Never
@@ -64,6 +81,15 @@ Open the cited notes before deciding whether to create a reusable
 `type: concept` note or a source-owned typed relationship.
 
 Intentional orphans and unlinked mentions may remain. Record the reason instead of manufacturing a connection.
+
+Review recent captures without maintained disposition when useful:
+
+```sh
+kb inbox --root "$KB_ROOT" --limit 25 --json
+```
+
+The inbox ignores source-to-source and catalog links. It is advisory; an
+intentional leaf capture needs no manufactured backlink.
 
 ## 4. Validate changed repository-context mappings
 
@@ -99,13 +125,14 @@ generated and vendor directories and never follows symbolic-link directories.
 
 ## 5. Re-refresh and check
 
-After any note or link edit, run the refresh command again so the catalog and advisories reflect the final content. Then run the read-only gate:
+After any note or link edit, run the refresh command again so derived state and advisories reflect the final content. Then run the read-only gate:
 
 ```sh
 kb check --root "$KB_ROOT"
 ```
 
 Finish only when the graph check and any required agent-context check succeed,
-the managed catalog is current, and broken or ambiguous links and relationships
-are resolved. Summarize deliberate concept, relationship, link, and mapping
-edits plus advisories intentionally left in place.
+the configured catalog mode is satisfied, and broken or ambiguous links,
+relationships, and local attachments are resolved. Summarize deliberate
+concept, relationship, link, scope, and mapping edits plus advisories
+intentionally left in place.

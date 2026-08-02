@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import {
   agentContextMarkerForScope,
@@ -20,6 +21,10 @@ import {
   MAX_SEARCH_RELATED_SEEDS,
 } from "./sdk.js";
 import { scanVault, type ScanVaultOptions } from "./vault.js";
+import {
+  qmdIndexerVersion,
+  recommendedEmbeddingModelSha256,
+} from "./semantic.js";
 
 function captureOutput(): {
   readonly output: { stdout: (value: string) => void; stderr: (value: string) => void };
@@ -137,6 +142,8 @@ describe("kb argument parsing", () => {
       "0.2",
       "--tag",
       "agents",
+      "--scope",
+      "packages/kb",
       "--where",
       "status=active",
       "--related",
@@ -152,6 +159,7 @@ describe("kb argument parsing", () => {
         mode: "keyword",
         filters: [{ kind: "equals", path: "status", value: "active" }],
         tags: ["agents"],
+        repositoryScopes: ["packages/kb"],
         graph: { related: ["notes/context"], depth: 2 },
         history: false,
         limit: 4,
@@ -246,6 +254,144 @@ describe("kb argument parsing", () => {
     });
   });
 
+  test("parses bounded direct Git history commands", () => {
+    expect(parseArguments([
+      "history",
+      "notes/retrieval",
+      "--root",
+      "vault",
+      "--repo",
+      "repository",
+      "--limit",
+      "12",
+      "--cochanged-limit",
+      "7",
+      "--json",
+    ])).toEqual({
+      ok: true,
+      value: {
+        kind: "history",
+        action: "note",
+        root: "vault",
+        repository: "repository",
+        query: "notes/retrieval",
+        limit: 12,
+        cochangedLimit: 7,
+        json: true,
+      },
+    });
+    expect(parseArguments([
+      "history",
+      "search",
+      "projects/example/app/articles.ts",
+      "--limit",
+      "9",
+      "--commit-limit",
+      "4",
+      "--cochanged-limit",
+      "0",
+    ])).toMatchObject({
+      ok: true,
+      value: {
+        kind: "history",
+        action: "search",
+        query: "projects/example/app/articles.ts",
+        limit: 9,
+        commitLimit: 4,
+        cochangedLimit: 0,
+      },
+    });
+    expect(parseArguments(["history", "note", "--limit", "51"])).toEqual({
+      ok: false,
+      message: "--limit must be an integer from 1 through 50",
+    });
+    expect(parseArguments(["history", "search", "query", "--commit-limit", "51"]))
+      .toEqual({
+        ok: false,
+        message: "--commit-limit must be an integer from 1 through 50",
+      });
+    expect(parseArguments(["history", "note", "--commit-limit", "2"]))
+      .toEqual({
+        ok: false,
+        message: "history <note> uses --limit for its per-note commit limit",
+      });
+  });
+
+  test("parses frozen-corpus evaluation with explicit retrievers and evidence bounds", () => {
+    expect(parseArguments([
+      "evaluate",
+      "kb/evaluations/memory.json",
+      "--root",
+      "kb",
+      "--repo",
+      ".",
+      "--retriever",
+      "exact",
+      "--retriever",
+      "metadata",
+      "--split",
+      "all",
+      "--limit",
+      "8",
+      "--cutoff",
+      "5",
+      "--timeout",
+      "1200",
+      "--baseline",
+      "exact",
+      "--json",
+    ])).toEqual({
+      ok: true,
+      value: {
+        kind: "evaluate",
+        manifest: "kb/evaluations/memory.json",
+        root: "kb",
+        repository: ".",
+        retrievers: ["exact", "metadata"],
+        split: "all",
+        limit: 8,
+        cutoff: 5,
+        timeoutMs: 1200,
+        baseline: "exact",
+        cacheState: "not-applicable",
+        json: true,
+      },
+    });
+    expect(parseArguments([
+      "evaluate",
+      "corpus.json",
+      "--retriever",
+      "semantic",
+    ])).toEqual({
+      ok: false,
+      message: "semantic and hybrid evaluation require --model-file to bind the pinned model bytes",
+    });
+    expect(parseArguments([
+      "evaluate",
+      "corpus.json",
+      "--retriever",
+      "exact",
+      "--model-file",
+      "unused.gguf",
+    ])).toEqual({
+      ok: false,
+      message: "--model-file is only valid when semantic or hybrid evaluation is selected",
+    });
+    expect(parseArguments([
+      "evaluate",
+      "corpus.json",
+      "--retriever",
+      "exact",
+      "--limit",
+      "4",
+      "--cutoff",
+      "5",
+    ])).toEqual({
+      ok: false,
+      message: "--cutoff must not exceed --limit",
+    });
+  });
+
   test("parses metadata queries and bounded graph navigation", () => {
     expect(parseArguments([
       "list",
@@ -259,6 +405,8 @@ describe("kb argument parsing", () => {
       "owner.name",
       "--tag",
       "Browser",
+      "--repository-scope",
+      "projects/browser",
       "--sort",
       "meta.area",
       "--order",
@@ -278,6 +426,7 @@ describe("kb argument parsing", () => {
           { kind: "exists", path: "owner.name" },
         ],
         tags: ["Browser"],
+        repositoryScopes: ["projects/browser"],
         sort: { kind: "metadata", path: "area" },
         direction: "desc",
         limit: 5,
@@ -344,7 +493,7 @@ describe("kb argument parsing", () => {
       `status=${"x".repeat(MAX_QUERY_TEXT_UTF8_BYTES + 1)}`,
     ])).toEqual({
       ok: false,
-      message: "Query filter 1 string value must be at most 16,384 UTF-8 bytes.",
+      message: "Query filter 1 value must be at most 16,384 UTF-8 bytes.",
     });
 
     const related = Array.from(
@@ -523,6 +672,22 @@ describe("kb argument parsing", () => {
           json: true,
         },
       });
+    expect(parseArguments([
+      "catalog",
+      "--root",
+      "vault",
+      "--index",
+      "home.md",
+      "--json",
+    ])).toEqual({
+      ok: true,
+      value: {
+        kind: "catalog",
+        root: "vault",
+        options: { index: "home.md", mentionScope: false },
+        json: true,
+      },
+    });
 
     expect(parseArguments(["percolate", "--min-support", "1"])).toEqual({
       ok: false,
@@ -531,6 +696,52 @@ describe("kb argument parsing", () => {
     expect(parseArguments(["graph", "--no-catalog"])).toEqual({
       ok: false,
       message: "unknown graph option",
+    });
+  });
+
+  test("parses the advisory source inbox and compatibility alias", () => {
+    const expected = {
+      ok: true,
+      value: {
+        kind: "inbox",
+        root: "vault",
+        options: { index: "home.md", mentionScope: false },
+        sourcePrefixes: ["articles", "sources"],
+        limit: 25,
+        json: true,
+      },
+    } as const;
+    expect(parseArguments([
+      "inbox",
+      "--root",
+      "vault",
+      "--index",
+      "home.md",
+      "--source-prefix",
+      "articles",
+      "--source-prefix",
+      "sources",
+      "--limit",
+      "25",
+      "--json",
+    ])).toEqual(expected);
+    expect(parseArguments([
+      "source-inbox",
+      "--root",
+      "vault",
+      "--index",
+      "home.md",
+      "--source-prefix",
+      "articles",
+      "--source-prefix",
+      "sources",
+      "--limit",
+      "25",
+      "--json",
+    ])).toEqual(expected);
+    expect(parseArguments(["inbox", "--limit", "1001"])).toEqual({
+      ok: false,
+      message: "--limit must be an integer from 0 through 1000",
     });
   });
 
@@ -682,6 +893,22 @@ describe("kb vault commands", () => {
       expect(await main(["refresh", "--root", vault], refreshOutput.output)).toBe(0);
       expect(refreshOutput.stdout()).toContain("Index: updated");
 
+      const indexBeforeCatalog = await Bun.file(join(vault, "index.md")).text();
+      const catalogOutput = captureOutput();
+      expect(await main([
+        "catalog",
+        "--root",
+        vault,
+        "--json",
+      ], catalogOutput.output)).toBe(0);
+      expect(JSON.parse(catalogOutput.stdout())).toMatchObject({
+        catalogMode: "managed",
+        noteCount: 2,
+      });
+      expect(stringProperty(parseJsonObject(catalogOutput.stdout()), "catalog"))
+        .toContain("[[notes/alpha|Alpha]]");
+      expect(await Bun.file(join(vault, "index.md")).text()).toBe(indexBeforeCatalog);
+
       const graphOutput = captureOutput();
       expect(await main(["graph", "--root", vault, "--json"], graphOutput.output)).toBe(0);
       expect(JSON.parse(graphOutput.stdout())).toMatchObject({
@@ -692,6 +919,21 @@ describe("kb vault commands", () => {
       const backlinkOutput = captureOutput();
       expect(await main(["backlinks", "Beta", "--root", vault], backlinkOutput.output)).toBe(0);
       expect(backlinkOutput.stdout()).toContain("notes/alpha.md:3");
+
+      const missingBacklinks = captureOutput();
+      expect(await main([
+        "backlinks",
+        "missing",
+        "--root",
+        vault,
+        "--json",
+      ], missingBacklinks.output)).toBe(3);
+      expect(JSON.parse(missingBacklinks.stdout())).toEqual({
+        ok: false,
+        kind: "missing",
+        note: "missing",
+      });
+      expect(missingBacklinks.stderr()).toBe("");
 
       const listOutput = captureOutput();
       expect(await main([
@@ -937,6 +1179,104 @@ describe("kb vault commands", () => {
       });
     } finally {
       await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("fails check on missing durable attachments with structured evidence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hraness-kb-cli-attachments-"));
+    try {
+      await writeFile(join(root, "index.md"), "# Index\n", "utf8");
+      await mkdir(join(root, "notes"), { recursive: true });
+      await writeFile(
+        join(root, "notes", "report.md"),
+        "# Report\n\n![missing](../assets/result(1).png)\n",
+        "utf8",
+      );
+
+      const jsonOutput = captureOutput();
+      expect(await main([
+        "check",
+        "--root",
+        root,
+        "--no-catalog",
+        "--json",
+      ], jsonOutput.output)).toBe(3);
+      expect(JSON.parse(jsonOutput.stdout())).toMatchObject({
+        attachments: {
+          referenceCount: 1,
+          validatedCount: 0,
+          truncated: false,
+          issues: [{
+            kind: "missing",
+            source: "notes/report.md",
+            line: 3,
+            target: "../assets/result(1).png",
+          }],
+        },
+      });
+
+      const humanOutput = captureOutput();
+      expect(await main([
+        "check",
+        "--root",
+        root,
+        "--no-catalog",
+      ], humanOutput.output)).toBe(3);
+      expect(humanOutput.stdout()).toContain(
+        "error: notes/report.md:3: missing attachment ../assets/result(1).png",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("lists recent undisposed captures through the advisory inbox", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hraness-kb-cli-inbox-"));
+    try {
+      await writeFile(join(root, "index.md"), "# Index\n", "utf8");
+      await mkdir(join(root, "articles", "pending"), { recursive: true });
+      await mkdir(join(root, "articles", "used"), { recursive: true });
+      await mkdir(join(root, "notes"), { recursive: true });
+      await writeFile(join(root, "articles", "pending", "pending.md"), [
+        "---",
+        "clipped: 2026-08-02",
+        "---",
+        "# Pending",
+        "",
+      ].join("\n"), "utf8");
+      await writeFile(join(root, "articles", "used", "used.md"), [
+        "---",
+        "clipped: 2026-08-01",
+        "---",
+        "# Used",
+        "",
+      ].join("\n"), "utf8");
+      await writeFile(
+        join(root, "notes", "synthesis.md"),
+        "---\ntype: note\n---\n# Synthesis\n\n[[articles/used/used]]\n",
+        "utf8",
+      );
+
+      const output = captureOutput();
+      expect(await main(["inbox", "--root", root, "--json"], output.output)).toBe(0);
+      expect(JSON.parse(output.stdout())).toMatchObject({
+        advisory: true,
+        totalSources: 2,
+        disposedSources: 1,
+        pendingSources: 1,
+        returnedSources: 1,
+        items: [{
+          id: "articles/pending/pending",
+          clipped: "2026-08-02",
+          reason: "no-maintained-disposition",
+        }],
+        dispositions: [{
+          id: "articles/used/used",
+          evidence: [{ kind: "link", source: "notes/synthesis", line: 6 }],
+        }],
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 
@@ -1220,6 +1560,7 @@ describe("kb vault commands", () => {
           mode: "hybrid",
           filters: [],
           tags: [],
+          repositoryScopes: [],
           graph: {},
           history: false,
           limit: 3,
@@ -1229,6 +1570,261 @@ describe("kb vault commands", () => {
     ]);
     expect(closed).toBe(1);
     expect(searchOutput.stdout()).toContain("notes/memory.md:4");
+  });
+
+  test("runs an injected frozen-corpus evaluator and emits the complete raw report", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-evaluate-cli-"));
+    const manifest = join(temporary, "corpus.json");
+    try {
+      await writeFile(manifest, JSON.stringify({
+        schemaVersion: 1,
+        id: "cli-evaluation-fixture",
+        description: "Two independently specified CLI evaluation queries.",
+        frozen: {
+          repositoryCommit: "a".repeat(40),
+          vaultTree: "b".repeat(40),
+          vaultRoot: "kb",
+        },
+        assessment: {
+          rubricVersion: "fixture-v1",
+          assessors: [{ id: "fixture-author" }],
+        },
+        queries: [{
+          id: "development-exact",
+          text: "Where is alpha?",
+          class: "exact-identifier",
+          split: "development",
+          answer: "answerable",
+          inputs: { text: "alpha" },
+          qrels: [{ documentId: "notes/alpha", relevance: 3 }],
+          assessorIds: ["fixture-author"],
+          adjudication: { status: "not-required" },
+        }, {
+          id: "test-no-answer",
+          text: "Which note documents an absent system?",
+          class: "no-answer",
+          split: "test",
+          answer: "no-answer",
+          inputs: { text: "absent-system-identifier" },
+          qrels: [],
+          assessorIds: ["fixture-author"],
+          adjudication: { status: "not-required" },
+        }],
+      }), "utf8");
+
+      let closed = 0;
+      const output = captureOutput();
+      expect(await main([
+        "evaluate",
+        manifest,
+        "--retriever",
+        "exact",
+        "--split",
+        "all",
+        "--limit",
+        "5",
+        "--cutoff",
+        "5",
+        "--json",
+      ], output.output, {
+        evaluationNow: () => new Date("2026-08-01T12:00:00.000Z"),
+        openKnowledgeBaseEvaluation: () => Promise.resolve({
+          retrievers: [{
+            id: "exact",
+            retrieve: ({ query }) => Promise.resolve({
+              status: "ready",
+              hits: query.answer === "no-answer"
+                ? []
+                : [{ documentId: "notes/alpha", rank: 1, score: 1 }],
+            }),
+          }],
+          close: () => {
+            closed += 1;
+            return Promise.resolve();
+          },
+        }),
+      })).toBe(0);
+      expect(JSON.parse(output.stdout())).toMatchObject({
+        schemaVersion: 1,
+        split: "all",
+        queryCount: 2,
+        cutoff: 5,
+        environment: {
+          generatedAt: "2026-08-01T12:00:00.000Z",
+          model: { kind: "none" },
+          cache: { state: "not-applicable" },
+        },
+        summaries: [{
+          retrieverId: "exact",
+          runs: 2,
+          ready: 2,
+          metrics: { recall: 1, reciprocalRank: 1, ndcg: 1, noAnswerAccuracy: 1 },
+        }],
+        runs: [
+          { retrieverId: "exact", queryId: "development-exact", status: "ready" },
+          { retrieverId: "exact", queryId: "test-no-answer", status: "ready" },
+        ],
+      });
+      expect(closed).toBe(1);
+      expect(output.stderr()).toBe("");
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("binds semantic evaluation to verified model bytes and detects mutation", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-evaluate-model-"));
+    const manifest = join(temporary, "corpus.json");
+    const modelFile = join(temporary, "private-model.gguf");
+    const arguments_ = [
+      "evaluate",
+      manifest,
+      "--retriever",
+      "semantic",
+      "--model-file",
+      modelFile,
+      "--json",
+    ] as const;
+    try {
+      await writeFile(manifest, JSON.stringify({
+        schemaVersion: 1,
+        id: "cli-model-binding-fixture",
+        description: "One semantic query for local model binding.",
+        frozen: {
+          repositoryCommit: "a".repeat(40),
+          vaultTree: "b".repeat(40),
+          vaultRoot: "kb",
+        },
+        assessment: {
+          rubricVersion: "fixture-v1",
+          assessors: [{ id: "fixture-author" }],
+        },
+        queries: [{
+          id: "development-semantic",
+          text: "Where is development memory?",
+          class: "conceptual-recall",
+          split: "development",
+          answer: "answerable",
+          inputs: { text: "development memory" },
+          qrels: [{ documentId: "notes/development", relevance: 3 }],
+          assessorIds: ["fixture-author"],
+          adjudication: { status: "not-required" },
+        }, {
+          id: "test-semantic",
+          text: "Where is semantic memory?",
+          class: "conceptual-recall",
+          split: "test",
+          answer: "answerable",
+          inputs: { text: "semantic memory" },
+          qrels: [{ documentId: "notes/semantic", relevance: 3 }],
+          assessorIds: ["fixture-author"],
+          adjudication: { status: "not-required" },
+        }],
+      }), "utf8");
+
+      let mismatchOpens = 0;
+      const mismatchOutput = captureOutput();
+      expect(await main(arguments_, mismatchOutput.output, {
+        digestEvaluationModel: () => Promise.resolve("0".repeat(64)),
+        openKnowledgeBaseEvaluation: () => {
+          mismatchOpens += 1;
+          throw new Error("must not open an evaluator for mismatched bytes");
+        },
+      })).toBe(1);
+      expect(mismatchOpens).toBe(0);
+      expect(parseJsonObject(mismatchOutput.stdout())).toMatchObject({
+        ok: false,
+        error: {
+          kind: "runtime",
+          message: "The evaluation model does not match the pinned recommended model SHA-256.",
+        },
+      });
+      expect(mismatchOutput.stdout()).not.toContain(modelFile);
+
+      let verifiedOpens = 0;
+      let verifiedCloses = 0;
+      let digestCalls = 0;
+      const verifiedOutput = captureOutput();
+      expect(await main(arguments_, verifiedOutput.output, {
+        evaluationNow: () => new Date("2026-08-02T12:00:00.000Z"),
+        digestEvaluationModel: (path) => {
+          digestCalls += 1;
+          expect(path).toBe(resolve(modelFile));
+          return Promise.resolve(recommendedEmbeddingModelSha256);
+        },
+        openKnowledgeBaseEvaluation: (options) => {
+          verifiedOpens += 1;
+          expect(options.embeddingModelFile).toBe(resolve(modelFile));
+          return Promise.resolve({
+            retrievers: [{
+              id: "semantic",
+              retrieve: () => Promise.resolve({
+                status: "ready" as const,
+                hits: [{ documentId: "notes/semantic", rank: 1, score: 0.9 }],
+              }),
+            }],
+            close: () => {
+              verifiedCloses += 1;
+              return Promise.resolve();
+            },
+          });
+        },
+      })).toBe(0);
+      expect({ digestCalls, verifiedOpens, verifiedCloses }).toEqual({
+        digestCalls: 2,
+        verifiedOpens: 1,
+        verifiedCloses: 1,
+      });
+      expect(parseJsonObject(verifiedOutput.stdout())).toMatchObject({
+        environment: {
+          generatedAt: "2026-08-02T12:00:00.000Z",
+          model: { kind: "local", sha256: recommendedEmbeddingModelSha256 },
+          retrievers: [{
+            id: "semantic",
+            version: `qmd-${qmdIndexerVersion}/semantic`,
+          }],
+        },
+      });
+      expect(verifiedOutput.stdout()).not.toContain(modelFile);
+
+      let mutationCloses = 0;
+      let mutationDigestCalls = 0;
+      const mutationOutput = captureOutput();
+      expect(await main(arguments_, mutationOutput.output, {
+        digestEvaluationModel: () => {
+          mutationDigestCalls += 1;
+          return Promise.resolve(
+            mutationDigestCalls === 1
+              ? recommendedEmbeddingModelSha256
+              : "f".repeat(64),
+          );
+        },
+        openKnowledgeBaseEvaluation: () => Promise.resolve({
+          retrievers: [{
+            id: "semantic",
+            retrieve: () => Promise.resolve({ status: "ready" as const, hits: [] }),
+          }],
+          close: () => {
+            mutationCloses += 1;
+            return Promise.resolve();
+          },
+        }),
+      })).toBe(1);
+      expect({ mutationDigestCalls, mutationCloses }).toEqual({
+        mutationDigestCalls: 2,
+        mutationCloses: 1,
+      });
+      expect(parseJsonObject(mutationOutput.stdout())).toMatchObject({
+        ok: false,
+        error: {
+          kind: "runtime",
+          message: "The evaluation model changed while retrieval was running; retry.",
+        },
+      });
+      expect(mutationOutput.stdout()).not.toContain(modelFile);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
   });
 
   test("renders usable but incomplete Git provenance in text and JSON search output", async () => {
@@ -1312,6 +1908,302 @@ describe("kb vault commands", () => {
     });
   });
 
+  test("exposes direct note and co-change history with bounded evidence and guaranteed close", async () => {
+    const calls: unknown[] = [];
+    let closed = 0;
+    const limitedCommit = {
+      hash: "b".repeat(40),
+      committedAt: "2026-07-30T12:00:00.000Z",
+      subject: "Large repository rename",
+      reason: "changed-path-limit" as const,
+      pathLimit: 2_000,
+      observedPathRecords: 3_142,
+      affectedNoteIds: ["notes/memory"],
+    };
+    const openKnowledgeBase = (): Promise<KnowledgeBaseSession> => Promise.resolve({
+      root: "/vault",
+      repository: "/repository",
+      noteCount: 1,
+      grep: () => [],
+      list: () => [],
+      read: (note, options) => {
+        calls.push({ read: note, options });
+        return {
+          id: "notes/memory",
+          path: "notes/memory.md",
+          title: "Agent memory",
+          content: "A",
+          truncated: true,
+        };
+      },
+      links: () => { throw new Error("not used"); },
+      backlinks: () => { throw new Error("not used"); },
+      search: () => { throw new Error("not used"); },
+      history: (ids, options) => {
+        calls.push({ history: ids, options });
+        return Promise.resolve({
+          status: "ready" as const,
+          head: "a".repeat(40),
+          notes: [{
+            id: "notes/memory",
+            path: "notes/memory.md",
+            commits: [{
+              hash: "b".repeat(40),
+              committedAt: "2026-07-30T12:00:00.000Z",
+              subject: "Large repository rename",
+              cochangedPaths: ["projects/example/app/articles.ts"],
+              cochangeDetailsLimited: true as const,
+            }],
+          }],
+          limitedCommits: [limitedCommit],
+        });
+      },
+      searchHistory: (options) => {
+        calls.push({ searchHistory: options });
+        return Promise.resolve({
+          status: "ready" as const,
+          head: "a".repeat(40),
+          query: options.query,
+          hits: [{
+            id: "notes/memory",
+            path: "notes/memory.md",
+            score: 3.25,
+            commits: [{
+              hash: "b".repeat(40),
+              committedAt: "2026-07-30T12:00:00.000Z",
+              subject: "Large repository rename",
+              cochangedPaths: ["projects/example/app/articles.ts"],
+              matchedSubject: false,
+              matchedPaths: ["projects/example/app/articles.ts"],
+            }],
+          }],
+          limitedCommits: [limitedCommit],
+        });
+      },
+      close: () => {
+        closed += 1;
+        return Promise.resolve();
+      },
+    });
+
+    const noteOutput = captureOutput();
+    expect(await main([
+      "history",
+      "Agent memory",
+      "--limit",
+      "3",
+      "--cochanged-limit",
+      "8",
+      "--json",
+    ], noteOutput.output, { openKnowledgeBase })).toBe(0);
+    expect(parseJsonObject(noteOutput.stdout())).toMatchObject({
+      kind: "note",
+      note: { id: "notes/memory", path: "notes/memory.md" },
+      partial: true,
+      history: {
+        status: "ready",
+        limitedCommits: [{ observedPathRecords: 3_142 }],
+      },
+    });
+
+    const searchOutput = captureOutput();
+    expect(await main([
+      "history",
+      "search",
+      "projects/example/app/articles.ts",
+      "--limit",
+      "6",
+      "--commit-limit",
+      "2",
+      "--cochanged-limit",
+      "5",
+    ], searchOutput.output, { openKnowledgeBase })).toBe(0);
+    expect(searchOutput.stdout()).toContain("notes/memory.md");
+    expect(searchOutput.stdout()).toContain("incomplete co-change paths");
+    expect(calls).toEqual([
+      { read: "Agent memory", options: { maxBytes: 1 } },
+      {
+        history: ["notes/memory"],
+        options: { commitsPerNote: 3, cochangedPathsPerCommit: 8 },
+      },
+      {
+        searchHistory: {
+          query: "projects/example/app/articles.ts",
+          limit: 6,
+          commitsPerHit: 2,
+          cochangedPathsPerCommit: 5,
+        },
+      },
+    ]);
+    expect(closed).toBe(2);
+  });
+
+  test("returns unavailable Git evidence and still closes the session", async () => {
+    let closed = 0;
+    const unavailable = {
+      status: "unavailable" as const,
+      repository: "/repository",
+      root: "/vault",
+      vaultPrefix: "kb",
+      reason: "Git is unavailable.",
+    };
+    const output = captureOutput();
+    expect(await main([
+      "history",
+      "search",
+      "project/path",
+      "--json",
+    ], output.output, {
+      openKnowledgeBase: () => Promise.resolve({
+        root: "/vault",
+        repository: "/repository",
+        noteCount: 0,
+        grep: () => [],
+        list: () => [],
+        read: () => { throw new Error("not used"); },
+        links: () => { throw new Error("not used"); },
+        backlinks: () => { throw new Error("not used"); },
+        search: () => { throw new Error("not used"); },
+        history: () => Promise.resolve(unavailable),
+        searchHistory: () => Promise.resolve(unavailable),
+        close: () => {
+          closed += 1;
+          return Promise.resolve();
+        },
+      }),
+    })).toBe(0);
+    expect(parseJsonObject(output.stdout())).toMatchObject({
+      kind: "search",
+      partial: true,
+      history: { status: "unavailable", reason: "Git is unavailable." },
+    });
+    expect(closed).toBe(1);
+  });
+
+  test("emits one JSON error object for parse and runtime failures", async () => {
+    const parseOutput = captureOutput();
+    expect(await main(["history", "--limit", "oops", "--json"], parseOutput.output))
+      .toBe(2);
+    expect(parseJsonObject(parseOutput.stdout())).toEqual({
+      ok: false,
+      error: {
+        kind: "parse",
+        message: "--limit must be an integer from 1 through 50",
+      },
+    });
+    expect(parseOutput.stderr()).toBe("");
+
+    const runtimeOutput = captureOutput();
+    expect(await main(["index", "--json"], runtimeOutput.output, {
+      indexSemanticVault: () => Promise.reject(new Error("model failed")),
+    })).toBe(1);
+    expect(parseJsonObject(runtimeOutput.stdout())).toEqual({
+      ok: false,
+      error: { kind: "runtime", message: "model failed" },
+    });
+  });
+
+  test("keeps process-level JSON parseable while a dependency writes model progress", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-process-"));
+    try {
+      const cliUrl = pathToFileURL(join(import.meta.dir, "cli.ts")).href;
+      const script = join(temporary, "strict-json.ts");
+      const vault = join(temporary, "vault");
+      await mkdir(vault);
+      await writeFile(join(vault, "index.md"), "# Index\n", "utf8");
+      await writeFile(script, [
+        `import { runExecutable } from ${JSON.stringify(cliUrl)};`,
+        "const mode = process.env.KB_CLI_TEST_MODE;",
+        "if (mode === 'parse') {",
+        "  process.exitCode = await runExecutable(['history', '--limit', 'oops', '--json']);",
+        "} else if (mode === 'runtime') {",
+        "  process.exitCode = await runExecutable(['index', '--json'], {",
+        "    indexSemanticVault: async () => { throw new Error('simulated runtime failure'); },",
+        "  });",
+        "} else if (mode === 'unavailable') {",
+        "  const unused = () => { throw new Error('unused'); };",
+        "  process.exitCode = await runExecutable(['history', 'search', 'project/path', '--json'], {",
+        "    openKnowledgeBase: async () => ({",
+        "      root: '/vault', repository: '/repository', noteCount: 0,",
+        "      grep: unused, list: unused, read: unused, links: unused, backlinks: unused, search: unused, history: unused,",
+        "      searchHistory: async () => ({ status: 'unavailable', repository: '/repository', root: '/vault', vaultPrefix: 'kb', reason: 'Git unavailable' }),",
+        "      close: async () => undefined,",
+        "    }),",
+        "  });",
+        "} else if (mode === 'missing') {",
+        "  process.exitCode = await runExecutable(['backlinks', 'missing', '--root', process.env.KB_CLI_TEST_ROOT!, '--json']);",
+        "} else {",
+        "  process.exitCode = await runExecutable(['index', '--json'], {",
+        "    indexSemanticVault: async () => {",
+        "      process.stdout.write('\\u001b[2KDownloading local model 40%\\r');",
+        "      console.log('raw dependency progress');",
+        "      return {",
+        "        root: '/vault',",
+        "        database: '/cache/index.sqlite',",
+        "        model: 'local-model',",
+        "        update: { collections: 1, indexed: 1, updated: 0, unchanged: 0, removed: 0, needsEmbedding: 1 },",
+        "        embedding: { docsProcessed: 1, chunksEmbedded: 2, errors: 0, durationMs: 1 },",
+        "      };",
+        "    },",
+        "  });",
+        "}",
+        "",
+      ].join("\n"), "utf8");
+      const invoke = (mode: string) =>
+        Bun.spawnSync([process.execPath, script], {
+          cwd: join(import.meta.dir, ".."),
+          stdout: "pipe",
+          stderr: "pipe",
+          env: {
+            ...process.env,
+            NO_COLOR: "1",
+            KB_CLI_TEST_MODE: mode,
+            KB_CLI_TEST_ROOT: vault,
+          },
+        });
+      const processResult = invoke("progress");
+      expect(processResult.exitCode).toBe(0);
+      const stdout = processResult.stdout.toString();
+      expect(JSON.parse(stdout)).toMatchObject({ model: "local-model" });
+      expect(stdout).not.toContain("Downloading");
+      const stderr = processResult.stderr.toString();
+      expect(stderr).toContain("Downloading local model 40%");
+      expect(stderr).toContain("raw dependency progress");
+
+      const unavailable = invoke("unavailable");
+      expect(unavailable.exitCode).toBe(0);
+      expect(JSON.parse(unavailable.stdout.toString())).toMatchObject({
+        kind: "search",
+        partial: true,
+        history: { status: "unavailable", reason: "Git unavailable" },
+      });
+
+      const parseFailure = invoke("parse");
+      expect(parseFailure.exitCode).toBe(2);
+      expect(JSON.parse(parseFailure.stdout.toString())).toMatchObject({
+        ok: false,
+        error: { kind: "parse" },
+      });
+
+      const missing = invoke("missing");
+      expect(missing.exitCode).toBe(3);
+      expect(JSON.parse(missing.stdout.toString())).toEqual({
+        ok: false,
+        kind: "missing",
+        note: "missing",
+      });
+
+      const runtimeFailure = invoke("runtime");
+      expect(runtimeFailure.exitCode).toBe(1);
+      expect(JSON.parse(runtimeFailure.stdout.toString())).toEqual({
+        ok: false,
+        error: { kind: "runtime", message: "simulated runtime failure" },
+      });
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
   test("reports broken links as check failures and sanitizes thrown terminal text", async () => {
     const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-"));
     try {
@@ -1391,6 +2283,7 @@ describe("kb agent context commands", () => {
       await mkdir(join(repository, "other"), { recursive: true });
       await symlink(join(repository, "other"), join(repository, "linked"));
       await mkdir(join(vault, "scopes"), { recursive: true });
+      await mkdir(join(vault, "notes"), { recursive: true });
       await writeFile(join(repository, "AGENTS.md"), [
         agentContextMarkerForScope("."),
         "# Contents",
@@ -1436,6 +2329,20 @@ describe("kb agent context commands", () => {
           "",
         ].join("\n"));
       }
+      await writeFile(join(vault, "notes", "source-memory.md"), [
+        "---",
+        "title: Source memory",
+        "description: Current decisions for the source directory.",
+        "type: note",
+        "repository_scopes:",
+        "  - src",
+        "---",
+        "",
+        "# Source memory",
+        "",
+        "Keep repository memory next to its source-owned Markdown record.",
+        "",
+      ].join("\n"));
 
       const contextOutput = captureOutput();
       expect(await main([
@@ -1460,6 +2367,25 @@ describe("kb agent context commands", () => {
           { title: "Source context", scope: "src" },
           { title: "Repository context", scope: "." },
         ],
+        records: {
+          target: "src/button.ts",
+          counts: { matched: 1, returned: 1, invalid: 0, advisories: 0 },
+          groups: {
+            maintainedKnowledge: {
+              total: 1,
+              returned: 1,
+              truncated: false,
+              records: [{
+                path: "notes/source-memory.md",
+                matchedScope: "src",
+                match: "ancestor",
+                scopeState: { status: "present", scope: "src", kind: "directory" },
+              }],
+            },
+            activePlans: { total: 0, returned: 0, truncated: false },
+            historicalPlans: { total: 0, returned: 0, truncated: false },
+          },
+        },
         issues: [],
       });
       expect(contextOutput.stdout()).not.toContain("The remainder of this hub");

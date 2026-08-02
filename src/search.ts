@@ -81,6 +81,8 @@ export type ExactSearchOptions = {
   readonly query: string;
   readonly filters?: readonly MetadataFilter[];
   readonly tags?: readonly string[];
+  /** Match any exact, case-sensitive canonical authored repository scope. */
+  readonly repositoryScopes?: readonly string[];
   readonly limit?: number;
 };
 
@@ -417,6 +419,7 @@ export function searchExactVault(
   const allowed = new Set(queryVault(notes, analysis, {
     filters: options.filters ?? [],
     tags: options.tags ?? [],
+    repositoryScopes: options.repositoryScopes ?? [],
   }).map(({ id }) => id));
   const terms = validated.terms;
   return notes

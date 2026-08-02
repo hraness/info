@@ -12,7 +12,8 @@ authority.
 
 ## Locate the vault
 
-- Resolve `<vault>` to the directory containing the managed `index.md`.
+- Resolve `<vault>` to the directory containing its authored or managed
+  `index.md` front door.
 - Read the applicable repository and vault instructions before editing.
 - Pass the resolved path to every `--root`.
 - Identify the note or small neighborhood changed by the current task. Prefer a
@@ -122,7 +123,7 @@ Prefer the note-scoped commands first. Use the whole-vault graph only when the
 question spans several neighborhoods, and confirm returned IDs against their
 Markdown notes before reporting a conclusion.
 
-## Finish without creating a merge hotspot
+## Finish under the vault's catalog mode
 
 When working alone or integrating several lanes:
 
@@ -131,13 +132,16 @@ kb refresh --root "$KB_ROOT"
 kb check --root "$KB_ROOT"
 ```
 
-When several agents are editing different notes in parallel, each lane should
-validate authored graph structure without rewriting the shared catalog:
+When several agents are editing different notes in a managed-catalog vault,
+each lane should validate authored structure and local attachments without
+rewriting the shared catalog:
 
 ```sh
 kb check --root "$KB_ROOT" --no-catalog
 ```
 
-The integrating agent runs one final refresh and normal check. Resolve
-same-note Git conflicts from the prose and evidence; do not accept one side's
-frontmatter mechanically.
+The integrating agent runs one final managed refresh and normal check. In an
+authored-catalog vault, refresh and check leave the front door untouched, while
+`kb catalog --root "$KB_ROOT"` renders an exhaustive disposable inventory.
+Resolve same-note Git conflicts from the prose and evidence; do not accept one
+side's frontmatter mechanically.

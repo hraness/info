@@ -7,8 +7,14 @@ import {
   type NoteConnections,
   type VaultAnalysis,
 } from "./graph.js";
+import {
+  analyzeAuthoredRepositoryScopes,
+  validateRepositoryScopeSelection,
+} from "./repository-memory.js";
 
 export const MAX_QUERY_FILTERS = 64;
+export const MAX_QUERY_ONE_OF_VALUES = 64;
+export const MAX_QUERY_FILTER_VALUES = 256;
 export const MAX_QUERY_TAGS = 64;
 export const MAX_QUERY_METADATA_PATH_UTF8_BYTES = 1_024;
 export const MAX_QUERY_METADATA_PATH_SEGMENTS = 32;
@@ -26,6 +32,11 @@ export type MetadataFilter =
   | {
       readonly kind: "exists";
       readonly path: MetadataPath;
+    }
+  | {
+      readonly kind: "one-of";
+      readonly path: MetadataPath;
+      readonly values: readonly MetadataScalar[];
     };
 
 export type QuerySort =
@@ -45,6 +56,8 @@ export type QueryOptions = {
   readonly filters?: readonly MetadataFilter[];
   /** Repeated tags are combined with AND semantics. */
   readonly tags?: readonly string[];
+  /** Match any exact, case-sensitive canonical authored repository scope. */
+  readonly repositoryScopes?: readonly string[];
   readonly sort?: QuerySort;
   readonly direction?: QueryDirection;
   readonly limit?: number;
@@ -84,7 +97,7 @@ function normalizedTag(value: string): string {
   return normalizedString(value.trim().replace(/^#+/u, ""));
 }
 
-type QueryTextBudget = { bytes: number };
+type QueryTextBudget = { bytes: number; filterValues: number };
 
 type PreparedMetadataSegment = {
   readonly exact: string;
@@ -244,21 +257,28 @@ export function metadataAtPath(
   );
 }
 
+type PreparedEqualsFilter = {
+  readonly kind: "equals";
+  readonly path: PreparedMetadataPath;
+  readonly value: MetadataScalar;
+  readonly normalizedValue?: string;
+};
+
 type PreparedMetadataFilter =
-  | {
-      readonly kind: "equals";
-      readonly path: PreparedMetadataPath;
-      readonly value: MetadataScalar;
-      readonly normalizedValue?: string;
-    }
+  | PreparedEqualsFilter
   | {
       readonly kind: "exists";
       readonly path: PreparedMetadataPath;
+    }
+  | {
+      readonly kind: "one-of";
+      readonly path: PreparedMetadataPath;
+      readonly values: readonly PreparedEqualsFilter[];
     };
 
 function equalsScalar(
   value: MetadataValue,
-  filter: Extract<PreparedMetadataFilter, { readonly kind: "equals" }>,
+  filter: PreparedEqualsFilter,
   stringCache: Map<string, string>,
 ): boolean {
   if (isMetadataArray(value)) {
@@ -286,7 +306,12 @@ function matchesFilter(
 ): boolean {
   const lookup = metadataAtPreparedPath(note.metadata, filter.path, keyCache);
   if (filter.kind === "exists") return lookup.found;
-  return lookup.found && equalsScalar(lookup.value, filter, stringCache);
+  if (!lookup.found) return false;
+  if (filter.kind === "one-of") {
+    return filter.values.some((candidate) =>
+      equalsScalar(lookup.value, candidate, stringCache));
+  }
+  return equalsScalar(lookup.value, filter, stringCache);
 }
 
 function matchesTags(note: QueryableMetadata, tags: ReadonlySet<string>): boolean {
@@ -310,6 +335,7 @@ type PreparedQuerySort =
 type PreparedQueryOptions = {
   readonly filters: readonly PreparedMetadataFilter[];
   readonly tags: ReadonlySet<string>;
+  readonly repositoryScopes: ReadonlySet<string>;
   readonly sort: PreparedQuerySort;
   readonly direction: QueryDirection;
   readonly limit?: number;
@@ -329,7 +355,7 @@ function prepareFilter(
 ): PreparedMetadataFilter {
   const label = `Query filter ${index + 1}`;
   if (value === null || typeof value !== "object") {
-    throw new TypeError(`${label} must be an equals or exists filter.`);
+    throw new TypeError(`${label} must be an equals, exists, or one-of filter.`);
   }
   const filter = value as Readonly<Record<string, unknown>>;
   const path = prepareMetadataPath(
@@ -338,27 +364,64 @@ function prepareFilter(
     budget,
   );
   if (filter.kind === "exists") return { kind: "exists", path };
+  if (filter.kind === "one-of") {
+    if (!Array.isArray(filter.values)) {
+      throw new TypeError(`${label} one-of values must be an array.`);
+    }
+    if (filter.values.length === 0 || filter.values.length > MAX_QUERY_ONE_OF_VALUES) {
+      throw new RangeError(
+        `${label} one-of values must contain from 1 through ${MAX_QUERY_ONE_OF_VALUES} entries.`,
+      );
+    }
+    budget.filterValues += filter.values.length;
+    if (budget.filterValues > MAX_QUERY_FILTER_VALUES) {
+      throw new RangeError(
+        `Query filters may contain at most ${MAX_QUERY_FILTER_VALUES} scalar values.`,
+      );
+    }
+    return {
+      kind: "one-of",
+      path,
+      values: filter.values.map((candidate, valueIndex) =>
+        prepareEqualsValue(candidate, `${label} one-of value ${valueIndex + 1}`, budget, path)),
+    };
+  }
   if (filter.kind !== "equals") {
-    throw new TypeError(`${label} must be an equals or exists filter.`);
+    throw new TypeError(`${label} must be an equals, exists, or one-of filter.`);
   }
-  if (!isMetadataScalar(filter.value)) {
-    throw new TypeError(`${label} value must be a metadata scalar.`);
+  budget.filterValues += 1;
+  if (budget.filterValues > MAX_QUERY_FILTER_VALUES) {
+    throw new RangeError(
+      `Query filters may contain at most ${MAX_QUERY_FILTER_VALUES} scalar values.`,
+    );
   }
-  if (typeof filter.value === "string") {
+  return prepareEqualsValue(filter.value, `${label} value`, budget, path);
+}
+
+function prepareEqualsValue(
+  value: unknown,
+  label: string,
+  budget: QueryTextBudget,
+  path: PreparedMetadataPath,
+): PreparedEqualsFilter {
+  if (!isMetadataScalar(value)) {
+    throw new TypeError(`${label} must be a metadata scalar.`);
+  }
+  if (typeof value === "string") {
     const bytes = boundedTextBytes(
-      filter.value,
+      value,
       MAX_QUERY_TEXT_UTF8_BYTES,
-      `${label} string value`,
+      label,
     );
     addQueryText(budget, bytes);
     return {
       kind: "equals",
       path,
-      value: filter.value,
-      normalizedValue: normalizedString(filter.value),
+      value,
+      normalizedValue: normalizedString(value),
     };
   }
-  return { kind: "equals", path, value: filter.value };
+  return { kind: "equals", path, value };
 }
 
 function prepareSort(
@@ -399,7 +462,7 @@ function prepareQueryOptions(options: QueryOptions): PreparedQueryOptions {
     throw new RangeError("Query limit must be a non-negative safe integer.");
   }
 
-  const budget: QueryTextBudget = { bytes: 0 };
+  const budget: QueryTextBudget = { bytes: 0, filterValues: 0 };
   const filters = rawFilters.map((filter, index) => prepareFilter(filter, index, budget));
   const tags = new Set<string>();
   for (const [index, value] of rawTags.entries()) {
@@ -412,10 +475,15 @@ function prepareQueryOptions(options: QueryOptions): PreparedQueryOptions {
     addQueryText(budget, bytes);
     tags.add(normalizedTag(value));
   }
+  const repositoryScopes = validateRepositoryScopeSelection(options.repositoryScopes ?? []);
+  for (const scope of repositoryScopes) {
+    addQueryText(budget, Buffer.byteLength(scope, "utf8"));
+  }
   const sort = prepareSort(options.sort, budget);
   return {
     filters,
     tags,
+    repositoryScopes: new Set(repositoryScopes),
     sort,
     direction: options.direction ?? "asc",
     ...(options.limit === undefined ? {} : { limit: options.limit }),
@@ -529,6 +597,17 @@ function queryRow(note: Note, connection: NoteConnections | undefined): QueryRow
   };
 }
 
+function matchesRepositoryScopes(
+  note: QueryableMetadata,
+  selected: ReadonlySet<string>,
+): boolean {
+  if (selected.size === 0) return true;
+  const authored = analyzeAuthoredRepositoryScopes(note.metadata);
+  return authored.present
+    && authored.valid
+    && authored.scopes.some((scope) => selected.has(scope));
+}
+
 /** Query content notes while enriching every result with the deterministic graph view. */
 export function queryVault(
   notes: readonly Note[],
@@ -549,7 +628,8 @@ export function queryVault(
       const stringCache = new Map<string, string>();
       return prepared.filters.every((filter) =>
         matchesFilter(row, filter, keyCache, stringCache))
-        && matchesTags(row, prepared.tags);
+        && matchesTags(row, prepared.tags)
+        && matchesRepositoryScopes(row, prepared.repositoryScopes);
     })
     .map((candidate) => ({
       ...candidate,

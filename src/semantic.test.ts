@@ -11,13 +11,14 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
   indexSemanticVault,
   openSemanticSearchSession,
   recommendedEmbeddingModel,
+  recommendedEmbeddingModelSha256,
   searchSemanticVault,
   semanticDatabasePath,
   type SemanticDependencies,
@@ -42,6 +43,24 @@ type SearchResultFixture = {
 };
 
 type FakeStore = {
+  readonly internal?: {
+    readonly getHashesNeedingEmbedding: (model?: string) => unknown;
+    readonly llm: {
+      readonly embed: (text: string, options?: { readonly model?: string }) => Promise<unknown>;
+    };
+    readonly searchVec: (
+      query: string,
+      model: string,
+      limit?: number,
+      collection?: string,
+      session?: {
+        readonly embed: (
+          text: string,
+          options?: { readonly model?: string },
+        ) => Promise<unknown>;
+      },
+    ) => Promise<unknown>;
+  };
   readonly close: () => Promise<unknown>;
   readonly embed: (options?: {
     readonly collection?: string;
@@ -121,6 +140,23 @@ describe("semantic index paths", () => {
 });
 
 describe("QMD indexing", () => {
+  test("keeps QMD document tokenization on the store-local embedding model", async () => {
+    const installedStore = await readFile(
+      join(dirname(fileURLToPath(import.meta.resolve("@tobilu/qmd"))), "store.js"),
+      "utf8",
+    );
+
+    expect(installedStore).toContain(
+      "chunkDocumentByTokensWithLlm(llm, doc.body",
+    );
+    expect(installedStore).toContain(
+      "chunkDocumentByTokensWithLlm(llm, sample.body",
+    );
+    expect(installedStore).toContain(
+      "chunkDocumentByTokensWithLlm(getDefaultLlamaCpp(), content",
+    );
+  });
+
   test("pins QMD's recommended embedding model, incrementally updates, embeds, and closes", async () => {
     const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
     const root = join(temporary, "vault");
@@ -227,13 +263,16 @@ describe("QMD indexing", () => {
         sha256: contentHash(original),
         bytes: Buffer.byteLength(original),
       });
-      const qmdEntry = fileURLToPath(import.meta.resolve("@tobilu/qmd"));
-      const qmdPackage = JSON.parse(
-        await readFile(resolve(dirname(qmdEntry), "..", "package.json"), "utf8"),
-      ) as { version: string };
       expect(manifest.indexIdentity).toMatchObject({
-        indexer: { package: "@tobilu/qmd", version: qmdPackage.version },
-        embedding: { model: recommendedEmbeddingModel, chunkStrategy: "regex" },
+        indexer: {
+          package: "@tobilu/qmd",
+          version:
+            "2.5.3+hraness.aa993dceb3ef8cfb71d470554ca437570f5a2b3c",
+        },
+        embedding: {
+          model: `${recommendedEmbeddingModel}@sha256:${recommendedEmbeddingModelSha256}`,
+          chunkStrategy: "regex",
+        },
       });
     } finally {
       await rm(temporary, { recursive: true, force: true });
@@ -383,6 +422,118 @@ describe("QMD indexing", () => {
 });
 
 describe("QMD search", () => {
+  test("loads verified local model bytes without exposing their path as model identity", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-model-"));
+    const root = join(temporary, "vault");
+    const modelFile = join(temporary, "private-model.gguf");
+    const optionsSeen: SemanticStoreOptions[] = [];
+    const embedModels: string[] = [];
+    const pendingModels: string[] = [];
+    const queryModels: string[] = [];
+    const queryEmbedModels: string[] = [];
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    const store = {
+      internal: {
+        getHashesNeedingEmbedding: (model?: string) => {
+          pendingModels.push(String(model));
+          return 1;
+        },
+        llm: {
+          embed: (_text: string, options?: { readonly model?: string }) => {
+            queryEmbedModels.push(String(options?.model));
+            return Promise.resolve({ embedding: [0.25], model: options?.model });
+          },
+        },
+        searchVec: async (
+          query: string,
+          model: string,
+          limit?: number,
+          collection?: string,
+          session?: {
+            readonly embed: (
+              text: string,
+              options?: { readonly model?: string },
+            ) => Promise<unknown>;
+          },
+        ) => {
+          queryModels.push(`${query}:${model}:${String(limit)}:${String(collection)}`);
+          await session?.embed("formatted query", { model });
+          return [];
+        },
+      },
+      update: () => Promise.resolve({ ...unchanged, needsEmbedding: 1 }),
+      embed: (options?: Parameters<FakeStore["embed"]>[0]) => {
+        embedModels.push(String(options?.model));
+        return Promise.resolve({
+          docsProcessed: 0,
+          chunksEmbedded: 0,
+          errors: 0,
+          durationMs: 0,
+        });
+      },
+      searchLex: () => Promise.resolve([]),
+      searchVector: () => Promise.reject(new Error("public vector search must not run")),
+      getDocumentBody: () => Promise.resolve(null),
+      close: () => Promise.resolve(),
+    } satisfies FakeStore;
+    try {
+      const session = await openSemanticSearchSession(
+        { root, embeddingModelFile: modelFile },
+        {
+          ...fakeDependencies(store, optionsSeen, join(temporary, "cache")),
+          digestEmbeddingModelFile: (path) => {
+            expect(path).toBe(modelFile);
+            return Promise.resolve(recommendedEmbeddingModelSha256);
+          },
+        },
+      );
+      const result = await session.search({ query: "local bytes", mode: "semantic" });
+      await session.close();
+
+      expect(optionsSeen[0]?.config.models?.embed).toBe(modelFile);
+      expect(embedModels).toEqual([recommendedEmbeddingModel]);
+      expect(pendingModels).toEqual([
+        recommendedEmbeddingModel,
+        recommendedEmbeddingModel,
+      ]);
+      expect(queryModels).toEqual([
+        `local bytes:${recommendedEmbeddingModel}:40:kb`,
+      ]);
+      expect(queryEmbedModels).toEqual([recommendedEmbeddingModel]);
+      expect(session.model).toBe(recommendedEmbeddingModel);
+      expect(result.model).toBe(recommendedEmbeddingModel);
+      expect(JSON.stringify({ session: session.model, result: result.model }))
+        .not.toContain(modelFile);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects unpinned local model bytes before opening QMD", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-model-"));
+    const root = join(temporary, "vault");
+    const modelFile = join(temporary, "wrong-model.gguf");
+    let creates = 0;
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(modelFile, "not the pinned model", "utf8");
+    try {
+      expect(openSemanticSearchSession(
+        { root, embeddingModelFile: modelFile },
+        {
+          createStore: () => {
+            creates += 1;
+            return Promise.reject(new Error("must not open QMD"));
+          },
+        },
+      )).rejects.toThrow("does not match the pinned recommended model SHA-256");
+      expect(creates).toBe(0);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
   test("shares one scan, update, embedding, and serialized store across a session", async () => {
     const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
     const root = join(temporary, "vault");

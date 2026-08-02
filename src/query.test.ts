@@ -3,8 +3,10 @@ import { describe, expect, test } from "bun:test";
 import { analyzeVault, parseNote } from "./graph.js";
 import {
   MAX_QUERY_FILTERS,
+  MAX_QUERY_FILTER_VALUES,
   MAX_QUERY_METADATA_PATH_SEGMENTS,
   MAX_QUERY_METADATA_PATH_UTF8_BYTES,
+  MAX_QUERY_ONE_OF_VALUES,
   MAX_QUERY_OPTIONS_UTF8_BYTES,
   MAX_QUERY_TAGS,
   MAX_QUERY_TEXT_UTF8_BYTES,
@@ -27,6 +29,7 @@ function fixture() {
       "  teams: [Research, Platform]",
       "metrics:",
       "  score: 10",
+      "repository_scopes: [packages/kb, packages/kb/src/query.ts]",
       "---",
       "# Alpha",
       "",
@@ -43,6 +46,7 @@ function fixture() {
       "owner:",
       "  name: Bob",
       "  teams: [Operations]",
+      "repository_scopes: [packages/KB]",
       "---",
       "# Beta",
       "",
@@ -103,6 +107,75 @@ describe("vault metadata queries", () => {
     });
 
     expect(rows.map(({ path }) => path)).toEqual(["notes/alpha.md", "notes/gamma.md"]);
+  });
+
+  test("supports bounded one-of filters without changing repeated-filter AND semantics", () => {
+    const { notes, analysis } = fixture();
+    expect(queryVault(notes, analysis, {
+      filters: [
+        { kind: "one-of", path: "status", values: ["parked", "ACTIVE"] },
+        { kind: "one-of", path: "owner.name", values: ["Alice"] },
+      ],
+    }).map(({ path }) => path)).toEqual(["notes/alpha.md", "notes/gamma.md"]);
+
+    expect(() => validateQueryOptions({
+      filters: [{ kind: "one-of", path: "status", values: [] }],
+    })).toThrow(`1 through ${MAX_QUERY_ONE_OF_VALUES}`);
+    expect(() => validateQueryOptions({
+      filters: [{
+        kind: "one-of",
+        path: "status",
+        values: Array.from({ length: MAX_QUERY_ONE_OF_VALUES + 1 }, () => "active"),
+      }],
+    })).toThrow(`1 through ${MAX_QUERY_ONE_OF_VALUES}`);
+    expect(() => validateQueryOptions({
+      filters: [{
+        kind: "one-of",
+        path: "status",
+        values: ["x".repeat(MAX_QUERY_TEXT_UTF8_BYTES + 1)],
+      }],
+    })).toThrow(`${MAX_QUERY_TEXT_UTF8_BYTES.toLocaleString("en-US")} UTF-8 bytes`);
+    const invalidOneOfValues: ("active" | null)[] = [];
+    Reflect.set(invalidOneOfValues, 0, {});
+    expect(() => validateQueryOptions({
+      filters: [{
+        kind: "one-of",
+        path: "status",
+        values: invalidOneOfValues,
+      }],
+    })).toThrow("must be a metadata scalar");
+    expect(() => validateQueryOptions({
+      filters: [{
+        kind: "one-of",
+        path: "status",
+        values: Array.from(
+          { length: Math.floor(MAX_QUERY_OPTIONS_UTF8_BYTES / MAX_QUERY_TEXT_UTF8_BYTES) + 1 },
+          () => "x".repeat(MAX_QUERY_TEXT_UTF8_BYTES),
+        ),
+      }],
+    })).toThrow(`${MAX_QUERY_OPTIONS_UTF8_BYTES.toLocaleString("en-US")} UTF-8 bytes`);
+    expect(() => validateQueryOptions({
+      filters: Array.from(
+        { length: Math.ceil(MAX_QUERY_FILTER_VALUES / MAX_QUERY_ONE_OF_VALUES) + 1 },
+        () => ({
+          kind: "one-of" as const,
+          path: "status",
+          values: Array.from({ length: MAX_QUERY_ONE_OF_VALUES }, () => "active"),
+        }),
+      ),
+    })).toThrow(`at most ${MAX_QUERY_FILTER_VALUES} scalar values`);
+  });
+
+  test("filters repository scopes exactly and case-sensitively", () => {
+    const { notes, analysis } = fixture();
+    expect(queryVault(notes, analysis, { repositoryScopes: ["packages/kb"] })
+      .map(({ path }) => path)).toEqual(["notes/alpha.md"]);
+    expect(queryVault(notes, analysis, { repositoryScopes: ["packages/KB"] })
+      .map(({ path }) => path)).toEqual(["notes/beta.md"]);
+    expect(queryVault(notes, analysis, { repositoryScopes: ["packages/kb/src"] }))
+      .toEqual([]);
+    expect(() => validateQueryOptions({ repositoryScopes: ["packages//kb"] }))
+      .toThrow("exact NFC-normalized POSIX form");
   });
 
   test("requires every repeated tag and enriches rows with graph counts", () => {
@@ -244,5 +317,8 @@ describe("vault metadata queries", () => {
     expect(() => queryVault(notes, guardedAnalysis, {
       tags: Array.from({ length: MAX_QUERY_TAGS + 1 }, () => "tag"),
     })).toThrow(`at most ${MAX_QUERY_TAGS} entries`);
+    expect(() => queryVault(notes, guardedAnalysis, {
+      repositoryScopes: ["packages//kb"],
+    })).toThrow("exact NFC-normalized POSIX form");
   });
 });

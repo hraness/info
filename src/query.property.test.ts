@@ -65,4 +65,43 @@ describe("vault query properties", () => {
       },
     ));
   });
+
+  test("one-of equals the union of scalar equality while repository scopes remain exact", () => {
+    fc.assert(fc.property(
+      fc.uniqueArray(fc.stringMatching(/^[a-z][a-z0-9-]{0,10}$/u), {
+        minLength: 1,
+        maxLength: 10,
+      }),
+      fc.subarray(["proposed", "accepted", "in-progress", "blocked"], {
+        minLength: 1,
+      }),
+      (names, statuses) => {
+        const notes = names.map((name, index) => parseNote(`notes/${name}.md`, [
+          "---",
+          `status: ${statuses[index % statuses.length]}`,
+          "repository_scopes:",
+          `  - packages/${index % 2 === 0 ? "kb" : "KB"}`,
+          "---",
+          `# ${name}`,
+        ].join("\n")));
+        const analysis = analyzeVault(notes);
+        const selected = statuses.slice(0, Math.max(1, Math.floor(statuses.length / 2)));
+        const oneOf = queryVault(notes, analysis, {
+          filters: [{ kind: "one-of", path: "status", values: selected }],
+          repositoryScopes: ["packages/kb"],
+        }).map(({ path }) => path);
+        const equalityUnion = new Set(selected.flatMap((status) =>
+          queryVault(notes, analysis, {
+            filters: [{ kind: "equals", path: "status", value: status }],
+            repositoryScopes: ["packages/kb"],
+          }).map(({ path }) => path)));
+
+        expect(oneOf).toEqual([...equalityUnion].toSorted());
+        expect(oneOf.every((path) => {
+          const index = names.findIndex((name) => path === `notes/${name}.md`);
+          return index % 2 === 0;
+        })).toBe(true);
+      },
+    ));
+  });
 });

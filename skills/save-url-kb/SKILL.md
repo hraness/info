@@ -19,7 +19,8 @@ kb doctor
 kb adapters
 ```
 
-Resolve `<vault>` to the directory containing the managed `index.md`, then set
+Resolve `<vault>` to the directory containing its authored or managed
+`index.md` front door, then set
 the shell-local `KB_ROOT` to that path (`KB_ROOT=kb` from a typical repository
 root, or `KB_ROOT=.` from inside the vault). Pass `--output "$KB_ROOT/articles"`
 to captures and read the vault's applicable agent instructions before writing.

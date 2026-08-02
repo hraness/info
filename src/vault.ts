@@ -61,11 +61,14 @@ export const defaultIgnoredDirectories = new Set([
   "node_modules",
 ]);
 
-export type VaultIndexState = "current" | "stale" | "updated";
+export type CatalogMode = "managed" | "authored";
+
+export type VaultIndexState = "current" | "stale" | "updated" | "authored";
 
 export type VaultSnapshot = {
   readonly root: string;
   readonly indexPath: string;
+  readonly catalogMode: CatalogMode;
   readonly index: VaultIndexState;
   readonly notes: readonly Note[];
   readonly analysis: VaultAnalysis;
@@ -73,6 +76,8 @@ export type VaultSnapshot = {
 
 export type ScanVaultOptions = Omit<AnalyzeVaultOptions, "mentionScope"> & {
   readonly index?: string;
+  /** Override the configured index's `kb_catalog` mode for this operation. */
+  readonly catalogMode?: CatalogMode;
   readonly ignoredDirectories?: ReadonlySet<string>;
   /** Maximum UTF-8 bytes accepted from one Markdown note. */
   readonly maxNoteBytes?: number;
@@ -387,7 +392,7 @@ function confined(root: string, path: string): boolean {
 }
 
 async function assertConfinedIndexParents(root: string, path: string): Promise<void> {
-  if (!confined(root, path)) throw new Error("The managed index must be a file inside the vault root.");
+  if (!confined(root, path)) throw new Error("The configured index must be a file inside the vault root.");
   const parent = dirname(path);
   const segments = relative(root, parent).split(sep).filter((segment) => segment !== "");
   let current = root;
@@ -395,15 +400,15 @@ async function assertConfinedIndexParents(root: string, path: string): Promise<v
     current = join(current, segment);
     const metadata = await lstat(current);
     if (metadata.isSymbolicLink()) {
-      throw new Error("The managed index path must not traverse a symbolic link.");
+      throw new Error("The configured index path must not traverse a symbolic link.");
     }
     if (!metadata.isDirectory()) {
-      throw new Error("Every managed index parent must be a directory.");
+      throw new Error("Every configured index parent must be a directory.");
     }
   }
   const canonicalParent = await realpath(parent);
   if (!confined(root, join(canonicalParent, basename(path)))) {
-    throw new Error("The managed index parent resolves outside the vault root.");
+    throw new Error("The configured index parent resolves outside the vault root.");
   }
 }
 
@@ -416,11 +421,11 @@ async function readIndexRevision(
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const metadata = await handle.stat({ bigint: true });
-    if (!metadata.isFile()) throw new Error("The managed index must be a regular file.");
-    if (metadata.nlink !== 1n) throw new Error("The managed index must not be hard-linked.");
+    if (!metadata.isFile()) throw new Error("The configured index must be a regular file.");
+    if (metadata.nlink !== 1n) throw new Error("The configured index must not be hard-linked.");
     const canonicalPath = await realpath(path);
     if (!confined(root, canonicalPath)) {
-      throw new Error("The managed index resolves outside the vault root.");
+      throw new Error("The configured index resolves outside the vault root.");
     }
     const vaultPath = relative(root, path).split(sep).join("/");
     if (metadata.size > BigInt(maxNoteBytes)) {
@@ -440,7 +445,7 @@ async function readIndexRevision(
       || afterRead.size !== metadata.size
       || afterRead.size !== BigInt(read.bytes)
     ) {
-      throw new Error("The managed index changed during scan; retry.");
+      throw new Error("The configured index changed during scan; retry.");
     }
     return {
       content: read.content,
@@ -459,6 +464,23 @@ function sameRevision(left: IndexRevision, right: IndexRevision): boolean {
     && left.content === right.content;
 }
 
+function parsedCatalogMode(value: unknown, source: string): CatalogMode | undefined {
+  if (value === undefined) return undefined;
+  if (value === "managed" || value === "authored") return value;
+  throw new Error(
+    `${source} must be exactly "managed" or "authored".`,
+  );
+}
+
+function declaredCatalogMode(indexNote: Note): CatalogMode | undefined {
+  const declaration = Object.entries(indexNote.metadata).find(([name]) =>
+    name.toLocaleLowerCase("en-US") === "kb_catalog");
+  return parsedCatalogMode(
+    declaration?.[1],
+    `The configured index frontmatter property "kb_catalog"`,
+  );
+}
+
 async function atomicReplace(
   root: string,
   path: string,
@@ -467,7 +489,7 @@ async function atomicReplace(
 ): Promise<void> {
   const beforeWrite = await readIndexRevision(root, path);
   if (!sameRevision(beforeWrite, expected)) {
-    throw new Error("The managed index changed during refresh; retry without overwriting the editor's changes.");
+    throw new Error("The configured index changed during refresh; retry without overwriting the editor's changes.");
   }
   const directory = dirname(path);
   const temporaryPath = join(directory, `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
@@ -485,7 +507,7 @@ async function atomicReplace(
     closed = true;
     const beforeRename = await readIndexRevision(root, path);
     if (!sameRevision(beforeRename, expected)) {
-      throw new Error("The managed index changed during refresh; retry without overwriting the editor's changes.");
+      throw new Error("The configured index changed during refresh; retry without overwriting the editor's changes.");
     }
     await assertConfinedIndexParents(root, path);
     await rename(temporaryPath, path);
@@ -508,10 +530,10 @@ async function snapshot(
   const indexPath = resolve(root, options.index ?? "index.md");
   const relativeIndex = relative(root, indexPath);
   if (!confined(root, indexPath)) {
-    throw new Error("The managed index must be a file inside the vault root.");
+    throw new Error("The configured index must be a file inside the vault root.");
   }
   if (!indexPath.toLowerCase().endsWith(".md")) {
-    throw new Error("The managed index must be a Markdown file.");
+    throw new Error("The configured index must be a Markdown file.");
   }
   const vaultIndexPath = relativeIndex.split(sep).join("/");
   const catalogNoteId = vaultIndexPath.toLowerCase().endsWith(".md")
@@ -532,20 +554,29 @@ async function snapshot(
     options.maxNoteBytes ?? MAX_NOTE_UTF8_BYTES,
   );
   const currentIndex = indexRevision.content;
-  const expectedIndex = replaceCatalog(
-    currentIndex,
-    renderCatalog(notes, catalogNoteId),
-  );
-  const stale = currentIndex !== expectedIndex;
-  let index: VaultIndexState = stale ? "stale" : "current";
+  const indexNote = parseNote(vaultIndexPath, currentIndex);
+  const catalogMode = parsedCatalogMode(
+    options.catalogMode,
+    "ScanVaultOptions.catalogMode",
+  ) ?? declaredCatalogMode(indexNote) ?? "managed";
+  let index: VaultIndexState = "authored";
 
-  if (writeIndex && stale) {
-    await atomicReplace(root, indexPath, expectedIndex, indexRevision);
-    index = "updated";
-    const parsed = parseNote(vaultIndexPath, expectedIndex);
-    const noteIndex = notes.findIndex((note) => note.path === vaultIndexPath);
-    if (noteIndex === -1) notes.push(parsed);
-    else notes[noteIndex] = parsed;
+  if (catalogMode === "managed") {
+    const expectedIndex = replaceCatalog(
+      currentIndex,
+      renderCatalog(notes, catalogNoteId),
+    );
+    const stale = currentIndex !== expectedIndex;
+    index = stale ? "stale" : "current";
+
+    if (writeIndex && stale) {
+      await atomicReplace(root, indexPath, expectedIndex, indexRevision);
+      index = "updated";
+      const parsed = parseNote(vaultIndexPath, expectedIndex);
+      const noteIndex = notes.findIndex((note) => note.path === vaultIndexPath);
+      if (noteIndex === -1) notes.push(parsed);
+      else notes[noteIndex] = parsed;
+    }
   }
 
   const mentionScope = options.mentionScope;
@@ -565,6 +596,7 @@ async function snapshot(
   return {
     root,
     indexPath,
+    catalogMode,
     index,
     notes,
     analysis: analyzeVault(notes, {

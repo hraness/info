@@ -2,7 +2,7 @@
 
 Use the browser state already available on the machine. Choose the route that matches where the page is currently readable.
 
-These examples assume `KB_ROOT` is the resolved vault directory containing the managed `index.md`.
+These examples assume `KB_ROOT` is the resolved vault directory containing its authored or managed `index.md` front door.
 
 ## Read the current tab
 

@@ -1,6 +1,13 @@
 // @bun
+import {
+  analyzeAuthoredRepositoryScopes,
+  validateRepositoryScopeSelection
+} from "./index-06c9ctr6.js";
+
 // src/query.ts
 var MAX_QUERY_FILTERS = 64;
+var MAX_QUERY_ONE_OF_VALUES = 64;
+var MAX_QUERY_FILTER_VALUES = 256;
 var MAX_QUERY_TAGS = 64;
 var MAX_QUERY_METADATA_PATH_UTF8_BYTES = 1024;
 var MAX_QUERY_METADATA_PATH_SEGMENTS = 32;
@@ -146,7 +153,12 @@ function matchesFilter(note, filter, keyCache, stringCache) {
   const lookup = metadataAtPreparedPath(note.metadata, filter.path, keyCache);
   if (filter.kind === "exists")
     return lookup.found;
-  return lookup.found && equalsScalar(lookup.value, filter, stringCache);
+  if (!lookup.found)
+    return false;
+  if (filter.kind === "one-of") {
+    return filter.values.some((candidate) => equalsScalar(lookup.value, candidate, stringCache));
+  }
+  return equalsScalar(lookup.value, filter, stringCache);
 }
 function matchesTags(note, tags) {
   const noteTags = new Set(note.tags.map(normalizedTag));
@@ -162,29 +174,53 @@ function isMetadataScalar(value) {
 function prepareFilter(value, index, budget) {
   const label = `Query filter ${index + 1}`;
   if (value === null || typeof value !== "object") {
-    throw new TypeError(`${label} must be an equals or exists filter.`);
+    throw new TypeError(`${label} must be an equals, exists, or one-of filter.`);
   }
   const filter = value;
   const path = prepareMetadataPath(filter.path, `${label} metadata path`, budget);
   if (filter.kind === "exists")
     return { kind: "exists", path };
+  if (filter.kind === "one-of") {
+    if (!Array.isArray(filter.values)) {
+      throw new TypeError(`${label} one-of values must be an array.`);
+    }
+    if (filter.values.length === 0 || filter.values.length > MAX_QUERY_ONE_OF_VALUES) {
+      throw new RangeError(`${label} one-of values must contain from 1 through ${MAX_QUERY_ONE_OF_VALUES} entries.`);
+    }
+    budget.filterValues += filter.values.length;
+    if (budget.filterValues > MAX_QUERY_FILTER_VALUES) {
+      throw new RangeError(`Query filters may contain at most ${MAX_QUERY_FILTER_VALUES} scalar values.`);
+    }
+    return {
+      kind: "one-of",
+      path,
+      values: filter.values.map((candidate, valueIndex) => prepareEqualsValue(candidate, `${label} one-of value ${valueIndex + 1}`, budget, path))
+    };
+  }
   if (filter.kind !== "equals") {
-    throw new TypeError(`${label} must be an equals or exists filter.`);
+    throw new TypeError(`${label} must be an equals, exists, or one-of filter.`);
   }
-  if (!isMetadataScalar(filter.value)) {
-    throw new TypeError(`${label} value must be a metadata scalar.`);
+  budget.filterValues += 1;
+  if (budget.filterValues > MAX_QUERY_FILTER_VALUES) {
+    throw new RangeError(`Query filters may contain at most ${MAX_QUERY_FILTER_VALUES} scalar values.`);
   }
-  if (typeof filter.value === "string") {
-    const bytes = boundedTextBytes(filter.value, MAX_QUERY_TEXT_UTF8_BYTES, `${label} string value`);
+  return prepareEqualsValue(filter.value, `${label} value`, budget, path);
+}
+function prepareEqualsValue(value, label, budget, path) {
+  if (!isMetadataScalar(value)) {
+    throw new TypeError(`${label} must be a metadata scalar.`);
+  }
+  if (typeof value === "string") {
+    const bytes = boundedTextBytes(value, MAX_QUERY_TEXT_UTF8_BYTES, label);
     addQueryText(budget, bytes);
     return {
       kind: "equals",
       path,
-      value: filter.value,
-      normalizedValue: normalizedString(filter.value)
+      value,
+      normalizedValue: normalizedString(value)
     };
   }
-  return { kind: "equals", path, value: filter.value };
+  return { kind: "equals", path, value };
 }
 function prepareSort(value, budget) {
   if (value === undefined)
@@ -219,7 +255,7 @@ function prepareQueryOptions(options) {
   if (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit < 0)) {
     throw new RangeError("Query limit must be a non-negative safe integer.");
   }
-  const budget = { bytes: 0 };
+  const budget = { bytes: 0, filterValues: 0 };
   const filters = rawFilters.map((filter, index) => prepareFilter(filter, index, budget));
   const tags = new Set;
   for (const [index, value] of rawTags.entries()) {
@@ -229,10 +265,15 @@ function prepareQueryOptions(options) {
     addQueryText(budget, bytes);
     tags.add(normalizedTag(value));
   }
+  const repositoryScopes = validateRepositoryScopeSelection(options.repositoryScopes ?? []);
+  for (const scope of repositoryScopes) {
+    addQueryText(budget, Buffer.byteLength(scope, "utf8"));
+  }
   const sort = prepareSort(options.sort, budget);
   return {
     filters,
     tags,
+    repositoryScopes: new Set(repositoryScopes),
     sort,
     direction: options.direction ?? "asc",
     ...options.limit === undefined ? {} : { limit: options.limit }
@@ -325,13 +366,19 @@ function queryRow(note, connection) {
     backlinks: connection.backlinks
   };
 }
+function matchesRepositoryScopes(note, selected) {
+  if (selected.size === 0)
+    return true;
+  const authored = analyzeAuthoredRepositoryScopes(note.metadata);
+  return authored.present && authored.valid && authored.scopes.some((scope) => selected.has(scope));
+}
 function queryVault(notes, analysis, options = {}) {
   const prepared = prepareQueryOptions(options);
   const keyCache = new WeakMap;
   const connections = new Map(analysis.noteConnections.map((connection) => [connection.id, connection]));
   const indexed = notes.map((note, index) => ({ index, row: queryRow(note, connections.get(note.id)) })).filter((candidate) => candidate.row !== null).filter(({ row }) => {
     const stringCache = new Map;
-    return prepared.filters.every((filter) => matchesFilter(row, filter, keyCache, stringCache)) && matchesTags(row, prepared.tags);
+    return prepared.filters.every((filter) => matchesFilter(row, filter, keyCache, stringCache)) && matchesTags(row, prepared.tags) && matchesRepositoryScopes(row, prepared.repositoryScopes);
   }).map((candidate) => ({
     ...candidate,
     pathKey: normalizedString(candidate.row.path),
@@ -342,4 +389,4 @@ function queryVault(notes, analysis, options = {}) {
   return prepared.limit === undefined ? rows : rows.slice(0, prepared.limit);
 }
 
-export { MAX_QUERY_FILTERS, MAX_QUERY_TAGS, MAX_QUERY_METADATA_PATH_UTF8_BYTES, MAX_QUERY_METADATA_PATH_SEGMENTS, MAX_QUERY_TEXT_UTF8_BYTES, MAX_QUERY_OPTIONS_UTF8_BYTES, metadataAtPath, validateQueryOptions, queryVault };
+export { MAX_QUERY_FILTERS, MAX_QUERY_ONE_OF_VALUES, MAX_QUERY_FILTER_VALUES, MAX_QUERY_TAGS, MAX_QUERY_METADATA_PATH_UTF8_BYTES, MAX_QUERY_METADATA_PATH_SEGMENTS, MAX_QUERY_TEXT_UTF8_BYTES, MAX_QUERY_OPTIONS_UTF8_BYTES, metadataAtPath, validateQueryOptions, queryVault };

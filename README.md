@@ -14,7 +14,7 @@ history are authoritative; the QMD search database, graph views, catalog, and
 Git index are derived and replaceable.
 
 ```sh
-bun add --global github:hraness/kb#v0.12.0
+bun add --global github:hraness/kb#v0.13.0
 ```
 
 [article](https://hraness.com/engineering/a-durable-knowledge-base-is-a-write-path)
@@ -63,16 +63,30 @@ repository/
     ├── articles/<slug>/              # captured evidence and assets
     ├── notes/                         # maintained explanations
     ├── plans/                         # decisions and outcomes
-    └── index.md                       # regenerated catalog
+    └── index.md                       # short authored front door
 ```
 
 ### Keep the implementation small and the files authoritative
 
-hraness/kb packages the pattern as a small file contract. A useful vault can begin with Markdown, Git, `index.md`, and standard file search. Source capture, metadata queries, QMD, typed relationships, graph traversal, and TypeScript sessions are layers to add when the simpler setup stops answering the repository's questions. Application code need not import KB, and no hosted service or graph database owns its records.
+hraness/kb packages the pattern as a small file contract. A useful vault can begin with Markdown, Git, `index.md`, and standard file search. Source capture, metadata queries, repository-path context, QMD, typed relationships, graph traversal, and TypeScript sessions are layers to add when the simpler setup stops answering the repository's questions. Application code need not import KB, and no hosted service or graph database owns its records.
 
-Captured sources preserve evidence, notes hold current explanations, and plans retain decisions and outcomes. YAML frontmatter adds queryable metadata without requiring one domain schema for every vault. Stable paths, explicit links, and reviewable Git changes keep the material legible outside the CLI.
+Captured sources preserve evidence, notes hold current explanations, and plans retain decisions and outcomes. YAML frontmatter adds queryable metadata without requiring one domain schema for every vault. A code-related record may declare a few exact repository-relative `repository_scopes` so an agent can recover it from the path it is about. The declaration stays in the record instead of a central project database, which lets parallel agents update unrelated memory without sharing a generated file.
 
-The Markdown files are authoritative. The catalog, QMD database, backlink view, graph traversal, and bounded Git index are derived and replaceable. Deleting one of those views removes a way to retrieve knowledge, not the knowledge itself.
+The Markdown files are authoritative. The catalog, QMD database, backlink view, path-context view, graph traversal, and bounded Git index are derived and replaceable. A vault can keep a managed catalog or an authored front door and render the complete inventory on demand. Deleting one of those views removes a way to retrieve knowledge, not the knowledge itself.
+
+### Route current memory from the code path
+
+A broad semantic search over years of completed plans can rank a detailed historical record above the short explanation that owns the code today. `kb context packages/parser/src/index.ts --root kb --repo .` starts from a stronger signal: the path being changed. It returns the inherited guides that govern the edit, curated scope hubs, and bounded records whose declared scope is that path or one of its ancestors.
+
+The records stay grouped by role. Maintained notes, proposed through blocked plans, dated market research, and generated reports form current memory. Completed, superseded, and cancelled plans remain available in a separate historical group. Every result states the declaration that matched and whether the target currently exists. A plan can therefore describe a future path, while a retired path remains honest historical evidence instead of being silently rewritten after a rename.
+
+**Path context, exact scope filtering, and Git memory**
+
+```shell
+kb context packages/parser/src/index.ts --root kb --repo .
+kb list --root kb --scope packages/parser --where type=plan --json
+kb history search packages/parser/src/index.ts --root kb --repo . --json
+```
 
 ### Preserve evidence and plans as working records
 
@@ -87,19 +101,20 @@ kb pdf "/absolute/path/to/document.pdf" --output articles
 
 The resulting bundle is evidence, not final interpretation. A maintained note can cite several captures, record disagreement, and change when later evidence warrants it. The sources stay available for audit. This prevents an agent from silently replacing what a page said with what it now believes the page meant.
 
-The `plan-kb` skill creates a normal Markdown file under `kb/plans/` with an outcome, status, area, assumptions, dependencies, decisions, and verification method. The file grows during execution as agents record deviations, review findings, evidence, and the final result. Completed plans remain in Git as the history of the work. When a finding becomes a rule whose omission would make a future edit wrong, move that rule into the applicable `AGENTS.md` and retain the plan as its rationale.
+The `plan-kb` skill creates a normal Markdown file under `kb/plans/` with an outcome, status, area, repository scopes, assumptions, dependencies, decisions, and verification method. The file grows during execution as agents record deviations, review findings, and reproducible evidence. Closeout adds a compact result and durable-memory disposition: each reusable conclusion links to the maintained note, guide, code contract, or runbook that now owns it, or says that no promotion was needed. Completed plans remain in Git as the history of the work. When a finding becomes a rule whose omission would make a future edit wrong, move that rule into the applicable `AGENTS.md` and retain the plan as its rationale.
 
 ### Search and connect with bounded signals
 
 An identifier, title, alias, path, tag, or quoted phrase should not depend on an embedding. Exact mode reads the live Markdown. The default hybrid mode combines those results with keyword and vector result orders from [QMD, a local search engine for Markdown](<https://github.com/tobi/qmd>), while keeping exact identity matches first. Graph context and Git provenance remain separate evidence, so neither silently changes the primary text rank.
 
-**Exact, hybrid, and requested Git retrieval**
+**Path context, exact and hybrid search, and direct history**
 
 ```shell
+kb context packages/parser/src/index.ts --root kb --repo .
 kb search "parser-v2" --root kb --mode exact
 kb search "why does the parser reject this input?" --root kb \
   --tag architecture --where status=active --json
-kb search "why did the parser change?" --root kb --history --json
+kb history "notes/parser-design" --root kb --repo . --json
 ```
 
 `--mode keyword` uses QMD's local full-text index without loading an embedding model. Hybrid and semantic modes use a pinned local embedding model. KB reconciles every QMD hit with current Markdown before returning it, and applies metadata and tag filters to those live notes. Search modes remain explicit through `--mode exact`, `--mode keyword`, `--mode semantic`, and `--mode hybrid`.
@@ -110,11 +125,23 @@ Each note owns its outbound typed relationships in frontmatter. KB derives backl
 
 Git provenance is opt-in. A search without `--history` performs no Git indexing. `--history` requests best-effort provenance, while `--require-history` rejects unavailable history or incomplete provenance for the selected notes. If one commit exceeds the 2,000-path detail limit, KB retains its identity and vault-local note associations, marks its co-change detail incomplete, and continues through later commits. Best-effort search reports that requested lane as partial.
 
-Search finds candidates. Similarity does not establish that a passage is current, correct, or supported by its sources. The checked six-case rank-fusion fixture is a deterministic regression, not a real-corpus retrieval, latency, or RAG benchmark. The Markdown, cited captures, explicit relationships, and requested Git history supply the material a reader must inspect.
+Local attachment checks cover Markdown and Obsidian references to images, PDFs, and editable tldraw sources. They reject missing or escaping files while leaving external URLs alone. A source-inbox view separately lists recent captures that have no inbound disposition from maintained knowledge. It is an advisory, not an automatic backlink requirement: a saved source may intentionally remain a leaf.
+
+### Measure retrieval on a frozen corpus
+
+The August 2, 2026 pilot froze one repository snapshot and 18 questions whose graded relevance judgments were written before the rankings were inspected. The evaluator scanned 156 Markdown records and projected 155 searchable notes into QMD after excluding the authored vault index and agent guides. Nine questions formed the development set, and nine were held out for the test. The test covered exact identity, conceptual recall, active plans, current decisions, code-path context, source evidence, historical rationale, stale-versus-current conflicts, and one no-answer case.
+
+At a cutoff of 10 results, exact search recorded `Recall@10` of 0.833333, `MRR@10` of 0.892857, and `nDCG@10` of 0.790377. Hybrid search recorded 0.833333, 0.937500, and 0.833884, respectively. Recall measures how much of the judged relevant set appeared; mean reciprocal rank rewards an earlier first relevant result; normalized discounted cumulative gain also accounts for graded relevance and position.
+
+Eight test questions had an answer. A 10,000-resample paired bootstrap, which repeatedly samples those same questions to estimate the stability of the difference, measured hybrid minus exact. The `Recall@10` difference was 0 with a 95% confidence interval of \[0, 0\]; the `MRR@10` difference was +0.044643 with \[0, 0.133929\]; and the `nDCG@10` difference was +0.043508 with \[-0.012752, 0.111832\]. Both retrievers returned a result for the one no-answer question instead of abstaining, so their no-answer accuracy was 0.
+
+The same mixed-cache, single-run test recorded p95 latencies of 44.345 milliseconds for exact, 62.834 for hybrid, 821.370 for keyword, and 41,000.524 for semantic retrieval. The semantic figure includes the first in-process model load. The run used [QMD 2.5.3 at Hraness compatibility commit aa993dc](<https://github.com/hraness/qmd/commit/aa993dceb3ef8cfb71d470554ca437570f5a2b3c>) and a locally verified EmbeddingGemma 300M Q8 model on Bun 1.3.14 and Node 24.3.0 under arm64 Darwin 25.5.0, with an Apple M4 Max, 16 logical CPUs, and 128 GiB of memory. Each p95 summarizes only nine queries with mixed cold and warm state, so these are local diagnostics, not speed claims. The corpus is too small to establish that hybrid is generally superior to exact search or to compare KB with industry retrieval systems.
+
+Search finds candidates. Similarity does not establish that a passage is current, correct, or supported by its sources. The Markdown, cited captures, explicit relationships, and requested Git history supply the material a reader must inspect.
 
 ### Adopt the smallest useful split
 
-Start with a short inherited `AGENTS.md` path for rules whose omission would make an edit wrong. A small knowledge base may need only Markdown, Git, an index page, and ordinary file search. Add source capture when evidence keeps disappearing. Add metadata or hybrid search when file search stops answering the repository's questions. Add links and graph views only when the relationships themselves help people make decisions.
+Start with a short inherited `AGENTS.md` path for rules whose omission would make an edit wrong. A small knowledge base may need only Markdown, Git, an index page, and ordinary file search. Add source capture when evidence keeps disappearing. Add repository scopes when agents need to recover current memory from code paths. Add metadata or hybrid search when file search stops answering the repository's questions. Add links and graph views only when the relationships themselves help people make decisions.
 
 Treat the knowledge base as repository-adjacent durable memory. Authored Markdown and Git are the record; catalogs, indexes, embeddings, and graph views are replaceable ways to find and inspect it. Checks can validate structure, captures can preserve a selected surface, and similarity can suggest candidates. None of those mechanisms proves that a source is trustworthy or an explanation is still true. People and agents must revise the knowledge as the repository changes.
 <!-- article:a-durable-knowledge-base-is-a-write-path:end -->
@@ -129,7 +156,7 @@ Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
 Install hraness/kb and its bundled Agent Skills from
-https://github.com/hraness/kb at the immutable v0.12.0 tag. Follow the repository
+https://github.com/hraness/kb at the immutable v0.13.0 tag. Follow the repository
 README, install the `kb` CLI, copy or link the skills I need into this agent
 runner's configured skills directory, and verify the installation with
 `kb doctor` and `kb --help`. Do not initialize or modify a vault until I ask.
@@ -139,10 +166,10 @@ The repository and packed package carry the same skill directories, so an agent
 can inspect the tagged instructions before placing them in its runner-specific
 discovery path.
 
-Install the CLI from the immutable `v0.12.0` tag:
+Install the CLI from the immutable `v0.13.0` tag:
 
 ```sh
-bun add --global github:hraness/kb#v0.12.0
+bun add --global github:hraness/kb#v0.13.0
 kb --help
 ```
 
@@ -151,7 +178,7 @@ For programmatic use, declare the same pinned source in a project:
 ```json
 {
   "dependencies": {
-    "@hraness/kb": "github:hraness/kb#v0.12.0"
+    "@hraness/kb": "github:hraness/kb#v0.13.0"
   }
 }
 ```
@@ -210,10 +237,12 @@ kb agents check --root kb --repo .
 
 `kb agents identity` derives a canonical mapping without writing files.
 `kb context` lists inherited `AGENTS.md` files from the repository root toward
-the target and verified context hubs from the nearest scope back toward the
-root. It prints hub summaries, not their full bodies. Open the useful hub, then
-use `kb links`, `kb backlinks`, `kb list`, or `kb search` to expand the
-question deliberately.
+the target, verified context hubs from the nearest scope back toward the root,
+and bounded repository-scoped memory. Maintained knowledge, active plans,
+dated research, reports, and terminal plans stay in separate groups. Every
+record states the exact authored scope that matched and whether it exists.
+Open only the useful summaries, then use `kb links`, `kb backlinks`, `kb list`,
+or `kb search` to expand the question deliberately.
 
 ## Command surface
 
@@ -223,8 +252,9 @@ question deliberately.
 | `kb clip <url\|current>` | Capture a source and write an article bundle. `current` reads an attached active tab without navigating it; `kb capture <url>` is the explicit URL form. |
 | `kb inspect <url>` | Run acquisition and extraction without writing a bundle. |
 | `kb pdf <file-or-url> [--slug <slug>]` | Convert a local or public remote PDF into Markdown while retaining the original bytes, extracted images, OCR-derived text, URL provenance, and page provenance. |
-| `kb refresh --root <directory>` | Rebuild the managed catalog atomically and report graph findings. |
-| `kb check --root <directory>` | Verify that the catalog is current and graph policy passes without changing files. `--no-catalog` gates an edit lane without requiring the shared catalog refresh. |
+| `kb refresh --root <directory>` | Rebuild a managed catalog atomically and report graph findings. An authored-catalog vault remains unchanged. |
+| `kb check --root <directory>` | Verify catalog policy, graph integrity, and confined local image, PDF, and tldraw attachments without changing files. `--no-catalog` gates an edit lane without requiring the shared catalog refresh. |
+| `kb catalog --root <directory>` | Render an exhaustive disposable catalog without modifying an authored or managed front door. |
 | `kb graph --root <directory>` | Print the resolved contextual and typed graph, broken or ambiguous targets, orphans, and advisory mention candidates. |
 | `kb backlinks <note> --root <directory>` | Show incoming contextual links and typed relationships for a note resolved by path, title, or alias. |
 | `kb links <note> --root <directory>` | Traverse incoming, outgoing, or bidirectional contextual links and typed relationships with explicit depth and node limits. |
@@ -232,10 +262,14 @@ question deliberately.
 | `kb relation add\|remove <source> <predicate> <target>` | Idempotently edit one source note's typed outbound relationship using exact canonical note IDs. |
 | `kb relation list <note> --root <directory>` | List a note's authored outbound and derived inbound typed relationships. |
 | `kb percolate [note] --root <directory>` | Report evidence-backed recurring-concept and missing-relationship candidates without writing notes. |
-| `kb list --root <directory>` | Filter typed, nested frontmatter and tags; sort by metadata, title, path, or graph counts. `kb notes` is an alias. |
+| `kb list --root <directory>` | Filter typed nested frontmatter, tags, and repeated exact `--scope` declarations; sort by metadata, title, path, or graph counts. `kb notes` is an alias. |
 | `kb index --root <directory>` | Build or incrementally refresh the optional local QMD embedding index. |
-| `kb search <query> --root <directory>` | Combine live exact matches with local QMD keyword and vector retrieval. Use `--mode exact\|keyword\|semantic\|hybrid`, metadata and tag filters, or bounded graph context. Omitted history performs no Git work; `--history` requests best-effort provenance and `--require-history` rejects unavailable or incomplete selected-note provenance. |
-| `kb context <repository-path> --root <vault> --repo <repository>` | List inherited guides root to nearest and reciprocal context hubs nearest to root. Use `--kind auto\|file\|directory` to control how the target path is interpreted. |
+| `kb search <query> --root <directory>` | Combine live exact matches with local QMD keyword and vector retrieval. Use `--mode exact\|keyword\|semantic\|hybrid`, metadata, tags, exact `--scope` filters, or bounded graph context. Omitted history performs no Git work; `--history` requests best-effort provenance and `--require-history` rejects unavailable or incomplete selected-note provenance. |
+| `kb history <note> --root <vault> --repo <repository>` | Return bounded direct provenance for one resolved note, including explicit oversized-commit limitations. |
+| `kb history search <query-or-path> --root <vault> --repo <repository>` | Search bounded commit subjects, note paths, and co-change paths without authoring links or repository scopes. |
+| `kb context <repository-path> --root <vault> --repo <repository>` | List inherited guides root to nearest, reciprocal hubs nearest to root, and grouped repository-scoped current and historical memory. Use `--kind auto\|file\|directory` to control path interpretation. |
+| `kb inbox --root <vault>` | List recent captures without a maintained-note disposition. This is advisory and never creates links or fails merely because a source is a leaf. |
+| `kb evaluate <manifest.json> --root <vault> --repo <repository>` | Verify an exact frozen Git/vault snapshot and run built-in exact, QMD, metadata, graph, path-context, and Git retrievers with raw evidence, latency, resource counters, metrics, and paired intervals. |
 | `kb agents identity <repository-scope>` | Derive the normalized scope, canonical hub ID and path, owning guide path, and exact reciprocal marker without writing files. |
 | `kb agents check --root <vault> --repo <repository>` | Validate context identities, exact scopes, reciprocal markers, real guide paths, collisions, confinement, and guide shape. Unmapped guides remain valid. |
 | `kb agents audit --root <vault> --repo <repository>` | Run the same correctness gate, then report deterministic per-guide, section, inherited-chain, long-bullet, and exact-duplicate advisories. |
@@ -324,9 +358,12 @@ provenance. Compose finite parallel retrieval graphs with
 lower-level entry points include
 `@hraness/kb/search`, `@hraness/kb/git`,
 `@hraness/kb/agent-context`,
-`@hraness/kb/agent-guide-audit`, `@hraness/kb/authoring`,
+`@hraness/kb/agent-guide-audit`, `@hraness/kb/attachments`,
+`@hraness/kb/authoring`, `@hraness/kb/evaluation`,
+`@hraness/kb/evaluation-kb`,
 `@hraness/kb/graph`, `@hraness/kb/navigation`, `@hraness/kb/percolate`,
-`@hraness/kb/query`, and `@hraness/kb/semantic`; web-capture orchestration and
+`@hraness/kb/query`, `@hraness/kb/repository-memory`,
+`@hraness/kb/source-inbox`, and `@hraness/kb/semantic`; web-capture orchestration and
 diagnostics from
 `@hraness/kb/capture`; PDF ingestion from `@hraness/kb/pdf`; and reusable
 disposable-profile helpers from `@hraness/kb/browser-profiles`. Embedders that

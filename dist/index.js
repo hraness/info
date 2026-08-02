@@ -11,14 +11,33 @@ import {
   workflowFromUnknown
 } from "./index-3v2z4f0q.js";
 import {
-  createRepresentativeRetrievalFixture,
-  createSyntheticRankFusionFixture,
-  evaluateRanking,
-  evaluateRetrievalBenchmark
-} from "./index-qft1h1n8.js";
-import {
   initVault
-} from "./index-awz7cev4.js";
+} from "./index-mqx4nd6v.js";
+import {
+  DEFAULT_PERCOLATION_LIMIT,
+  DEFAULT_PERCOLATION_MIN_SUPPORT,
+  MAX_PERCOLATION_EVIDENCE_PER_CANDIDATE,
+  MAX_PERCOLATION_LIMIT,
+  MAX_PERCOLATION_MENTIONS,
+  MAX_PERCOLATION_MENTION_PAIRS,
+  MAX_PERCOLATION_NOTES,
+  MAX_SCOPED_PERCOLATION_MENTION_PAIRS,
+  percolateVault
+} from "./index-egdc3x6v.js";
+import {
+  MAX_SOURCE_DISPOSITION_EVIDENCE,
+  MAX_SOURCE_INBOX_CONNECTIONS,
+  MAX_SOURCE_INBOX_NOTES,
+  MAX_SOURCE_INBOX_PREFIXES,
+  MAX_SOURCE_INBOX_RESULTS,
+  sourceInbox
+} from "./index-pj501bh1.js";
+import {
+  FrozenEvaluationSnapshotError,
+  knowledgeBaseEvaluationRetrieverIds,
+  openKnowledgeBaseEvaluation,
+  verifyFrozenEvaluationSnapshot
+} from "./index-gr1qf1b5.js";
 import {
   DEFAULT_SEARCH_RESULTS,
   MAX_SEARCH_CANDIDATES,
@@ -27,8 +46,9 @@ import {
   MAX_SEARCH_RESULTS,
   openKnowledgeBase,
   packSearchContext
-} from "./index-wjyf6bx7.js";
+} from "./index-1qtgx1er.js";
 import {
+  MAX_EMBEDDING_MODEL_BYTES,
   MAX_NOTE_UTF8_BYTES,
   MAX_SCANNED_NOTES,
   MAX_VAULT_UTF8_BYTES,
@@ -37,13 +57,33 @@ import {
   indexSemanticVault,
   markdownFiles,
   openSemanticSearchSession,
+  qmdIndexerVersion,
   readVaultNotes,
   recommendedEmbeddingModel,
+  recommendedEmbeddingModelSha256,
   refreshVault,
   scanVault,
   searchSemanticVault,
-  semanticDatabasePath
-} from "./index-6m6y70a2.js";
+  semanticDatabasePath,
+  sha256EmbeddingModelFile
+} from "./index-b4vcr4gt.js";
+import {
+  MAX_BOOTSTRAP_RESAMPLES,
+  MAX_EVALUATION_DIAGNOSTICS,
+  MAX_EVALUATION_EVIDENCE_BYTES,
+  MAX_EVALUATION_QRELS_PER_QUERY,
+  MAX_EVALUATION_QUERIES,
+  MAX_EVALUATION_RESULTS_PER_QUERY,
+  MAX_EVALUATION_RETRIEVERS,
+  MAX_EVALUATION_TEXT_BYTES,
+  MAX_EVALUATION_TIMEOUT_MS,
+  RETRIEVAL_EVALUATION_REPORT_VERSION,
+  RETRIEVAL_EVALUATION_SCHEMA_VERSION,
+  buildRetrievalEvaluationReport,
+  pairedBootstrapConfidenceInterval,
+  parseRetrievalEvaluationCorpus,
+  runRetrievalEvaluation
+} from "./index-b88v3vtm.js";
 import {
   GitHistoryError,
   MAX_GIT_HISTORY_COMMITS,
@@ -64,23 +104,98 @@ import {
   validateSearchGitHistoryOptions
 } from "./index-1gwbassd.js";
 import {
-  DEFAULT_PERCOLATION_LIMIT,
-  DEFAULT_PERCOLATION_MIN_SUPPORT,
-  MAX_PERCOLATION_EVIDENCE_PER_CANDIDATE,
-  MAX_PERCOLATION_LIMIT,
-  MAX_PERCOLATION_MENTIONS,
-  MAX_PERCOLATION_MENTION_PAIRS,
-  MAX_PERCOLATION_NOTES,
-  MAX_SCOPED_PERCOLATION_MENTION_PAIRS,
-  percolateVault
-} from "./index-egdc3x6v.js";
-import {
   auditAgentGuideRepository,
   auditAgentGuideSource,
   auditAgentGuides,
+  compareAgentGuideAudits,
   defaultAgentGuideIgnoredDirectories,
   discoverAgentGuides
-} from "./index-07fsx8bp.js";
+} from "./index-hya40gb2.js";
+import {
+  MAX_ATTACHMENT_PATH_BYTES,
+  MAX_ATTACHMENT_REFERENCES,
+  MAX_ATTACHMENT_SCAN_ENTRIES,
+  MAX_ATTACHMENT_SOURCE_BYTES,
+  parseLocalAttachmentReferences,
+  validateAttachmentReferences,
+  validateMarkdownAttachments
+} from "./index-x3fthpsc.js";
+import {
+  InvalidCanonicalNoteIdError,
+  NoteAlreadyExistsError,
+  NoteRecoveryRequiredError,
+  NoteRevisionConflictError,
+  addNoteRelation,
+  canonicalNoteId,
+  createConceptNote,
+  createNote,
+  listNoteRelations,
+  normalizeRelationPredicate,
+  noteRevision,
+  removeNoteRelation
+} from "./index-2fr3hf9q.js";
+import {
+  createRepresentativeRetrievalFixture,
+  createSyntheticRankFusionFixture,
+  evaluateRanking,
+  evaluateRetrievalBenchmark
+} from "./index-ct7haw4a.js";
+import {
+  MAX_SEARCH_QUERY_BYTES,
+  MAX_SEARCH_QUERY_TERMS,
+  buildGraphContext,
+  fuseRankedCandidates,
+  searchExactVault,
+  validateSearchQuery
+} from "./index-4cknf4jw.js";
+import {
+  MAX_QUERY_FILTERS,
+  MAX_QUERY_FILTER_VALUES,
+  MAX_QUERY_METADATA_PATH_SEGMENTS,
+  MAX_QUERY_METADATA_PATH_UTF8_BYTES,
+  MAX_QUERY_ONE_OF_VALUES,
+  MAX_QUERY_OPTIONS_UTF8_BYTES,
+  MAX_QUERY_TAGS,
+  MAX_QUERY_TEXT_UTF8_BYTES,
+  metadataAtPath,
+  queryVault,
+  validateQueryOptions
+} from "./index-48pz4jpc.js";
+import {
+  DEFAULT_REPOSITORY_MEMORY_DETAIL_LIMIT,
+  DEFAULT_REPOSITORY_MEMORY_GROUP_LIMIT,
+  MAX_REPOSITORY_MEMORY_DETAIL_LIMIT,
+  MAX_REPOSITORY_MEMORY_GROUP_LIMIT,
+  MAX_REPOSITORY_MEMORY_SUMMARY_UTF8_BYTES,
+  MAX_REPOSITORY_SCOPES,
+  MAX_REPOSITORY_SCOPES_UTF8_BYTES,
+  MAX_REPOSITORY_SCOPE_UTF8_BYTES,
+  RepositoryScopesError,
+  activePlanStatuses,
+  analyzeAuthoredRepositoryScopes,
+  auditRepositoryMemoryScopes,
+  buildRepositoryMemoryContext,
+  canonicalRepositoryPath,
+  classifyRepositoryMemoryRecord,
+  deepestRepositoryScopeMatch,
+  inspectRepositoryScopeState,
+  isActivePlanStatus,
+  isPlanStatus,
+  isTerminalPlanStatus,
+  metadataMatchesExactRepositoryScopes,
+  planStatuses,
+  repositoryMemoryGroupKeys,
+  repositoryScopeMatchesPath,
+  repositoryScopesMetadataKey,
+  terminalPlanStatuses,
+  validateRepositoryScopeSelection
+} from "./index-06c9ctr6.js";
+import {
+  MAX_NAVIGATION_INDEXED_CONNECTIONS,
+  MAX_NAVIGATION_RETURNED_CONNECTIONS,
+  NavigationBudgetError,
+  navigateLinks
+} from "./index-d13v9ckt.js";
 import {
   AgentContextRepositoryPathError,
   RepositoryScopeError,
@@ -98,45 +213,6 @@ import {
   normalizeRepositoryScope,
   parseAgentContextMarker
 } from "./index-5vwpzb5a.js";
-import {
-  InvalidCanonicalNoteIdError,
-  NoteAlreadyExistsError,
-  NoteRecoveryRequiredError,
-  NoteRevisionConflictError,
-  addNoteRelation,
-  canonicalNoteId,
-  createConceptNote,
-  createNote,
-  listNoteRelations,
-  normalizeRelationPredicate,
-  noteRevision,
-  removeNoteRelation
-} from "./index-2fr3hf9q.js";
-import {
-  MAX_SEARCH_QUERY_BYTES,
-  MAX_SEARCH_QUERY_TERMS,
-  buildGraphContext,
-  fuseRankedCandidates,
-  searchExactVault,
-  validateSearchQuery
-} from "./index-ahw5amhf.js";
-import {
-  MAX_NAVIGATION_INDEXED_CONNECTIONS,
-  MAX_NAVIGATION_RETURNED_CONNECTIONS,
-  NavigationBudgetError,
-  navigateLinks
-} from "./index-d13v9ckt.js";
-import {
-  MAX_QUERY_FILTERS,
-  MAX_QUERY_METADATA_PATH_SEGMENTS,
-  MAX_QUERY_METADATA_PATH_UTF8_BYTES,
-  MAX_QUERY_OPTIONS_UTF8_BYTES,
-  MAX_QUERY_TAGS,
-  MAX_QUERY_TEXT_UTF8_BYTES,
-  metadataAtPath,
-  queryVault,
-  validateQueryOptions
-} from "./index-7gsmq0jt.js";
 import {
   MAX_ANALYZED_NOTES,
   MAX_CONNECTION_OBSERVATIONS,
@@ -159,11 +235,18 @@ import {
 export {
   workflowFromUnknown,
   wikiLinks,
+  verifyFrozenEvaluationSnapshot,
   validateSearchQuery,
   validateSearchGitHistoryOptions,
+  validateRepositoryScopeSelection,
   validateQueryOptions,
+  validateMarkdownAttachments,
   validateGitHistoryForNotesRequest,
   validateGitHistoryForNotesOptions,
+  validateAttachmentReferences,
+  terminalPlanStatuses,
+  sourceInbox,
+  sha256EmbeddingModelFile,
   semanticDatabasePath,
   searchableMarkdown,
   searchSemanticVault,
@@ -171,20 +254,31 @@ export {
   searchExactVault,
   scanVault,
   runWorkflow,
+  runRetrievalEvaluation,
   runGitCommand,
+  repositoryScopesMetadataKey,
+  repositoryScopeMatchesPath,
+  repositoryMemoryGroupKeys,
   replaceCatalog,
   renderCatalog,
   removeNoteRelation,
   refreshVault,
+  recommendedEmbeddingModelSha256,
   recommendedEmbeddingModel,
   readVaultNotes,
   queryVault,
+  qmdIndexerVersion,
+  planStatuses,
   percolateVault,
+  parseRetrievalEvaluationCorpus,
   parseNote,
+  parseLocalAttachmentReferences,
   parseGitHistoryOutput,
   parseAgentContextMarker,
+  pairedBootstrapConfidenceInterval,
   packSearchContext,
   openSemanticSearchSession,
+  openKnowledgeBaseEvaluation,
   openKnowledgeBase,
   noteRevision,
   normalizeVaultPath,
@@ -192,11 +286,17 @@ export {
   normalizeRelationPredicate,
   navigateLinks,
   metadataValueFromUnknown,
+  metadataMatchesExactRepositoryScopes,
   metadataAtPath,
   markdownFiles,
   lookupNote,
   listNoteRelations,
+  knowledgeBaseEvaluationRetrieverIds,
+  isTerminalPlanStatus,
+  isPlanStatus,
   isCanonicalNoteId,
+  isActivePlanStatus,
+  inspectRepositoryScopeState,
   inspectAgentContextRepository,
   initVault,
   indexSemanticVault,
@@ -210,18 +310,26 @@ export {
   defineWorkflow,
   defaultIgnoredDirectories,
   defaultAgentGuideIgnoredDirectories,
+  deepestRepositoryScopeMatch,
   createSyntheticRankFusionFixture,
   createRepresentativeRetrievalFixture,
   createNote,
   createConceptNote,
+  compareAgentGuideAudits,
+  classifyRepositoryMemoryRecord,
   catalogStart,
   catalogEnd,
+  canonicalRepositoryPath,
   canonicalNoteId,
+  buildRetrievalEvaluationReport,
+  buildRepositoryMemoryContext,
   buildGraphContext,
+  auditRepositoryMemoryScopes,
   auditAgentGuides,
   auditAgentGuideSource,
   auditAgentGuideRepository,
   analyzeVault,
+  analyzeAuthoredRepositoryScopes,
   analyzeAgentContexts,
   agentContextType,
   agentContextSlugMaximumLength,
@@ -232,10 +340,14 @@ export {
   agentContextGuidePath,
   agentContextDirectory,
   addNoteRelation,
+  activePlanStatuses,
   WorkflowRunError,
   VaultScanBudgetError,
   VaultAnalysisBudgetError,
+  RepositoryScopesError,
   RepositoryScopeError,
+  RETRIEVAL_EVALUATION_SCHEMA_VERSION,
+  RETRIEVAL_EVALUATION_REPORT_VERSION,
   NoteRevisionConflictError,
   NoteRecoveryRequiredError,
   NoteAlreadyExistsError,
@@ -244,6 +356,11 @@ export {
   MAX_WORKFLOW_NODES,
   MAX_WORKFLOW_CONCURRENCY,
   MAX_VAULT_UTF8_BYTES,
+  MAX_SOURCE_INBOX_RESULTS,
+  MAX_SOURCE_INBOX_PREFIXES,
+  MAX_SOURCE_INBOX_NOTES,
+  MAX_SOURCE_INBOX_CONNECTIONS,
+  MAX_SOURCE_DISPOSITION_EVIDENCE,
   MAX_SEARCH_RESULTS,
   MAX_SEARCH_RELATED_SEEDS,
   MAX_SEARCH_QUERY_TERMS,
@@ -252,11 +369,19 @@ export {
   MAX_SEARCH_CANDIDATES,
   MAX_SCOPED_PERCOLATION_MENTION_PAIRS,
   MAX_SCANNED_NOTES,
+  MAX_REPOSITORY_SCOPE_UTF8_BYTES,
+  MAX_REPOSITORY_SCOPES_UTF8_BYTES,
+  MAX_REPOSITORY_SCOPES,
+  MAX_REPOSITORY_MEMORY_SUMMARY_UTF8_BYTES,
+  MAX_REPOSITORY_MEMORY_GROUP_LIMIT,
+  MAX_REPOSITORY_MEMORY_DETAIL_LIMIT,
   MAX_QUERY_TEXT_UTF8_BYTES,
   MAX_QUERY_TAGS,
   MAX_QUERY_OPTIONS_UTF8_BYTES,
+  MAX_QUERY_ONE_OF_VALUES,
   MAX_QUERY_METADATA_PATH_UTF8_BYTES,
   MAX_QUERY_METADATA_PATH_SEGMENTS,
+  MAX_QUERY_FILTER_VALUES,
   MAX_QUERY_FILTERS,
   MAX_PERCOLATION_NOTES,
   MAX_PERCOLATION_MENTION_PAIRS,
@@ -277,12 +402,29 @@ export {
   MAX_GIT_HISTORY_OUTPUT_BYTES,
   MAX_GIT_HISTORY_NOTES,
   MAX_GIT_HISTORY_COMMITS,
+  MAX_EVALUATION_TIMEOUT_MS,
+  MAX_EVALUATION_TEXT_BYTES,
+  MAX_EVALUATION_RETRIEVERS,
+  MAX_EVALUATION_RESULTS_PER_QUERY,
+  MAX_EVALUATION_QUERIES,
+  MAX_EVALUATION_QRELS_PER_QUERY,
+  MAX_EVALUATION_EVIDENCE_BYTES,
+  MAX_EVALUATION_DIAGNOSTICS,
+  MAX_EMBEDDING_MODEL_BYTES,
   MAX_CONNECTION_OBSERVATIONS,
+  MAX_BOOTSTRAP_RESAMPLES,
+  MAX_ATTACHMENT_SOURCE_BYTES,
+  MAX_ATTACHMENT_SCAN_ENTRIES,
+  MAX_ATTACHMENT_REFERENCES,
+  MAX_ATTACHMENT_PATH_BYTES,
   MAX_ANALYZED_NOTES,
   InvalidCanonicalNoteIdError,
   GitHistoryError,
+  FrozenEvaluationSnapshotError,
   DEFAULT_WORKFLOW_OUTPUT_BYTES,
   DEFAULT_SEARCH_RESULTS,
+  DEFAULT_REPOSITORY_MEMORY_GROUP_LIMIT,
+  DEFAULT_REPOSITORY_MEMORY_DETAIL_LIMIT,
   DEFAULT_PERCOLATION_MIN_SUPPORT,
   DEFAULT_PERCOLATION_LIMIT,
   AgentContextRepositoryPathError

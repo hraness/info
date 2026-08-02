@@ -17,7 +17,7 @@ The vault is an ordinary directory of Obsidian-compatible Markdown, suitable for
 - `plans/` contains proposals, decisions, execution state, and verification.
 - `riffs/` contains cleaned first-person thought from dictated or stream-of-consciousness material.
 - `scopes/` contains optional pull-based context for selected repository directories.
-- `index.md` is the front door and contains one marked, tool-managed catalog block.
+- `index.md` is the front door. It can be a short authored page or contain one marked, tool-managed catalog block.
 
 The boundaries separate what a source said from what the vault currently concludes. They are conventions expressed in Markdown and agent guides, not proprietary file formats.
 
@@ -84,11 +84,31 @@ exact scope, and a marker requires that canonical hub. A guide without a marker
 is valid and remains fully normative.
 
 `kb context <repository-path> --root <vault> --repo <repository>` returns the
-applicable guides from root to nearest and verified hubs from nearest to root.
-The text view includes hub summaries, not hub bodies. Open the useful hub, then
-use `kb links`, `kb backlinks`, `kb list`, or `kb search` for a bounded
-expansion. `--kind auto` uses filesystem state and a conservative path hint;
-`--kind file` or `--kind directory` makes the target interpretation explicit.
+applicable guides from root to nearest, verified hubs from nearest to root, and
+the authored memory records whose `repository_scopes` contain the target. The
+text view includes summaries, not bodies. It keeps maintained knowledge, active
+plans, dated research, reports, and terminal plans in separate bounded groups,
+reports the exact declaration that matched, and prefers the deepest matching
+scope. Open only the useful record, then use `kb links`, `kb backlinks`, `kb
+list`, or `kb search` for a bounded expansion. `--kind auto` uses filesystem
+state and a conservative path hint; `--kind file` or `--kind directory` makes
+the target interpretation explicit.
+
+`repository_scopes` is an optional array of exact, canonical,
+repository-relative paths. Matching is case-sensitive and lexical. A directory
+scope matches itself and descendants; a file scope matches only that file.
+Scopes can name future or retired paths, so existence is reported separately
+from validity. Active plans and maintained notes with missing scopes produce an
+advisory; terminal plans may retain a retired path as historical evidence. The
+tool never follows Git renames or writes inferred scopes back into Markdown.
+
+The dated-research group is deliberately narrower than an arbitrary note with
+a date. A record must live under `projects/<domain>/market/`, declare `type:
+market-research`, `status: snapshot`, a valid `as_of` date, and at least one
+repository scope. Reports analogously declare `type: report`, a valid
+`generated` date, and a repository scope. Records outside those contracts stay
+available to ordinary metadata, text, and graph queries without being labeled
+current path memory.
 
 `kb agents check` verifies canonical IDs, `type` and `scope` metadata,
 duplicate, case-fold, and Unicode-normalization collisions, repository
@@ -145,8 +165,8 @@ Four rules keep the result honest:
 
 1. Backlinks and inverse relationships are derived, never written into source
    notes.
-2. The managed catalog is navigation, so links to or from its note (`index.md`
-   by default) do not count as contextual edges.
+2. The catalog or authored front door is navigation, so links to or from its
+   note (`index.md` by default) do not count as contextual edges.
 3. A title, alias, recurring tag, shared neighborhood, or semantic match is a
    candidate. It becomes an edge only after an agent or person reviews the
    evidence and authors the assertion.
@@ -197,16 +217,23 @@ and avoids a repository-wide merge hotspot. A future cache may live outside the
 vault only if measurements justify it; it must be content-addressed by source
 and analysis version and rebuild on any mismatch.
 
-## Refresh owns one region
+## Catalog ownership is explicit
 
-`kb refresh` scans the vault, renders a sorted catalog, and atomically replaces only the region between the catalog markers in the configured index note (`index.md` by default). Text outside those markers belongs to the author. If markers are malformed or duplicated, refresh fails instead of guessing.
+A managed vault gives one marked region in `index.md` to the tool. `kb refresh`
+renders a sorted catalog and atomically replaces only that region. Text outside
+the markers belongs to the author. Malformed or duplicate markers fail closed.
 
-`kb check` computes the expected catalog and graph policy without writing. It
-fails when the managed region is stale or required graph invariants do not
-hold. `kb check --no-catalog` applies the graph gate without requiring the
-shared catalog to be current. Parallel edit lanes use that mode while touching
-their owned notes; the integrating agent performs one final refresh and normal
-check. This confines the only generated Markdown hotspot to integration.
+An authored vault declares `kb_catalog: authored` in `index.md`. Refresh and
+check leave the complete file untouched, while `kb catalog` renders the same
+exhaustive inventory on demand. This removes a repository-wide generated-file
+hotspot without weakening the scan, graph, metadata, attachment, plan, research,
+or context checks.
+
+`kb check` computes the expected managed catalog when one exists and applies
+the remaining vault policy in either mode. `kb check --no-catalog` skips only
+catalog freshness, which lets independent lanes validate their notes before
+integration. A managed vault still performs one final refresh after lanes join;
+an authored vault has no shared generated Markdown write.
 
 `kb graph` exposes the scan as a human-readable or structured report.
 `kb backlinks` and `kb relation list` use the same identities to retrieve
@@ -224,7 +251,12 @@ merge mechanism.
 
 Frontmatter is parsed as typed, nested data rather than flattened strings. Scalars retain their string, number, boolean, or null type; arrays and objects retain their structure. Tags from frontmatter are normalized for matching while the original metadata remains available in structured output.
 
-`kb list` filters that authored state by nested dotted paths, field existence, or tags, then sorts by title, path, graph counts, or nested metadata. Repeated filters are conjunctive. Missing sort values are placed last and ties are stable, so the same vault and query produce the same order.
+`kb list` filters that authored state by nested dotted paths, field existence,
+tags, or repeated exact repository scopes, then sorts by title, path, graph
+counts, or nested metadata. `kb search` and the SDK expose the same
+case-sensitive scope constraint. Repeated filters are conjunctive; repeated
+scope values form one exact allowlist. Missing sort values are placed last and
+ties are stable, so the same vault and query produce the same order.
 
 Metadata is useful for exact questions such as “which implementation plans are in progress?” It is not inferred from prose and the tool does not invent tags to improve retrieval. Authors and agents can evolve conventions in the vault's scoped `AGENTS.md` files without migrating to a package-owned schema.
 
@@ -249,10 +281,25 @@ vector lane.
 
 KB pins QMD 2.5.3 and one full upstream revision of its compact
 EmbeddingGemma model for local vector retrieval. The revision prevents branch
-drift and gives the model a revision-specific cache identity; it is not a
-byte-level checksum claim. The first hybrid or semantic query downloads that
-revision. Later runs reuse the local cache and incrementally update changed
+drift and gives the model a revision-specific cache identity. Without an
+explicit local source, the first hybrid or semantic query downloads that
+revision; later runs reuse the local cache and incrementally update changed
 Markdown.
+
+An explicit model file is accepted only when its SHA-256 matches the pinned
+artifact. KB gives QMD that file as the per-store load source while retaining
+the stable model URI and digest as derived-index identity. QMD 2.5.3's public
+vector method falls back to a process-global model for query embeddings, so KB
+uses QMD's exposed per-store vector boundary for both query and document
+inference. That QMD release also asks its process-global model to tokenize fresh
+document chunks and legacy fingerprint samples. KB pins an [immutable public
+Hraness QMD compatibility commit](https://github.com/hraness/qmd/commit/aa993dceb3ef8cfb71d470554ca437570f5a2b3c)
+that routes those two internal calls through QMD's existing store-local model
+without changing its public chunking API. The
+fork includes compiled distribution files so standalone Git installs do not
+depend on consumer-relative patches or installation-time compilation. The local model-file path does not
+enter reports, SDK results, or generation identity, and moving identical model
+bytes does not require a new logical index.
 
 Each vault gets a path-derived SQLite cache under the user's cache directory unless `--database` selects another file outside the vault. KB refuses a database symlink or multiply linked database file and claims its adjacent snapshot directory with a versioned ownership record before cleanup. It scans and bounds the live Markdown first, then atomically refreshes a disposable validated source projection beside the database. QMD indexes that projection, so it cannot read a note that bypassed KB's per-note or aggregate vault limits or recursively ingest its own cache. Cached files are checked against the manifest before reuse. An older snapshot directory without the ownership record is never removed automatically; delete the explicitly named disposable `.snapshot` directory and retry.
 
@@ -275,9 +322,12 @@ Immediate explicit links and typed relationships can be returned with search,
 along with a bounded neighborhood around the strongest results. These graph
 neighbors remain a separate context collection. They do not enter primary text
 rank or become authored edges. When explicitly requested, bounded Git history
-can likewise explain when a note changed and which paths changed with it.
-`--history`, `--require-history`, or SDK history options enable that separate
-lane. Omitted history performs no Git indexing, and an explicit request with no
+can likewise explain when a note changed and which paths changed with it. `kb
+history <note>` retrieves one note's provenance directly, and `kb history
+search <query-or-path>` searches commit subjects, note paths, and co-change
+paths without running text retrieval. `--history`, `--require-history`, or SDK
+history options enable that separate lane on search. Omitted history performs
+no Git indexing, and an explicit request with no
 primary results has nothing to enrich. Query, note, and detail bounds are
 validated before the Git index opens. A commit that exceeds the per-commit
 changed-path detail limit retains its
@@ -353,12 +403,47 @@ try {
 parallel, and `planRadarWorkflow` joins exact plan state with retrieval and
 history.
 
-Changes to retrieval ranking use the exported `evaluateRetrievalBenchmark`
-metrics: recall at k, reciprocal rank, and nDCG. The included six-case synthetic
-rank-fusion fixture supplies already-ranked IDs for identity, conceptual, and
-mixed examples. It checks metric and fusion arithmetic only. It does not execute
-the production retriever, QMD, or the embedding model, measure speed, or claim
-universal superiority.
+Changes to retrieval ranking use the exported deterministic metric helpers for
+recall at k, reciprocal rank, and nDCG. The six-case synthetic rank-fusion
+fixture supplies already-ranked IDs for identity, conceptual, and mixed
+examples. It checks metric and fusion arithmetic only.
+
+The real-corpus evaluator accepts a versioned manifest with query text,
+independently authored relevance judgments, query classes, and structured lane
+inputs. `kb evaluate` fails before retrieval unless the checkout's exact `HEAD`,
+the `HEAD:<vault-root>` tree, and the clean vault match the frozen manifest. It
+then runs built-in exact, keyword, semantic, hybrid, graph, metadata,
+path-context, and Git adapters through one immutable session. Human query prose
+is never parsed into tool arguments; each adapter receives only its explicit
+input object.
+
+The report retains raw rankings and evidence, unavailable and failed lanes,
+backend and wall timings, bounded resource counters, aggregate and per-class
+quality, no-answer accuracy, and deterministic paired bootstrap intervals.
+Machine-local home and temporary roots are redacted from persisted hit evidence,
+diagnostics, and failures while relative document identities and the surrounding
+evidence remain intact.
+Semantic or hybrid runs require `--model-file`. The evaluator verifies those
+bytes against the pinned model digest before retrieval, gives that file to QMD,
+and verifies it again before reporting. Reports retain the stable model URI,
+revision, and digest without persisting the machine path. Cache state and
+hardware remain explicit environment evidence. The evaluator does not turn a
+local fixture into an industry claim: model download, cold and warm runs,
+scale, concurrency, and agent-task outcomes still need measured protocols of
+their own.
+
+## Local artifacts remain inspectable
+
+Graph validation also checks local Markdown and Obsidian attachments. Relative
+image, PDF, and tldraw targets must resolve to one regular confined file with
+matching case. Symlinks, hard links, ambiguous case-fold matches, missing files,
+and paths outside the vault fail. External URLs and fragment-only links remain
+outside this local integrity lane.
+
+`kb inbox` is a bounded advisory view over recent captured sources that have no
+maintained-note disposition. Source-to-source and catalog links do not count as
+synthesis. A capture may intentionally remain a leaf, so the inbox never writes
+links, creates notes, or fails the vault merely because an item is present.
 
 ## Capture preserves an audit trail
 

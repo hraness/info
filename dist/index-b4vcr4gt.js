@@ -2,7 +2,7 @@
 import {
   fuseRankedCandidates,
   validateSearchQuery
-} from "./index-ahw5amhf.js";
+} from "./index-4cknf4jw.js";
 import {
   MAX_ANALYZED_NOTES,
   analyzeVault,
@@ -16,7 +16,8 @@ import {
 
 // src/semantic.ts
 import { createHash as createHash2 } from "crypto";
-import { mkdir as mkdir2, realpath as realpath3, stat } from "fs/promises";
+import { constants as constants3 } from "fs";
+import { mkdir as mkdir2, open as open3, realpath as realpath3, stat } from "fs/promises";
 import { homedir } from "os";
 import { dirname as dirname3, isAbsolute as isAbsolute2, join as join3, relative as relative3, resolve as resolve3, sep as sep3 } from "path";
 
@@ -243,7 +244,7 @@ function confined(root, path) {
 }
 async function assertConfinedIndexParents(root, path) {
   if (!confined(root, path))
-    throw new Error("The managed index must be a file inside the vault root.");
+    throw new Error("The configured index must be a file inside the vault root.");
   const parent = dirname(path);
   const segments = relative(root, parent).split(sep).filter((segment) => segment !== "");
   let current = root;
@@ -251,15 +252,15 @@ async function assertConfinedIndexParents(root, path) {
     current = join(current, segment);
     const metadata = await lstat(current);
     if (metadata.isSymbolicLink()) {
-      throw new Error("The managed index path must not traverse a symbolic link.");
+      throw new Error("The configured index path must not traverse a symbolic link.");
     }
     if (!metadata.isDirectory()) {
-      throw new Error("Every managed index parent must be a directory.");
+      throw new Error("Every configured index parent must be a directory.");
     }
   }
   const canonicalParent = await realpath(parent);
   if (!confined(root, join(canonicalParent, basename(path)))) {
-    throw new Error("The managed index parent resolves outside the vault root.");
+    throw new Error("The configured index parent resolves outside the vault root.");
   }
 }
 async function readIndexRevision(root, path, maxNoteBytes = MAX_NOTE_UTF8_BYTES) {
@@ -268,12 +269,12 @@ async function readIndexRevision(root, path, maxNoteBytes = MAX_NOTE_UTF8_BYTES)
   try {
     const metadata = await handle.stat({ bigint: true });
     if (!metadata.isFile())
-      throw new Error("The managed index must be a regular file.");
+      throw new Error("The configured index must be a regular file.");
     if (metadata.nlink !== 1n)
-      throw new Error("The managed index must not be hard-linked.");
+      throw new Error("The configured index must not be hard-linked.");
     const canonicalPath = await realpath(path);
     if (!confined(root, canonicalPath)) {
-      throw new Error("The managed index resolves outside the vault root.");
+      throw new Error("The configured index resolves outside the vault root.");
     }
     const vaultPath = relative(root, path).split(sep).join("/");
     if (metadata.size > BigInt(maxNoteBytes)) {
@@ -282,7 +283,7 @@ async function readIndexRevision(root, path, maxNoteBytes = MAX_NOTE_UTF8_BYTES)
     const read = await readBoundedNote(handle, vaultPath, maxNoteBytes, maxNoteBytes, maxNoteBytes);
     const afterRead = await handle.stat({ bigint: true });
     if (afterRead.dev !== metadata.dev || afterRead.ino !== metadata.ino || afterRead.size !== metadata.size || afterRead.size !== BigInt(read.bytes)) {
-      throw new Error("The managed index changed during scan; retry.");
+      throw new Error("The configured index changed during scan; retry.");
     }
     return {
       content: read.content,
@@ -297,10 +298,21 @@ async function readIndexRevision(root, path, maxNoteBytes = MAX_NOTE_UTF8_BYTES)
 function sameRevision(left, right) {
   return left.device === right.device && left.inode === right.inode && left.content === right.content;
 }
+function parsedCatalogMode(value, source) {
+  if (value === undefined)
+    return;
+  if (value === "managed" || value === "authored")
+    return value;
+  throw new Error(`${source} must be exactly "managed" or "authored".`);
+}
+function declaredCatalogMode(indexNote) {
+  const declaration = Object.entries(indexNote.metadata).find(([name]) => name.toLocaleLowerCase("en-US") === "kb_catalog");
+  return parsedCatalogMode(declaration?.[1], `The configured index frontmatter property "kb_catalog"`);
+}
 async function atomicReplace(root, path, content, expected) {
   const beforeWrite = await readIndexRevision(root, path);
   if (!sameRevision(beforeWrite, expected)) {
-    throw new Error("The managed index changed during refresh; retry without overwriting the editor's changes.");
+    throw new Error("The configured index changed during refresh; retry without overwriting the editor's changes.");
   }
   const directory = dirname(path);
   const temporaryPath = join(directory, `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
@@ -314,7 +326,7 @@ async function atomicReplace(root, path, content, expected) {
     closed = true;
     const beforeRename = await readIndexRevision(root, path);
     if (!sameRevision(beforeRename, expected)) {
-      throw new Error("The managed index changed during refresh; retry without overwriting the editor's changes.");
+      throw new Error("The configured index changed during refresh; retry without overwriting the editor's changes.");
     }
     await assertConfinedIndexParents(root, path);
     await rename(temporaryPath, path);
@@ -338,10 +350,10 @@ async function snapshot(rootInput, options, writeIndex) {
   const indexPath = resolve(root, options.index ?? "index.md");
   const relativeIndex = relative(root, indexPath);
   if (!confined(root, indexPath)) {
-    throw new Error("The managed index must be a file inside the vault root.");
+    throw new Error("The configured index must be a file inside the vault root.");
   }
   if (!indexPath.toLowerCase().endsWith(".md")) {
-    throw new Error("The managed index must be a Markdown file.");
+    throw new Error("The configured index must be a Markdown file.");
   }
   const vaultIndexPath = relativeIndex.split(sep).join("/");
   const catalogNoteId = vaultIndexPath.toLowerCase().endsWith(".md") ? vaultIndexPath.slice(0, -3) : vaultIndexPath;
@@ -352,18 +364,23 @@ async function snapshot(rootInput, options, writeIndex) {
   });
   const indexRevision = await readIndexRevision(root, indexPath, options.maxNoteBytes ?? MAX_NOTE_UTF8_BYTES);
   const currentIndex = indexRevision.content;
-  const expectedIndex = replaceCatalog(currentIndex, renderCatalog(notes, catalogNoteId));
-  const stale = currentIndex !== expectedIndex;
-  let index = stale ? "stale" : "current";
-  if (writeIndex && stale) {
-    await atomicReplace(root, indexPath, expectedIndex, indexRevision);
-    index = "updated";
-    const parsed = parseNote(vaultIndexPath, expectedIndex);
-    const noteIndex = notes.findIndex((note) => note.path === vaultIndexPath);
-    if (noteIndex === -1)
-      notes.push(parsed);
-    else
-      notes[noteIndex] = parsed;
+  const indexNote = parseNote(vaultIndexPath, currentIndex);
+  const catalogMode = parsedCatalogMode(options.catalogMode, "ScanVaultOptions.catalogMode") ?? declaredCatalogMode(indexNote) ?? "managed";
+  let index = "authored";
+  if (catalogMode === "managed") {
+    const expectedIndex = replaceCatalog(currentIndex, renderCatalog(notes, catalogNoteId));
+    const stale = currentIndex !== expectedIndex;
+    index = stale ? "stale" : "current";
+    if (writeIndex && stale) {
+      await atomicReplace(root, indexPath, expectedIndex, indexRevision);
+      index = "updated";
+      const parsed = parseNote(vaultIndexPath, expectedIndex);
+      const noteIndex = notes.findIndex((note) => note.path === vaultIndexPath);
+      if (noteIndex === -1)
+        notes.push(parsed);
+      else
+        notes[noteIndex] = parsed;
+    }
   }
   const mentionScope = options.mentionScope;
   const mentionIds = new Set;
@@ -380,6 +397,7 @@ async function snapshot(rootInput, options, writeIndex) {
   return {
     root,
     indexPath,
+    catalogMode,
     index,
     notes,
     analysis: analyzeVault(notes, {
@@ -1193,8 +1211,10 @@ async function prepareSemanticProjection(description, notes) {
 
 // src/semantic.ts
 var recommendedEmbeddingModel = "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf#0f741b5a6585bd53aeb15cd1372c56f2a0f65e12";
+var recommendedEmbeddingModelSha256 = "b5ce9d77a3fc4b3b39ccb5643c36777911cc4eb46a66962eadfa3f5f60490d63";
+var MAX_EMBEDDING_MODEL_BYTES = 2 * 1024 * 1024 * 1024;
 var semanticIndexSchema = 1;
-var qmdVersion = "2.5.3";
+var qmdIndexerVersion = "2.5.3+hraness.aa993dceb3ef8cfb71d470554ca437570f5a2b3c";
 var collectionName = "kb";
 var markdownPattern = "**/*.md";
 var ignoredPatterns = ["index.md", "**/AGENTS.md"];
@@ -1207,9 +1227,10 @@ var collectionContext = {
   "/plans": "Decisions, constraints, execution state, and verification evidence.",
   "/riffs": "Voice-preserving first-person source thought."
 };
+var recommendedEmbeddingModelIdentity = `${recommendedEmbeddingModel}@sha256:${recommendedEmbeddingModelSha256}`;
 var semanticIndexIdentity = {
   producer: { package: "@hraness/kb", schema: semanticIndexSchema },
-  indexer: { package: "@tobilu/qmd", version: qmdVersion },
+  indexer: { package: "@tobilu/qmd", version: qmdIndexerVersion },
   collection: {
     name: collectionName,
     pattern: markdownPattern,
@@ -1218,11 +1239,52 @@ var semanticIndexIdentity = {
     pathContexts: Object.entries(collectionContext).map(([path, context]) => ({ path, context }))
   },
   embedding: {
-    model: recommendedEmbeddingModel,
+    model: recommendedEmbeddingModelIdentity,
     chunkStrategy: embeddingChunkStrategy
   }
 };
 var qmdModuleSpecifier = "@tobilu/qmd";
+async function sha256EmbeddingModelFile(path) {
+  const handle = await open3(path, constants3.O_RDONLY | constants3.O_NOFOLLOW);
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile())
+      throw new TypeError("The embedding model must be a regular file.");
+    if (metadata.size > MAX_EMBEDDING_MODEL_BYTES) {
+      throw new RangeError(`The embedding model exceeds ${MAX_EMBEDDING_MODEL_BYTES.toLocaleString("en-US")} bytes.`);
+    }
+    const hash = createHash2("sha256");
+    const buffer = new Uint8Array(1024 * 1024);
+    let observed = 0;
+    while (true) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+      if (bytesRead === 0)
+        break;
+      observed += bytesRead;
+      if (observed > MAX_EMBEDDING_MODEL_BYTES) {
+        throw new RangeError(`The embedding model exceeds ${MAX_EMBEDDING_MODEL_BYTES.toLocaleString("en-US")} bytes.`);
+      }
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+    const after = await handle.stat();
+    if (after.size !== metadata.size || observed !== metadata.size) {
+      throw new Error("The embedding model changed while its digest was computed; retry.");
+    }
+    return hash.digest("hex");
+  } finally {
+    await handle.close();
+  }
+}
+async function verifiedEmbeddingModelSource(path, dependencies) {
+  if (path === undefined)
+    return recommendedEmbeddingModel;
+  const absolutePath = resolve3(path);
+  const digest = await (dependencies.digestEmbeddingModelFile ?? sha256EmbeddingModelFile)(absolutePath);
+  if (digest !== recommendedEmbeddingModelSha256) {
+    throw new Error("The local embedding model does not match the pinned recommended model SHA-256.");
+  }
+  return absolutePath;
+}
 function cacheHome(dependencies) {
   const configured = dependencies.cacheHome ?? process.env.XDG_CACHE_HOME;
   if (configured !== undefined && configured.trim() !== "") {
@@ -1342,21 +1404,44 @@ function boundUnknownMethod(owner, name, label) {
     return await returned;
   };
 }
-function parseSearchStore(value) {
+function internalVectorBoundary(store, modelIdentity) {
+  if (store.internal === undefined)
+    return null;
+  const internal = boundaryRecord(store.internal, "QMD store.internal");
+  const llm = boundaryRecord(internal.llm, "QMD store.internal.llm");
+  const getHashesNeedingEmbedding = boundUnknownMethod(internal, "getHashesNeedingEmbedding", "QMD store.internal");
+  const searchVec = boundUnknownMethod(internal, "searchVec", "QMD store.internal");
+  const embed = boundUnknownMethod(llm, "embed", "QMD store.internal.llm");
+  const session = Object.freeze({ embed });
+  return {
+    pendingEmbeddingCount: async () => boundaryCount(await getHashesNeedingEmbedding(modelIdentity), "QMD store.internal.getHashesNeedingEmbedding result"),
+    searchVector: async (query, options) => parseSearchResults(await searchVec(query, modelIdentity, options.limit, options.collection, session), options.limit)
+  };
+}
+function parseSearchStore(value, modelIdentity) {
   const store = boundaryRecord(value, "QMD store");
   const close = boundUnknownMethod(store, "close", "QMD store");
   const embed = boundUnknownMethod(store, "embed", "QMD store");
   const searchLex = boundUnknownMethod(store, "searchLex", "QMD store");
   const searchVector = boundUnknownMethod(store, "searchVector", "QMD store");
   const update = boundUnknownMethod(store, "update", "QMD store");
+  const internalVector = internalVectorBoundary(store, modelIdentity);
   return {
     close: async () => {
       await close();
     },
     embed: async (options) => parseEmbeddingResult(await embed(options)),
     searchLex: async (query, options) => parseSearchResults(await searchLex(query, options), options.limit),
-    searchVector: async (query, options) => parseSearchResults(await searchVector(query, options), options.limit),
-    update: async (options) => parseUpdateResult(await update(options))
+    searchVector: internalVector?.searchVector ?? (async (query, options) => parseSearchResults(await searchVector(query, options), options.limit)),
+    update: async (options) => {
+      const result = parseUpdateResult(await update(options));
+      if (internalVector === null)
+        return result;
+      return {
+        ...result,
+        needsEmbedding: await internalVector.pendingEmbeddingCount()
+      };
+    }
   };
 }
 async function closeMalformedStore(value) {
@@ -1370,15 +1455,15 @@ async function closeMalformedStore(value) {
     await returned;
   } catch {}
 }
-async function openedSearchStore(value) {
+async function openedSearchStore(value, modelIdentity) {
   try {
-    return parseSearchStore(value);
+    return parseSearchStore(value, modelIdentity);
   } catch (error) {
     await closeMalformedStore(value);
     throw error;
   }
 }
-function storeConfig(root) {
+function storeConfig(root, embeddingModelSource) {
   return {
     global_context: globalContext,
     collections: {
@@ -1389,7 +1474,7 @@ function storeConfig(root) {
         context: collectionContext
       }
     },
-    models: { embed: recommendedEmbeddingModel }
+    models: { embed: embeddingModelSource }
   };
 }
 async function defaultCreateStore(options) {
@@ -1398,13 +1483,13 @@ async function defaultCreateStore(options) {
   const createStore = boundUnknownMethod(module, "createStore", "QMD module");
   return await createStore(options);
 }
-async function openStore(root, database, dependencies) {
+async function openStore(root, database, embeddingModelSource, dependencies) {
   await mkdir2(dirname3(database), { recursive: true });
   const created = await (dependencies.createStore ?? defaultCreateStore)({
     dbPath: database,
-    config: storeConfig(root)
+    config: storeConfig(root, embeddingModelSource)
   });
-  return await openedSearchStore(created);
+  return await openedSearchStore(created, recommendedEmbeddingModel);
 }
 function databaseFor(root, requested, dependencies) {
   if (requested === undefined)
@@ -1434,7 +1519,7 @@ async function indexSemanticVault(options, dependencies = {}) {
     const projection = await prepareSemanticProjection(description, snapshot2.notes);
     let store;
     try {
-      store = await openStore(projection.root, database, dependencies);
+      store = await openStore(projection.root, database, recommendedEmbeddingModel, dependencies);
       const update = await store.update({ collections: [collectionName] });
       const embedding = await embedChanged(store, update, options.force ?? false);
       return { root, database, model: recommendedEmbeddingModel, update, embedding };
@@ -1722,6 +1807,7 @@ async function executeSemanticSearch(context, options) {
   };
 }
 async function openSemanticSearchSession(options, dependencies = {}) {
+  const embeddingModelSource = await verifiedEmbeddingModelSource(options.embeddingModelFile, dependencies);
   const root = await resolvedDirectory(options.root);
   const databaseCandidate = await resolveSemanticDatabase(databaseFor(root, options.database, dependencies), root);
   const snapshot2 = await semanticSnapshot(root, dependencies);
@@ -1734,7 +1820,7 @@ async function openSemanticSearchSession(options, dependencies = {}) {
       const projection2 = await prepareSemanticProjection(description, snapshot2.notes);
       let store2;
       try {
-        store2 = await openStore(projection2.root, database, dependencies);
+        store2 = await openStore(projection2.root, database, embeddingModelSource, dependencies);
         retained = { store: store2, projection: projection2 };
         const update2 = await store2.update({ collections: [collectionName] });
         return { store: store2, projection: projection2, update: update2 };
@@ -1843,4 +1929,4 @@ async function searchSemanticVault(options, dependencies = {}) {
   }
 }
 
-export { MAX_SCANNED_NOTES, MAX_NOTE_UTF8_BYTES, MAX_VAULT_UTF8_BYTES, VaultScanBudgetError, defaultIgnoredDirectories, markdownFiles, readVaultNotes, scanVault, refreshVault, recommendedEmbeddingModel, semanticDatabasePath, indexSemanticVault, openSemanticSearchSession, searchSemanticVault };
+export { MAX_SCANNED_NOTES, MAX_NOTE_UTF8_BYTES, MAX_VAULT_UTF8_BYTES, VaultScanBudgetError, defaultIgnoredDirectories, markdownFiles, readVaultNotes, scanVault, refreshVault, recommendedEmbeddingModel, recommendedEmbeddingModelSha256, MAX_EMBEDDING_MODEL_BYTES, qmdIndexerVersion, sha256EmbeddingModelFile, semanticDatabasePath, indexSemanticVault, openSemanticSearchSession, searchSemanticVault };

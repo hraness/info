@@ -13,6 +13,8 @@ description: One sentence naming the change and dominant result.
 type: plan
 area: product-or-system
 status: proposed
+repository_scopes:
+  - packages/example
 aliases:
   - Short plan name
 tags:
@@ -20,8 +22,11 @@ tags:
 ---
 ```
 
-`type`, `area`, and `status` are the stable query surface. Use a kebab-case
-`area`. Tags are optional facets, not a replacement for prose or links.
+`type`, `area`, `status`, and a non-empty description are the stable plan query
+surface. Use a kebab-case `area`. Add `repository_scopes` when the plan owns
+repository work; each entry is one exact canonical repository-relative file or
+directory path, without globs. Omit the field for plans with no code-path
+ownership. Tags are optional facets, not a replacement for prose or links.
 
 ## Core sections
 
@@ -83,11 +88,18 @@ Add these when execution starts:
 
 ## Result
 
-What shipped, what was verified, what intentionally remains, and which stable
-conclusions moved to maintained notes or current documentation.
+What shipped or why work stopped, what was verified, and what intentionally
+remains.
+
+## Durable memory
+
+Link each reusable conclusion to the maintained note, guide, documentation, or
+checked code contract that now owns it. If no conclusion warrants promotion,
+state that no durable promotion was needed and explain why.
 ```
 
 Keep evidence compact but reproducible. A test name, checked invariant, or link
 to an artifact is stronger than “validation passed.” Preserve superseded
 decisions when they explain the final shape; mark their disposition instead of
-silently deleting them.
+silently deleting them. Require both Result and Durable memory when the status
+becomes `completed`, `superseded`, or `cancelled`.
