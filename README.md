@@ -40,12 +40,9 @@ kb history search packages/parser --root . --repo .. --json
 ## links
 
 [github](https://github.com/hraness/kb)
-
-[article](https://hraness.com/engineering/a-durable-knowledge-base-is-a-write-path)
 <!-- hraness:kb-landing:end -->
 
-<!-- article:a-durable-knowledge-base-is-a-write-path:start -->
-## [A knowledge base for your coding agents](<https://hraness.com/engineering/a-durable-knowledge-base-is-a-write-path>)
+## A knowledge base for your coding agents
 
 > Give coding agents durable, searchable memory beside the repository with plain Markdown, Git history, and replaceable local search.
 
@@ -65,7 +62,7 @@ In April 2026, Andrej Karpathy published an [LLM Wiki proposal](<https://gist.gi
 
 A repository needs two kinds of memory. Rules that must govern an edit belong in a scoped `AGENTS.md` file on the path to the code. Rationale, history, examples, evidence, plans, and neighboring decisions belong in a knowledge base that an agent pulls only when the task needs them. This keeps mandatory instructions short without throwing away the context behind them.
 
-A root guide carries repository-wide policy, and nested guides add constraints owned by a package or product. A nearby knowledge note can explain why a parser rejects a tempting shortcut, preserve the source behind the decision, and link the plan that introduced it. If the note and the applicable guide disagree, the guide controls the edit and the note needs repair. [Agent docs hygiene](<https://hraness.com/engineering/the-ai-codebase-agent-docs-hygiene>) covers that instruction path in more detail.
+A root guide carries repository-wide policy, and nested guides add constraints owned by a package or product. A nearby knowledge note can explain why a parser rejects a tempting shortcut, preserve the source behind the decision, and link the plan that introduced it. If the note and the applicable guide disagree, the guide controls the edit and the note needs repair.
 
 The result has two concrete parts: scoped instruction files govern edits, while an ordinary Markdown vault stores supporting context. Application code imports neither the vault nor its search indexes:
 
@@ -162,7 +159,6 @@ Search finds candidates. Similarity does not establish that a passage is current
 Start with a short inherited `AGENTS.md` path for rules whose omission would make an edit wrong. A small knowledge base may need only Markdown, Git, an index page, and ordinary file search. Add source capture when evidence keeps disappearing. Add repository scopes when agents need to recover current memory from code paths. Add metadata or hybrid search when file search stops answering the repository's questions. Add links and graph views only when the relationships themselves help people make decisions.
 
 Treat the knowledge base as repository-adjacent durable memory. Authored Markdown and Git are the record; catalogs, indexes, embeddings, and graph views are replaceable ways to find and inspect it. Checks can validate structure, captures can preserve a selected surface, and similarity can suggest candidates. None of those mechanisms proves that a source is trustworthy or an explanation is still true. People and agents must revise the knowledge as the repository changes.
-<!-- article:a-durable-knowledge-base-is-a-write-path:end -->
 
 ## Install
 
