@@ -1,30 +1,48 @@
+<!-- hraness:kb-landing:start -->
 # kb
 
 durable local memory for coding agents.
 
-kb keeps sources, notes, plans, and repository context beside your code in
-ordinary Markdown and Git. Agents can retrieve an exact identifier, filter
-metadata and tags, search locally by words or meaning, follow explicit
-backlinks and typed relations, and inspect the Git history behind a note. The
-TypeScript SDK reuses one live vault scan across queries, while bounded DAG
-workflows let independent retrieval steps run in parallel.
-
-The vault stays independent from application code. Markdown and repository Git
-history are authoritative; the QMD search database, graph views, catalog, and
-Git index are derived and replaceable.
+## install
 
 ```sh
 bun add --global github:hraness/kb#v0.13.0
 ```
 
+## about
+
+Keep knowledge in Markdown and Git. Your application stays independent.
+
+Search exact identifiers, metadata, and tags. Find meaning locally with QMD.
+Follow explicit backlinks and typed relations; inspect Git provenance
+separately.
+
+Capture signed-in pages and PDFs with local assets. Use the TypeScript SDK and
+bounded workflows.
+
+Markdown and Git history stay authoritative. Every index and graph view is
+replaceable.
+
+## use
+
+```sh
+kb init kb
+kb clip https://example.com/article --output articles
+kb pdf ./report.pdf --output articles
+kb percolate notes/topic --root .
+kb context packages/parser/src/index.ts --root kb --repo .
+kb list --where type=plan --scope packages/parser --root .
+kb links notes/topic --root . --direction both
+kb search "parser-v2" --root . --mode exact
+kb history search packages/parser --root . --repo .. --json
+```
+
+## links
+
+[github](https://github.com/hraness/kb)
+
 [article](https://hraness.com/engineering/a-durable-knowledge-base-is-a-write-path)
-
-[website](https://hraness.com/kb)
-
-the command-line tool runs with Bun. exact search, metadata filters, repository
-context, links, Git provenance, capture, and PDF conversion need no hosted
-service. hybrid search adds QMD's local keyword and embedding index. graph and
-Git evidence stay separate from the primary exact and text relevance rank.
+<!-- hraness:kb-landing:end -->
 
 <!-- article:a-durable-knowledge-base-is-a-write-path:start -->
 ## [A knowledge base for your coding agents](<https://hraness.com/engineering/a-durable-knowledge-base-is-a-write-path>)
