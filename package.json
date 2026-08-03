@@ -1,7 +1,7 @@
 {
   "name": "@hraness/kb",
   "version": "0.13.0",
-  "description": "A Markdown knowledge base that connects coding agents to repository context, captures web pages and PDFs with their sources, and retrieves knowledge locally by metadata, links, words, or meaning.",
+  "description": "A knowledge base for coding agents, built from Markdown, backlinks, semantic search, and Git context.",
   "license": "MIT",
   "type": "module",
   "sideEffects": [

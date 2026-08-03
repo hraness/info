@@ -1,7 +1,7 @@
 <!-- hraness:kb-landing:start -->
 # kb
 
-durable local memory for coding agents.
+a knowledge base for coding agents.
 
 ## install
 
@@ -11,17 +11,16 @@ bun add --global github:hraness/kb#v0.13.0
 
 ## about
 
-Keep knowledge in Markdown and Git. Your application stays independent.
+Turn research, plans, and decisions into reusable context for coding agents.
+Keep sources and repository context beside your code in Markdown and Git. Your
+application stays independent.
 
-Search exact identifiers, metadata, and tags. Find meaning locally with QMD.
-Follow explicit backlinks and typed relations; inspect Git provenance
-separately.
+Search identifiers and metadata. Find meaning locally with QMD. Follow
+backlinks and typed relations. Inspect Git provenance.
 
-Capture signed-in pages and PDFs with local assets. Use the TypeScript SDK and
-bounded workflows.
+Capture signed-in pages and PDFs. Use the TypeScript SDK and bounded workflows.
 
-Markdown and Git history stay authoritative. Every index and graph view is
-replaceable.
+Markdown and Git stay authoritative. Indexes and graph views are replaceable.
 
 ## use
 
