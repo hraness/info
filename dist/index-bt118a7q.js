@@ -4,7 +4,7 @@ import {
 } from "./index-hgve9rh2.js";
 import {
   startNetworkProxy
-} from "./index-7qhzw38d.js";
+} from "./index-w2zc0vwa.js";
 import {
   sanitizeArtifactUrl
 } from "./index-ey9rycsn.js";
@@ -20,7 +20,7 @@ import {
   assertSafeNetworkUrl,
   decodeBytes,
   safeFetch
-} from "./index-4sh2hh3t.js";
+} from "./index-e5fbsywq.js";
 import {
   readBoundedByteStream
 } from "./index-gh719d91.js";

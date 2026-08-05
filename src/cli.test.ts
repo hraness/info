@@ -94,6 +94,13 @@ describe("kb argument parsing", () => {
         arguments: ["document.pdf", "--slug", "document"],
       },
     });
+    expect(parseArguments(["url-metadata", "backfill", "--root", "kb", "--json"])).toEqual({
+      ok: true,
+      value: {
+        kind: "url-metadata",
+        arguments: ["backfill", "--root", "kb", "--json"],
+      },
+    });
     expect(parseArguments(["check", "--secret=do-not-print"])).toEqual({
       ok: false,
       message: "unknown check option",
@@ -1454,6 +1461,19 @@ describe("kb vault commands", () => {
     });
     expect(exitCode).toBe(3);
     expect(captured).toEqual([["document.pdf", "--json"]]);
+  });
+
+  test("delegates URL metadata arguments and preserves its exit code", async () => {
+    const captured: string[][] = [];
+    const output = captureOutput();
+    const exitCode = await main(["url-metadata", "backfill", "--root", "kb", "--json"], output.output, {
+      runUrlMetadataCommand: (arguments_) => {
+        captured.push([...(arguments_ ?? [])]);
+        return Promise.resolve(3);
+      },
+    });
+    expect(exitCode).toBe(3);
+    expect(captured).toEqual([["backfill", "--root", "kb", "--json"]]);
   });
 
   test("delegates local semantic indexing and search without loading QMD in other commands", async () => {

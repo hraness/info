@@ -1,0 +1,18 @@
+[package]
+name = "kb-url-metadata-search"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+metadata-search-engine-rs = { git = "https://github.com/MikeLuu99/searxng-rust", rev = "f40a00ea67a857ee996e1caba1ebab3ee7a14a47" }
+libc = "=0.2.189"
+reqwest = { version = "=0.12.28", features = ["brotli", "cookies", "gzip"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = true

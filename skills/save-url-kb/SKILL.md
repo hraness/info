@@ -33,7 +33,7 @@ Start ordinary URL capture with the layered default:
 kb clip https://example.com/article --output "$KB_ROOT/articles"
 ```
 
-The command tries stable structured data, bounded HTTP extraction, and rendered-browser fallback as needed.
+The command tries stable structured data, bounded HTTP extraction, and rendered-browser fallback as needed. If those routes produce no usable source material, URL capture may perform one read-only lookup for an existing Archive.today-family snapshot. It never submits the source for archival. A useful structured provider result, including a partial Hacker News result, remains authoritative over the archive fallback.
 
 When the source is already open in a signed-in browser, read the current tab in place:
 
@@ -106,6 +106,17 @@ default. Missing optional metadata or transcript regions remain explicit in
 the capture status and warnings.
 
 Source evidence is stored as sanitized inert HTML. Screenshots are viewport pixels and can include everything visible in the tab, so inspect them before retaining or sharing a bundle.
+
+## Backfill saved-URL metadata
+
+From a package checkout, build the pinned Rust metadata-search helper and backfill every saved external URL into a separate tool-owned sidecar:
+
+```sh
+bun run url-metadata:tool:build
+kb url-metadata backfill --root "$KB_ROOT" --json
+```
+
+The backfill runs serially with bounded output and time, resumes compatible sidecars by default, and searches for exact source matches plus existing Archive.today-family snapshots. It never rewrites the saved Markdown or adopts the search library's URL normalization, accepts descriptive metadata only from an exact source match, records partial or failed engines literally, and never promotes search output into `capture.json`. Use `--refresh` for an explicit replacement run after reviewing the provider and archive disclosure policy.
 
 ## Report completeness literally
 

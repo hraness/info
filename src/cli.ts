@@ -35,6 +35,7 @@ import {
   type AttachmentValidationReport,
 } from "./attachments.js";
 import { main as runClipCommand } from "./clip/cli.js";
+import { main as runUrlMetadataCommand } from "./clip/url-metadata-cli.js";
 import { redactSensitiveText } from "./clip/persist.js";
 import { sanitizeTerminalLine, sanitizeTerminalText } from "./clip/terminal.js";
 import { main as runPdfCommand } from "./pdf/cli.js";
@@ -172,6 +173,7 @@ export const usage = `kb — auditable capture and derived links for Markdown va
 Usage:
   kb init [directory] [--json]
   kb clip <url|current> [capture options]
+  kb url-metadata backfill [metadata options]
   kb inspect <url> [capture options]
   kb pdf <file-or-url> [PDF options]
   kb refresh [--root <directory>] [--index <path>] [--json]
@@ -207,6 +209,7 @@ type VaultCommand = "refresh" | "check" | "graph" | "backlinks" | "links";
 type ParsedCommand =
   | { readonly kind: "help" }
   | { readonly kind: "clip"; readonly arguments: readonly string[] }
+  | { readonly kind: "url-metadata"; readonly arguments: readonly string[] }
   | { readonly kind: "pdf"; readonly arguments: readonly string[] }
   | { readonly kind: "init"; readonly directory: string; readonly json: boolean }
   | {
@@ -350,6 +353,7 @@ type ParseResult =
 
 type CliDependencies = {
   readonly runClipCommand?: typeof runClipCommand;
+  readonly runUrlMetadataCommand?: typeof runUrlMetadataCommand;
   readonly runPdfCommand?: typeof runPdfCommand;
   readonly initVault?: typeof initVault;
   readonly scanVault?: typeof scanVault;
@@ -1568,6 +1572,9 @@ export function parseArguments(arguments_: readonly string[]): ParseResult {
     }
     const delegated = command === "inspect" ? "inspect" : "capture";
     return { ok: true, value: { kind: "clip", arguments: [delegated, ...arguments_.slice(1)] } };
+  }
+  if (command === "url-metadata") {
+    return { ok: true, value: { kind: "url-metadata", arguments: arguments_.slice(1) } };
   }
   if (command === "pdf") {
     return { ok: true, value: { kind: "pdf", arguments: arguments_.slice(1) } };
@@ -2983,6 +2990,9 @@ export async function main(
   try {
     if (command.kind === "clip") {
       return await (dependencies.runClipCommand ?? runClipCommand)(command.arguments, process.env, output);
+    }
+    if (command.kind === "url-metadata") {
+      return await (dependencies.runUrlMetadataCommand ?? runUrlMetadataCommand)(command.arguments, process.env, output);
     }
     if (command.kind === "pdf") {
       return await (dependencies.runPdfCommand ?? runPdfCommand)(command.arguments, process.env, output);

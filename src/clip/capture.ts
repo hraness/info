@@ -24,7 +24,16 @@ import {
 import { captureUrl, type CaptureArguments, type CaptureScope } from "./args.js";
 import { localizeAssets, sniffImage, type AssetRecord } from "./assets.js";
 import { cloneBrowserProfile } from "./browser-profiles.js";
-import { canonicalizeUrl, chooseBestExtraction, countWords, extractPage, type ExtractedPage, type Platform } from "./extract.js";
+import {
+  canonicalizeUrl,
+  chooseBestExtraction,
+  countWords,
+  extractPage,
+  extractionShowsAccessControl,
+  scoreExtraction,
+  type ExtractedPage,
+  type Platform,
+} from "./extract.js";
 import {
   buildClipMarkdown,
   CONTENT_REWRITE_TRUNCATION_WARNING,
@@ -56,6 +65,12 @@ import {
 } from "./persist.js";
 import { classifyPlatformUrl } from "./platforms.js";
 import { acquirePublicStructured, type PublicStructuredCapture } from "./structured.js";
+import {
+  acquireArchiveTodaySnapshot,
+  discoverArchiveTodaySnapshot,
+  type ArchiveTodayDiscovery,
+} from "./archive-today.js";
+import { FetchFailure } from "./network.js";
 
 export type AttemptOutcome = "succeeded" | "failed" | "skipped";
 
@@ -93,6 +108,8 @@ export type CaptureDependencies = {
   readonly acquireCookieRecords?: typeof acquireCookieRecords;
   readonly acquireBrowser?: typeof acquireBrowser;
   readonly acquirePublicStructured?: typeof acquirePublicStructured;
+  readonly discoverArchiveTodaySnapshot?: typeof discoverArchiveTodaySnapshot;
+  readonly acquireArchiveTodaySnapshot?: typeof acquireArchiveTodaySnapshot;
   readonly extractPage?: typeof extractPage;
   readonly localizeAssets?: typeof localizeAssets;
   readonly captureMedia?: typeof captureMedia;
@@ -230,6 +247,117 @@ function chooseCaptureExtraction(
   return chooseBestExtraction(candidates);
 }
 
+function authoritativeStructuredExtraction(structuredCapture: PublicStructuredCapture | null): boolean {
+  const extraction = structuredCapture?.extraction;
+  return extraction !== undefined
+    && (extraction.acquisition.method === "hacker-news-api" || extraction.acquisition.method === "bluesky-api")
+    && (extraction.status === "complete" || extraction.status === "partial");
+}
+
+function shouldTryArchiveFallback(
+  options: CaptureArguments,
+  candidates: readonly ExtractedPage[],
+  structuredCapture: PublicStructuredCapture | null,
+): boolean {
+  if ((options.mode !== "auto" && options.mode !== "http") || options.currentTab) return false;
+  if (authoritativeStructuredExtraction(structuredCapture)) return false;
+  const best = chooseBestExtraction(candidates);
+  return best === null
+    || (best.status !== "complete" && best.status !== "partial")
+    || (best.status === "partial" && best.wordCount < 60 && best.capturedItems === 0);
+}
+
+const archiveBypassHttpStatuses = new Set([401, 402, 403, 407, 423, 429, 451]);
+
+function recordArchiveFallbackDenial(denials: Set<string>, extraction: ExtractedPage): void {
+  if (extractionShowsAccessControl(extraction)) denials.add("access-control response");
+}
+
+function recordArchiveFallbackErrorDenial(denials: Set<string>, error: unknown): void {
+  if (error instanceof FetchFailure && error.status !== null && archiveBypassHttpStatuses.has(error.status)) {
+    denials.add("access-control or rate-limit response");
+  }
+}
+
+function archiveDiscoveryAttempt(discovery: ArchiveTodayDiscovery): CaptureAttempt {
+  switch (discovery.status) {
+    case "found":
+      return { method: "archive-is-discovery", outcome: "succeeded", message: "found one exact existing snapshot" };
+    case "not-found":
+      return { method: "archive-is-discovery", outcome: "skipped", message: "no exact existing snapshot was found" };
+    case "throttled":
+      return { method: "archive-is-discovery", outcome: "failed", message: "provider throttled the read-only lookup" };
+    case "unavailable":
+      return { method: "archive-is-discovery", outcome: "failed", message: `provider lookup unavailable (${discovery.reason})` };
+  }
+}
+
+async function tryArchiveFallback(options: {
+  readonly sourceUrl: string;
+  readonly platform: Platform;
+  readonly scope: Exclude<CaptureScope, "auto">;
+  readonly captureOptions: CaptureArguments;
+  readonly extractor: typeof extractPage;
+  readonly discover: typeof discoverArchiveTodaySnapshot;
+  readonly acquire: typeof acquireArchiveTodaySnapshot;
+  readonly now: () => Date;
+  readonly candidates: ExtractedPage[];
+  readonly attempts: CaptureAttempt[];
+}): Promise<void> {
+  let discovery: ArchiveTodayDiscovery;
+  try {
+    discovery = await options.discover(options.sourceUrl, {
+      now: options.now,
+      timeoutMs: options.captureOptions.timeoutMs,
+      maxBytes: options.captureOptions.maxHtmlBytes,
+      userAgent: options.captureOptions.userAgent,
+    });
+  } catch (error) {
+    options.attempts.push({ method: "archive-is-discovery", outcome: "failed", message: safeAttemptMessage(error) });
+    return;
+  }
+  options.attempts.push(archiveDiscoveryAttempt(discovery));
+  if (discovery.status !== "found") return;
+  try {
+    const acquisition = await options.acquire(options.sourceUrl, discovery.snapshot.url, {
+      now: options.now,
+      timeoutMs: options.captureOptions.timeoutMs,
+      maxBytes: options.captureOptions.maxHtmlBytes,
+      userAgent: options.captureOptions.userAgent,
+    });
+    const extracted = await options.extractor(acquisition, options.scope, options.captureOptions.timeoutMs);
+    if (extracted === null) {
+      options.attempts.push({ method: "archive-is", outcome: "failed", message: "snapshot yielded no extractable content" });
+      return;
+    }
+    const warning = `Captured an Archive.today snapshot from ${discovery.snapshot.capturedAt}; it may differ from the current source.`;
+    const archivedStatus = extracted.status === "complete" ? "partial" : extracted.status;
+    const archived: ExtractedPage = {
+      ...extracted,
+      canonicalUrl: new URL(options.sourceUrl),
+      platform: options.platform,
+      status: archivedStatus,
+      score: scoreExtraction(
+        extracted.article,
+        archivedStatus,
+        extracted.wordCount,
+        extracted.capturedItems,
+        acquisition,
+      ),
+      warnings: Object.freeze([...extracted.warnings, warning]),
+      acquisition,
+    };
+    options.candidates.push(archived);
+    options.attempts.push({
+      method: "archive-is",
+      outcome: "succeeded",
+      message: `${archived.status}; ${archived.wordCount} words; ${archived.capturedItems} items`,
+    });
+  } catch (error) {
+    options.attempts.push({ method: "archive-is", outcome: "failed", message: safeAttemptMessage(error) });
+  }
+}
+
 async function tryAcquisition(
   method: string,
   acquire: () => Promise<AcquiredPage>,
@@ -238,6 +366,7 @@ async function tryAcquisition(
   extractor: typeof extractPage,
   candidates: ExtractedPage[],
   attempts: CaptureAttempt[],
+  archiveFallbackDenials: Set<string>,
 ): Promise<AcquiredPage | null> {
   try {
     const acquisition = await acquire();
@@ -247,6 +376,7 @@ async function tryAcquisition(
       return acquisition;
     }
     candidates.push(extracted);
+    recordArchiveFallbackDenial(archiveFallbackDenials, extracted);
     attempts.push({
       method: acquisition.method,
       outcome: "succeeded",
@@ -254,6 +384,7 @@ async function tryAcquisition(
     });
     return acquisition;
   } catch (error) {
+    recordArchiveFallbackErrorDenial(archiveFallbackDenials, error);
     attempts.push({ method, outcome: "failed", message: safeAttemptMessage(error) });
     return null;
   }
@@ -471,6 +602,8 @@ export async function runCapture(
     acquireCookieRecords: dependencies.acquireCookieRecords ?? acquireCookieRecords,
     acquireBrowser: dependencies.acquireBrowser ?? acquireBrowser,
     acquirePublicStructured: dependencies.acquirePublicStructured ?? acquirePublicStructured,
+    discoverArchiveTodaySnapshot: dependencies.discoverArchiveTodaySnapshot ?? discoverArchiveTodaySnapshot,
+    acquireArchiveTodaySnapshot: dependencies.acquireArchiveTodaySnapshot ?? acquireArchiveTodaySnapshot,
     extractPage: dependencies.extractPage ?? extractPage,
     localizeAssets: dependencies.localizeAssets ?? localizeAssets,
     captureMedia: dependencies.captureMedia ?? captureMedia,
@@ -503,6 +636,7 @@ export async function runCapture(
     const options: CaptureArguments = { ...resolvedOptions, scope };
     const candidates: ExtractedPage[] = [];
     const attempts: CaptureAttempt[] = [];
+    const archiveFallbackDenials = new Set<string>();
     const browserOperationalWarnings: string[] = [];
     let structuredCapture: PublicStructuredCapture | null = null;
     const browserScreenshots = new Map<AcquiredPage, string>();
@@ -531,6 +665,7 @@ export async function runCapture(
           deps.extractPage,
           eagerBrowserCandidates,
           eagerBrowserAttempts,
+          archiveFallbackDenials,
         )
       : null;
     if (options.currentTab) {
@@ -543,17 +678,28 @@ export async function runCapture(
         deps.extractPage,
         candidates,
         attempts,
+        archiveFallbackDenials,
       );
       if (browser !== null) browserOperationalWarnings.push(...browser.warnings);
       if (browser?.screenshotPath !== undefined) browserScreenshots.set(browser, browser.screenshotPath);
     } else if (options.mode === "file") {
-      await tryAcquisition("file", () => deps.acquireFile(options), scope, options.timeoutMs, deps.extractPage, candidates, attempts);
+      await tryAcquisition(
+        "file",
+        () => deps.acquireFile(options),
+        scope,
+        options.timeoutMs,
+        deps.extractPage,
+        candidates,
+        attempts,
+        archiveFallbackDenials,
+      );
     } else {
       if (options.mode === "auto" || options.mode === "http") {
         try {
           structuredCapture = await deps.acquirePublicStructured(options);
           if (structuredCapture !== null) {
             candidates.push(structuredCapture.extraction);
+            recordArchiveFallbackDenial(archiveFallbackDenials, structuredCapture.extraction);
             attempts.push({
               method: structuredCapture.extraction.acquisition.method,
               outcome: "succeeded",
@@ -563,9 +709,19 @@ export async function runCapture(
             attempts.push({ method: "public-api", outcome: "skipped", message: "no stable public structured adapter" });
           }
         } catch (error) {
+          recordArchiveFallbackErrorDenial(archiveFallbackDenials, error);
           attempts.push({ method: "public-api", outcome: "failed", message: safeAttemptMessage(error) });
         }
-        await tryAcquisition("http", () => deps.acquireHttp(options), scope, options.timeoutMs, deps.extractPage, candidates, attempts);
+        await tryAcquisition(
+          "http",
+          () => deps.acquireHttp(options),
+          scope,
+          options.timeoutMs,
+          deps.extractPage,
+          candidates,
+          attempts,
+          archiveFallbackDenials,
+        );
         if (options.cookieSources.length > 0 || options.cookiesFile !== undefined) {
           await tryAcquisition(
             "cookie-http",
@@ -575,6 +731,7 @@ export async function runCapture(
             deps.extractPage,
             candidates,
             attempts,
+            archiveFallbackDenials,
           );
         }
       }
@@ -606,9 +763,33 @@ export async function runCapture(
           deps.extractPage,
           candidates,
           attempts,
+          archiveFallbackDenials,
         );
         if (browser !== null) browserOperationalWarnings.push(...browser.warnings);
         if (browser?.screenshotPath !== undefined) browserScreenshots.set(browser, browser.screenshotPath);
+      }
+    }
+
+    if (shouldTryArchiveFallback(options, candidates, structuredCapture)) {
+      if (archiveFallbackDenials.size > 0) {
+        attempts.push({
+          method: "archive-is-discovery",
+          outcome: "skipped",
+          message: `archive fallback disabled after ${[...archiveFallbackDenials].sort().join(" and ")}`,
+        });
+      } else {
+        await tryArchiveFallback({
+          sourceUrl,
+          platform,
+          scope,
+          captureOptions: options,
+          extractor: deps.extractPage,
+          discover: deps.discoverArchiveTodaySnapshot,
+          acquire: deps.acquireArchiveTodaySnapshot,
+          now: deps.now,
+          candidates,
+          attempts,
+        });
       }
     }
 
@@ -792,7 +973,9 @@ export async function runCapture(
         scope,
         acquisition: {
           method: best.acquisition.method,
-          finalUrl: canonicalizeUrl(best.acquisition.finalUrl, best.platform).href,
+          finalUrl: best.acquisition.method === "archive-is"
+            ? sanitizeArtifactUrl(best.acquisition.finalUrl.href)
+            : canonicalizeUrl(best.acquisition.finalUrl, best.platform).href,
           contentType: best.acquisition.contentType,
         },
         extraction: {

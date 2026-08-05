@@ -8,6 +8,7 @@ import type { CaptureArguments } from "./args.js";
 import { appendCapturedMedia, appendVideoContext, captureSlug, effectiveScope, runCapture } from "./capture.js";
 import { countWords, type ExtractedPage } from "./extract.js";
 import { CONTENT_REWRITE_TRUNCATION_WARNING } from "./lib.js";
+import { FetchFailure } from "./network.js";
 
 const baseOptions = (url: string, overrides: Partial<CaptureArguments> = {}): CaptureArguments => ({
   command: "inspect",
@@ -504,6 +505,7 @@ describe("capture orchestration", () => {
   test("does not defeat explicit structured item bounds with an unbounded browser fallback", async () => {
     const url = "https://news.ycombinator.com/item?id=1";
     let browserCalls = 0;
+    let archiveCalls = 0;
     const bounded = {
       ...extraction(url),
       platform: "hacker-news" as const,
@@ -519,10 +521,234 @@ describe("capture orchestration", () => {
         browserCalls += 1;
         return Promise.reject(new Error("unexpected"));
       },
+      discoverArchiveTodaySnapshot: () => {
+        archiveCalls += 1;
+        return Promise.resolve({ status: "not-found", sourceUrl: url });
+      },
       extractPage: () => Promise.resolve({ ...extraction(url), status: "partial", score: 2_000 }),
       now: () => new Date("2026-07-21T12:00:00Z"),
     });
     expect(browserCalls).toBe(0);
+    expect(archiveCalls).toBe(0);
+  });
+
+  test("uses an exact Archive.today snapshot only after direct content is unusable", async () => {
+    const url = "https://example.com/missing";
+    const snapshotUrl = `https://archive.ph/20260801010203/${url}`;
+    let discoveries = 0;
+    let acquisitions = 0;
+    const result = await runCapture(baseOptions(url), {
+      acquirePublicStructured: () => Promise.resolve(null),
+      acquireHttp: () => Promise.resolve(acquisition(url)),
+      discoverArchiveTodaySnapshot: (sourceUrl) => {
+        discoveries += 1;
+        expect(sourceUrl).toBe(url);
+        return Promise.resolve({
+          status: "found",
+          sourceUrl: url,
+          snapshot: {
+            url: snapshotUrl,
+            capturedAt: "2026-08-01T01:02:03.000Z",
+            sourceUrl: url,
+            discovery: "newest",
+          },
+        });
+      },
+      acquireArchiveTodaySnapshot: (sourceUrl, requestedSnapshot) => {
+        acquisitions += 1;
+        expect(sourceUrl).toBe(url);
+        expect(requestedSnapshot).toBe(snapshotUrl);
+        return Promise.resolve({
+          ...acquisition(snapshotUrl),
+          method: "archive-is",
+          finalUrl: new URL(snapshotUrl),
+        });
+      },
+      extractPage: (page) => Promise.resolve(page.method === "archive-is"
+        ? {
+            ...extraction(snapshotUrl, "Archived fixture"),
+            acquisition: page,
+            canonicalUrl: new URL(snapshotUrl),
+            status: "complete",
+            wordCount: 120,
+          }
+        : {
+            ...extraction(url),
+            acquisition: page,
+            status: "unsupported",
+            score: -5_000,
+            capturedItems: 0,
+            wordCount: 0,
+          }),
+      now: () => new Date("2026-08-04T12:00:00.000Z"),
+    });
+
+    expect(discoveries).toBe(1);
+    expect(acquisitions).toBe(1);
+    expect(result.acquisitionMethod).toBe("archive-is");
+    expect(result.canonicalUrl).toBe(url);
+    expect(result.status).toBe("partial");
+    expect(result.markdown).toContain('capture_method: "archive-is"');
+    expect(result.warnings.some((warning) => warning.includes("2026-08-01T01:02:03.000Z"))).toBeTrue();
+    expect(result.attempts.some(({ method, outcome }) => method === "archive-is" && outcome === "succeeded")).toBeTrue();
+  });
+
+  test("never uses an archive snapshot to bypass access gates or rate limits", async () => {
+    const url = "https://example.com/protected";
+    for (const status of ["auth-required", "blocked"] as const) {
+      let discoveries = 0;
+      const result = await runCapture(baseOptions(url), {
+        acquirePublicStructured: () => Promise.resolve(null),
+        acquireHttp: () => Promise.resolve(acquisition(url)),
+        discoverArchiveTodaySnapshot: () => {
+          discoveries += 1;
+          return Promise.resolve({ status: "not-found", sourceUrl: url });
+        },
+        extractPage: () => Promise.resolve({
+          ...extraction(url),
+          status,
+          score: status === "blocked" ? -4_000 : -2_000,
+          capturedItems: 0,
+          wordCount: 0,
+        }),
+        now: () => new Date("2026-08-04T12:00:00.000Z"),
+      });
+      expect(result.status).toBe(status);
+      expect(discoveries).toBe(0);
+      expect(result.attempts).toContainEqual({
+        method: "archive-is-discovery",
+        outcome: "skipped",
+        message: "archive fallback disabled after access-control response",
+      });
+    }
+
+    let discoveries = 0;
+    const rateLimited = await runCapture(baseOptions(url), {
+      acquirePublicStructured: () => Promise.resolve(null),
+      acquireHttp: () => Promise.resolve({
+        ...acquisition(url),
+        body: "429 Too Many Requests\n\nRate limit exceeded. Please try again later.",
+        contentType: "text/plain",
+      }),
+      discoverArchiveTodaySnapshot: () => {
+        discoveries += 1;
+        return Promise.resolve({ status: "not-found", sourceUrl: url });
+      },
+      now: () => new Date("2026-08-04T12:00:00.000Z"),
+    });
+    expect(rateLimited.status).toBe("blocked");
+    expect(discoveries).toBe(0);
+
+    discoveries = 0;
+    let failure: unknown;
+    try {
+      await runCapture(baseOptions(url), {
+        acquirePublicStructured: () => Promise.resolve(null),
+        acquireHttp: () => Promise.reject(new FetchFailure("http", "HTTP 429", { status: 429 })),
+        discoverArchiveTodaySnapshot: () => {
+          discoveries += 1;
+          return Promise.resolve({ status: "not-found", sourceUrl: url });
+        },
+        now: () => new Date("2026-08-04T12:00:00.000Z"),
+      });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect(discoveries).toBe(0);
+  });
+
+  test("rescoring a downgraded archive keeps a stronger current partial capture", async () => {
+    const url = "https://example.com/current-partial";
+    const snapshotUrl = `https://archive.ph/20260801010203/${url}`;
+    const result = await runCapture(baseOptions(url), {
+      acquirePublicStructured: () => Promise.resolve(null),
+      acquireHttp: () => Promise.resolve(acquisition(url)),
+      discoverArchiveTodaySnapshot: () => Promise.resolve({
+        status: "found",
+        sourceUrl: url,
+        snapshot: {
+          url: snapshotUrl,
+          capturedAt: "2026-08-01T01:02:03.000Z",
+          sourceUrl: url,
+          discovery: "newest",
+        },
+      }),
+      acquireArchiveTodaySnapshot: () => Promise.resolve({
+        ...acquisition(snapshotUrl),
+        method: "archive-is",
+        finalUrl: new URL(snapshotUrl),
+      }),
+      extractPage: (page) => Promise.resolve(page.method === "archive-is"
+        ? {
+            ...extraction(snapshotUrl, "Archived fixture"),
+            acquisition: page,
+            status: "complete",
+            score: 6_000,
+            wordCount: 120,
+          }
+        : {
+            ...extraction(url, "Current partial"),
+            acquisition: page,
+            status: "partial",
+            score: 3_000,
+            capturedItems: 0,
+            wordCount: 0,
+          }),
+      now: () => new Date("2026-08-04T12:00:00.000Z"),
+    });
+    expect(result.acquisitionMethod).toBe("http");
+    expect(result.markdown).toContain("Current partial");
+  });
+
+  test("preserves archive snapshot provenance in a persisted capture manifest", async () => {
+    const root = mkdtempSync(join(tmpdir(), "clip-capture-archive-"));
+    const url = "https://example.com/removed";
+    const snapshotUrl = `https://archive.md/20260801010203/${url}`;
+    try {
+      const result = await runCapture(baseOptions(url, {
+        command: "capture",
+        stdout: false,
+        outputBase: root,
+      }), {
+        acquirePublicStructured: () => Promise.resolve(null),
+        acquireHttp: () => Promise.resolve(acquisition(url)),
+        discoverArchiveTodaySnapshot: () => Promise.resolve({
+          status: "found",
+          sourceUrl: url,
+          snapshot: {
+            url: snapshotUrl,
+            capturedAt: "2026-08-01T01:02:03.000Z",
+            sourceUrl: url,
+            discovery: "newest",
+          },
+        }),
+        acquireArchiveTodaySnapshot: () => Promise.resolve({
+          ...acquisition(snapshotUrl),
+          method: "archive-is",
+          finalUrl: new URL(snapshotUrl),
+        }),
+        extractPage: (page) => Promise.resolve({
+          ...extraction(page.finalUrl.href),
+          acquisition: page,
+          status: page.method === "archive-is" ? "complete" : "unsupported",
+          score: page.method === "archive-is" ? 5_000 : -5_000,
+          capturedItems: page.method === "archive-is" ? 1 : 0,
+          wordCount: page.method === "archive-is" ? 120 : 0,
+        }),
+        now: () => new Date("2026-08-04T12:00:00.000Z"),
+      });
+      expect(result.manifest?.sourceUrl).toBe(url);
+      expect(result.manifest?.canonicalUrl).toBe(url);
+      expect(result.manifest?.acquisition).toEqual({
+        method: "archive-is",
+        finalUrl: snapshotUrl,
+        contentType: "text/html",
+      });
+      expect(result.manifest?.status).toBe("partial");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("does not launch a browser after Bluesky reaches the explicit item bound", async () => {

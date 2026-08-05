@@ -478,6 +478,20 @@ describe("Defuddle extraction", () => {
       warnings: [],
     }, "page");
     expect(result?.status).toBe("auth-required");
+
+    for (const body of [
+      "Subscribe to unlock this article.",
+      "Create an account to keep reading.",
+    ]) {
+      const paywall = await extractPage({
+        body,
+        contentType: "text/plain",
+        finalUrl: new URL("https://example.com/paywall"),
+        method: "http",
+        warnings: [],
+      }, "page");
+      expect(paywall?.status).toBe("auth-required");
+    }
   }, 30_000);
 
   test("distinguishes compact block shells from prose discussing block messages", async () => {
@@ -490,6 +504,16 @@ describe("Defuddle extraction", () => {
       browserTitle: "Access Denied",
     }, "page");
     expect(blocked?.status).toBe("blocked");
+
+    const rateLimited = await extractPage({
+      body: "429 Too Many Requests\n\nRate limit exceeded. Please try again later.",
+      contentType: "text/plain",
+      finalUrl: new URL("https://example.com/rate-limited"),
+      method: "http",
+      warnings: [],
+      browserTitle: "Too Many Requests",
+    }, "page");
+    expect(rateLimited?.status).toBe("blocked");
 
     const troubleshooting = await extractPage({
       body: [
@@ -514,6 +538,24 @@ describe("Defuddle extraction", () => {
       warnings: [],
     }, "page");
     expect(shortGuide?.status).toBe("complete");
+
+    const rateLimitGuide = await extractPage({
+      body: "# How to troubleshoot rate limit exceeded\n\nThis guide explains how to inspect response headers, reduce request concurrency, add bounded backoff, and confirm that a client respects the provider's published limits.",
+      contentType: "text/markdown",
+      finalUrl: new URL("https://example.com/rate-limit-guide"),
+      method: "http",
+      warnings: [],
+    }, "page");
+    expect(rateLimitGuide?.status).toBe("complete");
+
+    const shortRateLimitNews = await extractPage({
+      body: "# API behavior note\n\nThe provider calls this state ‘rate limit exceeded.’ This post records the wording for client authors and does not describe a live request failure.",
+      contentType: "text/markdown",
+      finalUrl: new URL("https://example.com/rate-limit-news"),
+      method: "http",
+      warnings: [],
+    }, "page");
+    expect(shortRateLimitNews?.status).toBe("complete");
   });
 
   test("does not mistake ordinary prose about signing in for an access gate", async () => {
@@ -525,6 +567,15 @@ describe("Defuddle extraction", () => {
       warnings: [],
     }, "page");
     expect(result?.status).toBe("complete");
+
+    const paywallProse = await extractPage({
+      body: "# Subscription language study\n\nPublishers sometimes write “Subscribe to unlock this article.” This note analyzes that wording as interface copy and compares clearer alternatives; it is ordinary prose, not an active gate.",
+      contentType: "text/markdown",
+      finalUrl: new URL("https://example.com/paywall-language-study"),
+      method: "http",
+      warnings: [],
+    }, "page");
+    expect(paywallProse?.status).toBe("complete");
   }, 30_000);
 
   test("uses stable platform provenance instead of an ambiguous Defuddle site field", async () => {

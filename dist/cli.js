@@ -1,8 +1,12 @@
 #!/usr/bin/env bun
 // @bun
 import {
+  backfillSavedUrlMetadata,
+  createRustMetadataSearchProvider
+} from "./index-tpcs0zbm.js";
+import {
   main as main2
-} from "./index-8bzgkde7.js";
+} from "./index-t800m4cc.js";
 import {
   initVault
 } from "./index-mqx4nd6v.js";
@@ -90,12 +94,15 @@ import {
 } from "./index-4962kvds.js";
 import {
   main
-} from "./index-m1tsmg93.js";
-import"./index-0y58zcp8.js";
-import"./index-0kv488m1.js";
-import"./index-s3vk4e6j.js";
+} from "./index-2cw7jeq4.js";
+import"./index-tp2p17gt.js";
+import"./index-f984hw45.js";
+import"./index-h2a142gc.js";
+import {
+  findKbPackageRoot
+} from "./index-bt118a7q.js";
 import"./index-hgve9rh2.js";
-import"./index-7qhzw38d.js";
+import"./index-w2zc0vwa.js";
 import {
   redactSensitiveText
 } from "./index-ey9rycsn.js";
@@ -105,16 +112,184 @@ import {
 } from "./index-1xxnjn0d.js";
 import"./index-6g2pv9d2.js";
 import"./index-84x0vjjp.js";
-import"./index-4sh2hh3t.js";
+import"./index-e5fbsywq.js";
 import"./index-gh719d91.js";
 import"./index-5n05se68.js";
 
 // src/cli.ts
 import { open } from "fs/promises";
 import { cpus, release, totalmem } from "os";
-import { relative, resolve } from "path";
+import { relative, resolve as resolve2 } from "path";
 import { format } from "util";
+
+// src/clip/url-metadata-cli.ts
+import { resolve } from "path";
+var urlMetadataUsage = `kb url-metadata \u2014 backfill bounded metadata for saved URLs
+
+Usage:
+  kb url-metadata backfill [--root <vault>] [--search-binary <path>] [--refresh]
+    [--archive | --no-archive] [--delay-ms <milliseconds>]
+    [--max-results <count>] [--timeout <milliseconds>] [--json]
+
+From the @hraness/kb package directory, build the search helper from the immutable
+metadata-search-engine-rs revision:
+  bun run url-metadata:tool:build
+`;
 var defaultOutput = {
+  stdout: (value) => process.stdout.write(value),
+  stderr: (value) => process.stderr.write(value)
+};
+function integer(value, minimum, maximum) {
+  if (!/^(?:0|[1-9]\d*)$/u.test(value))
+    return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= minimum && parsed <= maximum ? parsed : null;
+}
+function metadataSearchBinaryPath(packageRoot = findKbPackageRoot(), platform = process.platform) {
+  const executable = platform === "win32" ? "kb-url-metadata-search.exe" : "kb-url-metadata-search";
+  return resolve(packageRoot, "src", "clip", "metadata-search-tool", "target", "release", executable);
+}
+function defaultBinaryPath(environment) {
+  const configured = environment.HRANESS_KB_METADATA_SEARCH_BINARY;
+  if (configured !== undefined && configured.trim() !== "")
+    return resolve(configured);
+  return metadataSearchBinaryPath();
+}
+function parseUrlMetadataArguments(arguments_, environment = process.env) {
+  const command = arguments_[0];
+  const jsonRequested = arguments_.includes("--json");
+  if (command === undefined || command === "help" || command === "--help" || command === "-h") {
+    return { ok: true, value: { kind: "help" } };
+  }
+  if (command !== "backfill") {
+    return { ok: false, message: "url-metadata accepts only the backfill subcommand", json: jsonRequested };
+  }
+  let root = "kb";
+  let binaryPath = defaultBinaryPath(environment);
+  let refresh = false;
+  let discoverArchives = true;
+  let delayMs = 1000;
+  let maxResults = 20;
+  let timeoutMs = 15000;
+  let json = false;
+  for (let index = 1;index < arguments_.length; index += 1) {
+    const argument = arguments_[index];
+    if (argument === "--refresh")
+      refresh = true;
+    else if (argument === "--archive")
+      discoverArchives = true;
+    else if (argument === "--no-archive")
+      discoverArchives = false;
+    else if (argument === "--json")
+      json = true;
+    else if (argument === "--root" || argument === "--search-binary" || argument === "--delay-ms" || argument === "--max-results" || argument === "--timeout") {
+      const value = arguments_[index + 1];
+      if (value === undefined || value.startsWith("--")) {
+        return { ok: false, message: `${argument} requires a value`, json: jsonRequested };
+      }
+      index += 1;
+      if (argument === "--root")
+        root = value;
+      else if (argument === "--search-binary")
+        binaryPath = resolve(value);
+      else if (argument === "--delay-ms") {
+        const parsed = integer(value, 0, 60000);
+        if (parsed === null)
+          return { ok: false, message: "--delay-ms must be an integer from 0 through 60000", json: jsonRequested };
+        delayMs = parsed;
+      } else if (argument === "--max-results") {
+        const parsed = integer(value, 1, 20);
+        if (parsed === null)
+          return { ok: false, message: "--max-results must be an integer from 1 through 20", json: jsonRequested };
+        maxResults = parsed;
+      } else {
+        const parsed = integer(value, 500, 15000);
+        if (parsed === null)
+          return { ok: false, message: "--timeout must be an integer from 500 through 15000", json: jsonRequested };
+        timeoutMs = parsed;
+      }
+    } else {
+      return { ok: false, message: `unknown url-metadata option: ${argument ?? ""}`, json: jsonRequested };
+    }
+  }
+  if (root.trim() === "")
+    return { ok: false, message: "--root must not be empty", json: jsonRequested };
+  return {
+    ok: true,
+    value: {
+      kind: "backfill",
+      root,
+      binaryPath,
+      refresh,
+      discoverArchives,
+      delayMs,
+      maxResults,
+      timeoutMs,
+      json
+    }
+  };
+}
+function terminalJson(value) {
+  return `${JSON.stringify(value, (_key, candidate) => typeof candidate === "string" ? sanitizeTerminalText(candidate) : candidate, 2)}
+`;
+}
+function renderReport(report) {
+  const counts = report.statusCounts;
+  return [
+    `URL metadata: ${report.processedRecords} processed, ${report.skippedRecords} resumed, ${report.remainingRecords} remaining.`,
+    `Writes: ${report.writtenRecords} new or refreshed, ${report.unchangedRecords} unchanged.`,
+    `Status: ${counts.matched} matched, ${counts.partial} partial, ${counts.notFound} not found, ${counts.unavailable} unavailable.`
+  ].join(`
+`) + `
+`;
+}
+async function main3(rawArguments = process.argv.slice(2), environment = process.env, output = defaultOutput, dependencies = {}) {
+  const parsed = parseUrlMetadataArguments(rawArguments, environment);
+  if (!parsed.ok) {
+    if (parsed.json)
+      output.stdout(terminalJson({ ok: false, error: parsed.message }));
+    else
+      output.stderr(`error: ${sanitizeTerminalText(parsed.message)}
+
+${urlMetadataUsage}`);
+    return 2;
+  }
+  if (parsed.value.kind === "help") {
+    output.stdout(urlMetadataUsage);
+    return 0;
+  }
+  try {
+    const provider = (dependencies.createSearchProvider ?? ((binaryPath) => createRustMetadataSearchProvider({ binaryPath })))(parsed.value.binaryPath);
+    const report = await (dependencies.backfill ?? backfillSavedUrlMetadata)({
+      vaultRoot: parsed.value.root,
+      refresh: parsed.value.refresh,
+      discoverArchives: parsed.value.discoverArchives,
+      interRequestDelayMs: parsed.value.delayMs,
+      maxResults: parsed.value.maxResults,
+      searchTimeoutMs: parsed.value.timeoutMs
+    }, { searchProvider: provider });
+    if (parsed.value.json)
+      output.stdout(terminalJson({ ok: !report.aborted, ...report }));
+    else
+      output.stdout(renderReport(report));
+    if (report.aborted)
+      return 130;
+    return report.statusCounts.unavailable > 0 ? 3 : 0;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (parsed.value.json)
+      output.stdout(terminalJson({ ok: false, error: message }));
+    else
+      output.stderr(`error: ${sanitizeTerminalText(message)}
+`);
+    return 1;
+  }
+}
+if (false)
+  ;
+
+// src/cli.ts
+var defaultOutput2 = {
   stdout: (value) => process.stdout.write(value),
   stderr: (value) => process.stderr.write(value)
 };
@@ -146,6 +321,7 @@ var usage = `kb \u2014 auditable capture and derived links for Markdown vaults
 Usage:
   kb init [directory] [--json]
   kb clip <url|current> [capture options]
+  kb url-metadata backfill [metadata options]
   kb inspect <url> [capture options]
   kb pdf <file-or-url> [PDF options]
   kb refresh [--root <directory>] [--index <path>] [--json]
@@ -1316,6 +1492,9 @@ function parseArguments(arguments_) {
     const delegated = command === "inspect" ? "inspect" : "capture";
     return { ok: true, value: { kind: "clip", arguments: [delegated, ...arguments_.slice(1)] } };
   }
+  if (command === "url-metadata") {
+    return { ok: true, value: { kind: "url-metadata", arguments: arguments_.slice(1) } };
+  }
   if (command === "pdf") {
     return { ok: true, value: { kind: "pdf", arguments: arguments_.slice(1) } };
   }
@@ -1569,7 +1748,7 @@ async function runEvaluation(command, output, dependencies) {
   if (queryCount * command.retrievers.length > MAX_CLI_EVALUATION_RUNS) {
     throw new RangeError(`CLI evaluation accepts at most ${MAX_CLI_EVALUATION_RUNS} retriever/query runs.`);
   }
-  const embeddingModelFile = command.modelFile === undefined ? undefined : resolve(command.modelFile);
+  const embeddingModelFile = command.modelFile === undefined ? undefined : resolve2(command.modelFile);
   const digestEvaluationModel = dependencies.digestEvaluationModel ?? sha256EmbeddingModelFile;
   const modelSha256 = embeddingModelFile === undefined ? null : await digestEvaluationModel(embeddingModelFile);
   if (modelSha256 !== null && modelSha256 !== recommendedEmbeddingModelSha256) {
@@ -2367,7 +2546,7 @@ async function runVault(command, output, dependencies) {
   output.stdout(command.json ? terminalSafeJson(backlinkPayload(lookup.note.path, backlinks, relationBacklinks)) : sanitizeTerminalText(renderBacklinks(lookup.note.path, backlinks, relationBacklinks)));
   return 0;
 }
-async function main3(rawArguments = process.argv.slice(2), output = defaultOutput, dependencies = {}) {
+async function main4(rawArguments = process.argv.slice(2), output = defaultOutput2, dependencies = {}) {
   const jsonRequested = rawArguments.includes("--json");
   const parsed = parseArguments(rawArguments);
   if (!parsed.ok) {
@@ -2391,6 +2570,9 @@ ${sanitizeTerminalText(usage)}`);
   try {
     if (command.kind === "clip") {
       return await (dependencies.runClipCommand ?? main)(command.arguments, process.env, output);
+    }
+    if (command.kind === "url-metadata") {
+      return await (dependencies.runUrlMetadataCommand ?? main3)(command.arguments, process.env, output);
     }
     if (command.kind === "pdf") {
       return await (dependencies.runPdfCommand ?? main2)(command.arguments, process.env, output);
@@ -2463,7 +2645,7 @@ function strictProtocolObject(value) {
 }
 async function runExecutable(rawArguments = process.argv.slice(2), dependencies = {}) {
   if (!rawArguments.includes("--json")) {
-    return main3(rawArguments, defaultOutput, dependencies);
+    return main4(rawArguments, defaultOutput2, dependencies);
   }
   return serializeStrictJson(async () => {
     const stdout = process.stdout;
@@ -2520,7 +2702,7 @@ async function runExecutable(rawArguments = process.argv.slice(2), dependencies 
     let exitCode = 1;
     let protocolValue;
     try {
-      exitCode = await main3(rawArguments, protocolOutput, dependencies);
+      exitCode = await main4(rawArguments, protocolOutput, dependencies);
       protocolValue = strictProtocolObject(chunks.join(""));
     } catch (error) {
       protocolValue = {
@@ -2551,5 +2733,5 @@ export {
   usage,
   runExecutable,
   parseArguments,
-  main3 as main
+  main4 as main
 };

@@ -11,7 +11,7 @@ import {
   requestPinnedNetworkAddress,
   resolveSafeNetworkTarget,
   safeFetch
-} from "../index-4sh2hh3t.js";
+} from "../index-e5fbsywq.js";
 import"../index-gh719d91.js";
 export {
   safeFetch,

@@ -10,7 +10,7 @@ import {
 import {
   FetchFailure,
   safeFetch
-} from "./index-4sh2hh3t.js";
+} from "./index-e5fbsywq.js";
 
 // src/clip/assets.ts
 import { createHash } from "crypto";
@@ -644,6 +644,10 @@ var blockedPattern = /(?:verify (?:that )?you are (?:a )?human|(?:complete|solve
 var blockedTitlePattern = /^(?:403(?: forbidden)?|access denied|request blocked|unusual traffic|verify (?:that )?you are (?:a )?human|human verification|captcha|security (?:check|verification)|attention required|just a moment(?:\.{3})?)$/i;
 var blockedContextPattern = /(?:\b(?:please )?(?:verify|confirm) (?:that )?you are (?:a )?human\b|\b(?:complete|solve) (?:the )?captcha\b|\b(?:you (?:do not|don't) have permission|you have been blocked)\b|\b(?:your|this) (?:request|access|ip(?: address)?) (?:has been|was|is) blocked\b|\bunusual traffic from your (?:computer )?network\b|\bautomated (?:queries|requests)\b|\b(?:before proceeding|to continue),? (?:please )?(?:verify|complete|enable)\b|\bcloudflare ray id\b)/i;
 var blockedStandaloneLinePattern = /(?:^|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:403(?: forbidden)?|access denied|request blocked|unusual traffic|verify (?:that )?you are (?:a )?human|captcha|security (?:check|verification))[.!]?[ \t]*(?:\r?\n|$)/i;
+var rateLimitSignalPattern = /\b(?:429(?: too many requests)?|too many requests|rate limit(?:ed| exceeded)?)\b/i;
+var rateLimitTitlePattern = /^(?:429(?: too many requests)?|too many requests|rate limit(?:ed| exceeded)?)$/i;
+var rateLimitStandaloneLinePattern = /(?:^|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:429(?: too many requests)?|too many requests|rate limit(?:ed| exceeded)?)[.!]?[ \t]*(?:\r?\n|$)/i;
+var rateLimitRetryContextPattern = /\b(?:please )?(?:(?:try|retry) again(?: later| in \d+)|wait (?:a moment|before retrying)|respect the retry-after header)\b/i;
 var articleDiscussionPattern = /(?:\bhow to\b|\btroubleshoot(?:ing)?\b|\b(?:this|the) (?:article|guide|tutorial)\b|\b(?:this|the) (?:article|guide|tutorial) explains?\b|\blearn (?:how|why)\b)/i;
 var MAX_BLOCKED_SHELL_CODE_UNITS = 4096;
 var MAX_BLOCKED_SHELL_WORDS = 160;
@@ -659,18 +663,38 @@ function looksLikeBlockedShell(content, title) {
 ${content}`;
   if (articleDiscussionPattern.test(boundedVisible))
     return false;
-  if (wordCount <= MAX_STANDALONE_BLOCKED_SHELL_WORDS && blockedStandaloneLinePattern.test(content))
+  if (wordCount <= MAX_STANDALONE_BLOCKED_SHELL_WORDS && (blockedStandaloneLinePattern.test(content) || rateLimitStandaloneLinePattern.test(content)))
     return true;
-  const exactGateTitle = blockedTitlePattern.test(normalizedTitle);
-  const hasBlockSignal = exactGateTitle || blockedPattern.test(content);
-  return hasBlockSignal && (exactGateTitle || blockedContextPattern.test(content));
+  const exactGateTitle = blockedTitlePattern.test(normalizedTitle) || rateLimitTitlePattern.test(normalizedTitle);
+  const rateLimitShell = rateLimitSignalPattern.test(content) && rateLimitRetryContextPattern.test(content);
+  const hasBlockSignal = exactGateTitle || blockedPattern.test(content) || rateLimitShell;
+  return hasBlockSignal && (exactGateTitle || blockedContextPattern.test(content) || rateLimitShell);
 }
 var authenticationGatePattern = /(?:\b(?:sign|log) in to (?:continue|read|view|see|access|comment|reply)\b|\blogin required\b|\bmembers? only\b|\bsubscriber-only\b|\bsubscribe to (?:continue|read)\b|\bthis content is private\b|\byou must be logged in\b)/i;
+var paywallCallToActionPattern = /\b(?:subscribe(?: now)? to (?:unlock (?:this|the) (?:article|story|content)|(?:keep|continue) reading)|create (?:an? |your )?account to (?:keep|continue) reading|register to (?:keep|continue) reading|sign up to (?:keep|continue) reading)\b/i;
+var paywallTitlePattern = /^(?:subscribe(?: now)? to (?:unlock (?:this|the) (?:article|story|content)|(?:keep|continue) reading)|create (?:an? |your )?account to (?:keep|continue) reading|register to (?:keep|continue) reading|sign up to (?:keep|continue) reading)[.!]?$/i;
+var paywallStandaloneLinePattern = /(?:^|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:subscribe(?: now)? to (?:unlock (?:this|the) (?:article|story|content)|(?:keep|continue) reading)|create (?:an? |your )?account to (?:keep|continue) reading|register to (?:keep|continue) reading|sign up to (?:keep|continue) reading)[.!]?[ \t]*(?:\r?\n|$)/i;
+var paywallDiscussionPattern = /\b(?:analy[sz](?:e|es|ed|ing)|discuss(?:es|ed|ing)?|examin(?:e|es|ed|ing)|quot(?:e|es|ed|ing)|stud(?:y|ies|ied|ying)|interface copy|wording|publishers? (?:sometimes )?(?:say|write|use))\b/i;
 var shellPattern = /(?:enable javascript|javascript is disabled|something went wrong|try reloading)/i;
 var xReplyGatePattern = /\bjoin\s+x\s+now\s+to\s+read\s+repl(?:y|ies)\b/i;
 var xCombinedAccountShellPattern = /\blog\s*in\s*sign\s*up\b/i;
 var loginShellPattern = /\blog\s*in\b/i;
 var signupShellPattern = /\bsign\s*up\b/i;
+function looksLikePaywallShell(content, title) {
+  if (content.length > MAX_BLOCKED_SHELL_CODE_UNITS)
+    return false;
+  const wordCount = countWords(content);
+  if (wordCount > MAX_BLOCKED_SHELL_WORDS)
+    return false;
+  const normalizedTitle = (title ?? "").slice(0, articleMetadataLimits.title).replace(/\s+/g, " ").trim();
+  if (paywallTitlePattern.test(normalizedTitle) || paywallStandaloneLinePattern.test(content))
+    return true;
+  if (wordCount > 48)
+    return false;
+  const boundedVisible = `${normalizedTitle}
+${content}`;
+  return paywallCallToActionPattern.test(boundedVisible) && !paywallDiscussionPattern.test(boundedVisible);
+}
 function isRenderedConversationAccessGate(content, platform) {
   if (authenticationGatePattern.test(content))
     return true;
@@ -681,13 +705,14 @@ function statusFor(content, title, scope, contentTruncated, renderedTextFallback
 ${content}`;
   if (looksLikeBlockedShell(content, title))
     return "blocked";
-  if (authenticationGatePattern.test(visible) && content.length < 1500)
+  const accessGate = authenticationGatePattern.test(visible) || looksLikePaywallShell(content, title);
+  if (accessGate && content.length < 1500)
     return "auth-required";
   if (shellPattern.test(visible) && content.length < 500)
     return "unsupported";
   if (content.trim().length < 40)
     return "unsupported";
-  if (authenticationGatePattern.test(visible))
+  if (accessGate)
     return "partial";
   if (contentTruncated || renderedTextFallback)
     return "partial";
@@ -695,7 +720,14 @@ ${content}`;
     return "partial";
   return "complete";
 }
-function qualityScore(article, status, wordCount, capturedItems, acquisition) {
+function extractionShowsAccessControl(extraction) {
+  if (extraction.status === "auth-required" || extraction.status === "blocked")
+    return true;
+  const { content, title } = extraction.article;
+  return looksLikeBlockedShell(content, title) || looksLikePaywallShell(content, title) || authenticationGatePattern.test(`${title ?? ""}
+${content}`);
+}
+function scoreExtraction(article, status, wordCount, capturedItems, acquisition) {
   const statusWeight = {
     complete: 5000,
     partial: 2000,
@@ -867,7 +899,7 @@ ${renderedConversation}
     canonicalUrl,
     platform,
     status,
-    score: qualityScore(article, status, wordCount, capturedItems, acquisition),
+    score: scoreExtraction(article, status, wordCount, capturedItems, acquisition),
     wordCount,
     expectedItems,
     capturedItems,
@@ -892,4 +924,4 @@ function chooseBestExtraction(candidates) {
   return best;
 }
 
-export { sniffImage, localizeAssets, countWords, canonicalizeUrl, extractPage, chooseBestExtraction };
+export { sniffImage, localizeAssets, countWords, canonicalizeUrl, extractionShowsAccessControl, scoreExtraction, extractPage, chooseBestExtraction };

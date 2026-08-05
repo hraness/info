@@ -19,10 +19,12 @@ import {
 import { networkInterfaces } from "os";
 class FetchFailure extends Error {
   code;
+  status;
   constructor(code, message, options) {
     super(message, options);
     this.name = "FetchFailure";
     this.code = code;
+    this.status = options?.status ?? null;
   }
 }
 var privateHostnameSuffixes = [".localhost", ".local", ".internal", ".home", ".lan"];
@@ -488,6 +490,22 @@ function createSafeFetch(dependencies = {}) {
   return async (url, options) => {
     const maxRedirects = options.maxRedirects ?? 8;
     const retries = options.retries ?? 2;
+    const acceptedStatuses = new Set(options.acceptStatuses ?? []);
+    if (acceptedStatuses.size > 8 || [...acceptedStatuses].some((status) => !Number.isInteger(status) || status < 400 || status > 599)) {
+      throw new FetchFailure("invalid-url", "accepted response statuses must contain at most eight HTTP 4xx/5xx integers");
+    }
+    const allowedRedirectOrigins = options.allowedRedirectOrigins === undefined ? null : new Set(options.allowedRedirectOrigins.map((origin) => {
+      let parsed;
+      try {
+        parsed = new URL(origin);
+      } catch (error) {
+        throw new FetchFailure("invalid-url", "allowed redirect origins must be absolute HTTP(S) origins", { cause: error });
+      }
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:" || parsed.username !== "" || parsed.password !== "" || parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== "" || parsed.href !== `${parsed.origin}/`) {
+        throw new FetchFailure("invalid-url", "allowed redirect origins must be canonical HTTP(S) origins");
+      }
+      return parsed.origin;
+    }));
     const deadline = Date.now() + options.timeoutMs;
     const originalUrl = new URL(url);
     let current = new URL(url);
@@ -549,31 +567,55 @@ function createSafeFetch(dependencies = {}) {
         throw new FetchFailure("network", `request failed: ${current.href}`, { cause: lastError });
       }
       if (response.status >= 300 && response.status < 400) {
+        if (options.redirect === "manual") {
+          try {
+            const location = response.headers.get("location");
+            response.cancel();
+            return {
+              bytes: new Uint8Array,
+              finalUrl: current,
+              status: response.status,
+              contentType: response.headers.get("content-type"),
+              etag: response.headers.get("etag"),
+              lastModified: response.headers.get("last-modified"),
+              location
+            };
+          } finally {
+            finalController?.abort();
+            if (finalTimeout !== null)
+              clearTimeout(finalTimeout);
+          }
+        }
         try {
           const location = response.headers.get("location");
           if (location === null)
             throw new FetchFailure("redirect", `HTTP ${response.status} omitted Location`);
           if (redirects === maxRedirects)
             throw new FetchFailure("redirect", `more than ${maxRedirects} redirects`);
+          let next;
           try {
-            current = new URL(location, current);
+            next = new URL(location, current);
           } catch (error) {
             throw new FetchFailure("redirect", `invalid redirect target: ${location}`, { cause: error });
           }
-          finalController?.abort();
-          response.cancel();
+          if (allowedRedirectOrigins !== null && !allowedRedirectOrigins.has(next.origin)) {
+            throw new FetchFailure("redirect", `redirect target origin is not allowed: ${next.origin}`);
+          }
+          current = next;
           continue;
         } finally {
+          finalController?.abort();
+          response.cancel();
           if (finalTimeout !== null)
             clearTimeout(finalTimeout);
         }
       }
-      if (response.status < 200 || response.status >= 300) {
+      if ((response.status < 200 || response.status >= 300) && !acceptedStatuses.has(response.status)) {
         if (finalTimeout !== null)
           clearTimeout(finalTimeout);
         finalController?.abort();
         response.cancel();
-        throw new FetchFailure("http", `HTTP ${response.status} for ${current.href}`);
+        throw new FetchFailure("http", `HTTP ${response.status} for ${current.href}`, { status: response.status });
       }
       try {
         const bytes = await beforeDeadline(readBounded(response, options.maxBytes), deadline, `response body timed out after ${options.timeoutMs}ms: ${current.href}`);
@@ -583,7 +625,8 @@ function createSafeFetch(dependencies = {}) {
           status: response.status,
           contentType: response.headers.get("content-type"),
           etag: response.headers.get("etag"),
-          lastModified: response.headers.get("last-modified")
+          lastModified: response.headers.get("last-modified"),
+          location: null
         };
       } catch (error) {
         if (finalController?.signal.aborted === true || error instanceof FetchFailure && error.code === "timeout") {

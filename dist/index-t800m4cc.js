@@ -2,7 +2,7 @@
 import {
   countWords,
   sniffImage
-} from "./index-0y58zcp8.js";
+} from "./index-f984hw45.js";
 import {
   slugify,
   yamlString
@@ -17,7 +17,7 @@ import {
 } from "./index-1xxnjn0d.js";
 import {
   safeFetch
-} from "./index-4sh2hh3t.js";
+} from "./index-e5fbsywq.js";
 import {
   BoundedByteBuffer
 } from "./index-gh719d91.js";

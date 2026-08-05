@@ -517,6 +517,10 @@ const blockedPattern = /(?:verify (?:that )?you are (?:a )?human|(?:complete|sol
 const blockedTitlePattern = /^(?:403(?: forbidden)?|access denied|request blocked|unusual traffic|verify (?:that )?you are (?:a )?human|human verification|captcha|security (?:check|verification)|attention required|just a moment(?:\.{3})?)$/i;
 const blockedContextPattern = /(?:\b(?:please )?(?:verify|confirm) (?:that )?you are (?:a )?human\b|\b(?:complete|solve) (?:the )?captcha\b|\b(?:you (?:do not|don't) have permission|you have been blocked)\b|\b(?:your|this) (?:request|access|ip(?: address)?) (?:has been|was|is) blocked\b|\bunusual traffic from your (?:computer )?network\b|\bautomated (?:queries|requests)\b|\b(?:before proceeding|to continue),? (?:please )?(?:verify|complete|enable)\b|\bcloudflare ray id\b)/i;
 const blockedStandaloneLinePattern = /(?:^|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:403(?: forbidden)?|access denied|request blocked|unusual traffic|verify (?:that )?you are (?:a )?human|captcha|security (?:check|verification))[.!]?[ \t]*(?:\r?\n|$)/i;
+const rateLimitSignalPattern = /\b(?:429(?: too many requests)?|too many requests|rate limit(?:ed| exceeded)?)\b/i;
+const rateLimitTitlePattern = /^(?:429(?: too many requests)?|too many requests|rate limit(?:ed| exceeded)?)$/i;
+const rateLimitStandaloneLinePattern = /(?:^|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:429(?: too many requests)?|too many requests|rate limit(?:ed| exceeded)?)[.!]?[ \t]*(?:\r?\n|$)/i;
+const rateLimitRetryContextPattern = /\b(?:please )?(?:(?:try|retry) again(?: later| in \d+)|wait (?:a moment|before retrying)|respect the retry-after header)\b/i;
 const articleDiscussionPattern = /(?:\bhow to\b|\btroubleshoot(?:ing)?\b|\b(?:this|the) (?:article|guide|tutorial)\b|\b(?:this|the) (?:article|guide|tutorial) explains?\b|\blearn (?:how|why)\b)/i;
 const MAX_BLOCKED_SHELL_CODE_UNITS = 4_096;
 const MAX_BLOCKED_SHELL_WORDS = 160;
@@ -532,18 +536,35 @@ function looksLikeBlockedShell(content: string, title: string | null): boolean {
   if (articleDiscussionPattern.test(boundedVisible)) return false;
   if (
     wordCount <= MAX_STANDALONE_BLOCKED_SHELL_WORDS
-    && blockedStandaloneLinePattern.test(content)
+    && (blockedStandaloneLinePattern.test(content) || rateLimitStandaloneLinePattern.test(content))
   ) return true;
-  const exactGateTitle = blockedTitlePattern.test(normalizedTitle);
-  const hasBlockSignal = exactGateTitle || blockedPattern.test(content);
-  return hasBlockSignal && (exactGateTitle || blockedContextPattern.test(content));
+  const exactGateTitle = blockedTitlePattern.test(normalizedTitle) || rateLimitTitlePattern.test(normalizedTitle);
+  const rateLimitShell = rateLimitSignalPattern.test(content) && rateLimitRetryContextPattern.test(content);
+  const hasBlockSignal = exactGateTitle || blockedPattern.test(content) || rateLimitShell;
+  return hasBlockSignal && (exactGateTitle || blockedContextPattern.test(content) || rateLimitShell);
 }
 const authenticationGatePattern = /(?:\b(?:sign|log) in to (?:continue|read|view|see|access|comment|reply)\b|\blogin required\b|\bmembers? only\b|\bsubscriber-only\b|\bsubscribe to (?:continue|read)\b|\bthis content is private\b|\byou must be logged in\b)/i;
+const paywallCallToActionPattern = /\b(?:subscribe(?: now)? to (?:unlock (?:this|the) (?:article|story|content)|(?:keep|continue) reading)|create (?:an? |your )?account to (?:keep|continue) reading|register to (?:keep|continue) reading|sign up to (?:keep|continue) reading)\b/i;
+const paywallTitlePattern = /^(?:subscribe(?: now)? to (?:unlock (?:this|the) (?:article|story|content)|(?:keep|continue) reading)|create (?:an? |your )?account to (?:keep|continue) reading|register to (?:keep|continue) reading|sign up to (?:keep|continue) reading)[.!]?$/i;
+const paywallStandaloneLinePattern = /(?:^|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:subscribe(?: now)? to (?:unlock (?:this|the) (?:article|story|content)|(?:keep|continue) reading)|create (?:an? |your )?account to (?:keep|continue) reading|register to (?:keep|continue) reading|sign up to (?:keep|continue) reading)[.!]?[ \t]*(?:\r?\n|$)/i;
+const paywallDiscussionPattern = /\b(?:analy[sz](?:e|es|ed|ing)|discuss(?:es|ed|ing)?|examin(?:e|es|ed|ing)|quot(?:e|es|ed|ing)|stud(?:y|ies|ied|ying)|interface copy|wording|publishers? (?:sometimes )?(?:say|write|use))\b/i;
 const shellPattern = /(?:enable javascript|javascript is disabled|something went wrong|try reloading)/i;
 const xReplyGatePattern = /\bjoin\s+x\s+now\s+to\s+read\s+repl(?:y|ies)\b/i;
 const xCombinedAccountShellPattern = /\blog\s*in\s*sign\s*up\b/i;
 const loginShellPattern = /\blog\s*in\b/i;
 const signupShellPattern = /\bsign\s*up\b/i;
+
+/** Recognize compact paywall calls to action without treating quoted interface language as a gate. */
+function looksLikePaywallShell(content: string, title: string | null): boolean {
+  if (content.length > MAX_BLOCKED_SHELL_CODE_UNITS) return false;
+  const wordCount = countWords(content);
+  if (wordCount > MAX_BLOCKED_SHELL_WORDS) return false;
+  const normalizedTitle = (title ?? "").slice(0, articleMetadataLimits.title).replace(/\s+/g, " ").trim();
+  if (paywallTitlePattern.test(normalizedTitle) || paywallStandaloneLinePattern.test(content)) return true;
+  if (wordCount > 48) return false;
+  const boundedVisible = `${normalizedTitle}\n${content}`;
+  return paywallCallToActionPattern.test(boundedVisible) && !paywallDiscussionPattern.test(boundedVisible);
+}
 
 function isRenderedConversationAccessGate(content: string, platform: Platform): boolean {
   if (authenticationGatePattern.test(content)) return true;
@@ -564,10 +585,11 @@ function statusFor(
 ): CaptureStatus {
   const visible = `${title ?? ""}\n${content}`;
   if (looksLikeBlockedShell(content, title)) return "blocked";
-  if (authenticationGatePattern.test(visible) && content.length < 1_500) return "auth-required";
+  const accessGate = authenticationGatePattern.test(visible) || looksLikePaywallShell(content, title);
+  if (accessGate && content.length < 1_500) return "auth-required";
   if (shellPattern.test(visible) && content.length < 500) return "unsupported";
   if (content.trim().length < 40) return "unsupported";
-  if (authenticationGatePattern.test(visible)) return "partial";
+  if (accessGate) return "partial";
   if (contentTruncated || renderedTextFallback) return "partial";
   // Only structured adapters can prove traversal completeness. A rendered DOM,
   // saved page, or cookie-authenticated HTML can omit pagination invisibly.
@@ -575,7 +597,16 @@ function statusFor(
   return "complete";
 }
 
-function qualityScore(
+/** Preserve access-control evidence even when useful surrounding content makes the extraction partial. */
+export function extractionShowsAccessControl(extraction: ExtractedPage): boolean {
+  if (extraction.status === "auth-required" || extraction.status === "blocked") return true;
+  const { content, title } = extraction.article;
+  return looksLikeBlockedShell(content, title)
+    || looksLikePaywallShell(content, title)
+    || authenticationGatePattern.test(`${title ?? ""}\n${content}`);
+}
+
+export function scoreExtraction(
   article: Article,
   status: CaptureStatus,
   wordCount: number,
@@ -807,7 +838,7 @@ export async function extractPage(
     canonicalUrl,
     platform,
     status,
-    score: qualityScore(article, status, wordCount, capturedItems, acquisition),
+    score: scoreExtraction(article, status, wordCount, capturedItems, acquisition),
     wordCount,
     expectedItems,
     capturedItems,

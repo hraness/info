@@ -105,6 +105,9 @@
       "@hraness/kb/source-inbox": [
         "./src/source-inbox.ts"
       ],
+      "@hraness/kb/url-intelligence": [
+        "./src/url-intelligence.ts"
+      ],
       "@hraness/kb/workflow": [
         "./src/workflow.ts"
       ],

@@ -1157,6 +1157,124 @@ process.once("SIGINT", close);
     expect(cancelled).toBeTrue();
   });
 
+  test("returns a bounded manual redirect without resolving or requesting its target", async () => {
+    const resolved: string[] = [];
+    let transportCalls = 0;
+    let cancelled = false;
+    const fetch = createDeterministicSafeFetch({
+      resolveHostname: (hostname) => {
+        resolved.push(hostname);
+        return Promise.resolve([publicAddress]);
+      },
+      transport: () => {
+        transportCalls += 1;
+        return Promise.resolve(networkResponse(302, {
+          headers: { Location: "https://archive.ph/20260801000000/https://example.com/" },
+          onCancel: () => {
+            cancelled = true;
+          },
+        }));
+      },
+    });
+
+    const result = await fetch(
+      new URL("https://archive.ph/newest/https://example.com/"),
+      fetchOptions({ redirect: "manual" }),
+    );
+    expect(result.status).toBe(302);
+    expect(result.location).toBe("https://archive.ph/20260801000000/https://example.com/");
+    expect(result.bytes).toHaveLength(0);
+    expect(resolved).toEqual(["archive.ph"]);
+    expect(transportCalls).toBe(1);
+    expect(cancelled).toBeTrue();
+  });
+
+  test("returns a missing manual Location for provider-specific classification", async () => {
+    let cancelled = false;
+    const fetch = createDeterministicSafeFetch({
+      resolveHostname: () => Promise.resolve([publicAddress]),
+      transport: () => Promise.resolve(networkResponse(302, {
+        onCancel: () => {
+          cancelled = true;
+        },
+      })),
+    });
+
+    const result = await fetch(
+      new URL("https://archive.ph/newest/https://example.com/"),
+      fetchOptions({ redirect: "manual" }),
+    );
+    expect(result.status).toBe(302);
+    expect(result.location).toBeNull();
+    expect(result.bytes).toHaveLength(0);
+    expect(cancelled).toBeTrue();
+  });
+
+  test("returns an explicitly accepted bounded 404 for provider-specific interpretation", async () => {
+    const fetch = createDeterministicSafeFetch({
+      resolveHostname: () => Promise.resolve([publicAddress]),
+      transport: () => Promise.resolve(networkResponse(404, {
+        headers: { "Content-Type": "text/plain" },
+        chunks: [new TextEncoder().encode("not archived")],
+      })),
+    });
+
+    const result = await fetch(
+      new URL("https://archive.ph/newest/https://example.com/missing"),
+      fetchOptions({ acceptStatuses: [404] }),
+    );
+    expect(result.status).toBe(404);
+    expect(new TextDecoder().decode(result.bytes)).toBe("not archived");
+  });
+
+  test("rejects followed redirects outside an exact caller allowlist before DNS", async () => {
+    const resolved: string[] = [];
+    let cancelled = false;
+    const fetch = createDeterministicSafeFetch({
+      resolveHostname: (hostname) => {
+        resolved.push(hostname);
+        return Promise.resolve([publicAddress]);
+      },
+      transport: () => Promise.resolve(networkResponse(302, {
+        headers: { Location: "https://attacker.example/archive" },
+        onCancel: () => {
+          cancelled = true;
+        },
+      })),
+    });
+
+    const failure = await rejectedFetch(fetch(
+      new URL("https://archive.ph/snapshot"),
+      fetchOptions({ allowedRedirectOrigins: ["https://archive.ph/"] }),
+    ));
+    expect(failure.code).toBe("redirect");
+    expect(resolved).toEqual(["archive.ph"]);
+    expect(cancelled).toBeTrue();
+  });
+
+  test("rejects malformed accepted statuses and redirect origins before transport", async () => {
+    let transported = false;
+    const fetch = createDeterministicSafeFetch({
+      resolveHostname: () => Promise.resolve([publicAddress]),
+      transport: () => {
+        transported = true;
+        return Promise.resolve(networkResponse(200));
+      },
+    });
+
+    const statusFailure = await rejectedFetch(fetch(
+      new URL("https://archive.ph/"),
+      fetchOptions({ acceptStatuses: [302] }),
+    ));
+    const originFailure = await rejectedFetch(fetch(
+      new URL("https://archive.ph/"),
+      fetchOptions({ allowedRedirectOrigins: ["https://archive.ph/path"] }),
+    ));
+    expect(statusFailure.code).toBe("invalid-url");
+    expect(originFailure.code).toBe("invalid-url");
+    expect(transported).toBeFalse();
+  });
+
   test("never forwards a flattened Cookie header across even same-origin redirects", async () => {
     const observed: Array<{ readonly url: string; readonly cookie: string | null }> = [];
     const fetch = createDeterministicSafeFetch({

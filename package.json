@@ -1,6 +1,6 @@
 {
   "name": "@hraness/kb",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "A knowledge base for coding agents, built from Markdown, backlinks, semantic search, and Git context.",
   "license": "MIT",
   "type": "module",
@@ -38,6 +38,7 @@
     "./src/search.ts",
     "./src/semantic.ts",
     "./src/source-inbox.ts",
+    "./src/url-intelligence.ts",
     "./src/workflow.ts",
     "./src/workflows/decision-context.ts",
     "./src/workflows/explain-change.ts",
@@ -195,6 +196,10 @@
       "types": "./src/source-inbox.ts",
       "import": "./dist/source-inbox.js"
     },
+    "./url-intelligence": {
+      "types": "./src/url-intelligence.ts",
+      "import": "./dist/url-intelligence.js"
+    },
     "./workflow": {
       "types": "./src/workflow.ts",
       "import": "./dist/workflow.js"
@@ -229,8 +234,10 @@
     "src/attachments.ts",
     "src/benchmark.ts",
     "src/capture.ts",
+    "src/url-intelligence.ts",
     "src/cli.ts",
     "src/clip/acquire.ts",
+    "src/clip/archive-today.ts",
     "src/clip/args.ts",
     "src/clip/assets.ts",
     "src/clip/bounded-byte-buffer.ts",
@@ -249,6 +256,16 @@
     "src/clip/platforms.ts",
     "src/clip/structured.ts",
     "src/clip/terminal.ts",
+    "src/clip/metadata-search.ts",
+    "src/clip/url-intelligence.ts",
+    "src/clip/url-metadata.ts",
+    "src/clip/url-metadata-backfill.ts",
+    "src/clip/url-metadata-cli.ts",
+    "src/clip/metadata-search-tool/.gitignore",
+    "src/clip/metadata-search-tool/Cargo.toml",
+    "src/clip/metadata-search-tool/Cargo.lock",
+    "src/clip/metadata-search-tool/runner.ts",
+    "src/clip/metadata-search-tool/src/main.rs",
     "src/git.ts",
     "src/evaluation-redaction.ts",
     "src/evaluation-kb.ts",
@@ -289,11 +306,14 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun -e 'await (await import(\"node:fs/promises\")).rm(\"./dist\", { recursive: true, force: true })' && bun build ./src/index.ts ./src/agent-context.ts ./src/agent-guide-audit.ts ./src/attachments.ts ./src/authoring.ts ./src/benchmark.ts ./src/clip/browser-profiles.ts ./src/capture.ts ./src/cli.ts ./src/clip/acquire.ts ./src/clip/args.ts ./src/clip/bounded-byte-buffer.ts ./src/clip/cli.ts ./src/clip/cookies.ts ./src/clip/doctor.ts ./src/clip/network.ts ./src/clip/network-proxy.ts ./src/clip/persist.ts ./src/clip/terminal.ts ./src/evaluation.ts ./src/evaluation-kb.ts ./src/git.ts ./src/graph.ts ./src/navigation.ts ./src/pdf.ts ./src/percolate.ts ./src/query.ts ./src/repository-memory.ts ./src/sdk.ts ./src/search.ts ./src/semantic.ts ./src/source-inbox.ts ./src/workflow.ts ./src/workflows/index.ts ./src/workflows/decision-context.ts ./src/workflows/explain-change.ts ./src/workflows/plan-radar.ts ./src/clip/defuddle-worker.ts --outdir ./dist --root ./src --target bun --format esm --splitting --packages external",
+    "build": "bun -e 'await (await import(\"node:fs/promises\")).rm(\"./dist\", { recursive: true, force: true })' && bun build ./src/index.ts ./src/agent-context.ts ./src/agent-guide-audit.ts ./src/attachments.ts ./src/authoring.ts ./src/benchmark.ts ./src/clip/browser-profiles.ts ./src/capture.ts ./src/cli.ts ./src/clip/acquire.ts ./src/clip/args.ts ./src/clip/bounded-byte-buffer.ts ./src/clip/cli.ts ./src/clip/cookies.ts ./src/clip/doctor.ts ./src/clip/network.ts ./src/clip/network-proxy.ts ./src/clip/persist.ts ./src/clip/terminal.ts ./src/evaluation.ts ./src/evaluation-kb.ts ./src/git.ts ./src/graph.ts ./src/navigation.ts ./src/pdf.ts ./src/percolate.ts ./src/query.ts ./src/repository-memory.ts ./src/sdk.ts ./src/search.ts ./src/semantic.ts ./src/source-inbox.ts ./src/url-intelligence.ts ./src/workflow.ts ./src/workflows/index.ts ./src/workflows/decision-context.ts ./src/workflows/explain-change.ts ./src/workflows/plan-radar.ts ./src/clip/defuddle-worker.ts --outdir ./dist --root ./src --target bun --format esm --splitting --packages external",
     "typecheck": "tsc --noEmit",
     "test": "bun test ./src",
+    "url-metadata:backfill": "bun src/cli.ts url-metadata backfill",
+    "url-metadata:tool:build": "bun run src/clip/metadata-search-tool/runner.ts build",
+    "url-metadata:tool:check": "bun run src/clip/metadata-search-tool/runner.ts check",
     "test:package": "bun run ./scripts/package-smoke.ts",
-    "check": "bun run typecheck && bun run build && bun run test:package && bun run test",
+    "check": "bun run typecheck && bun run build && bun run test:package && bun run test && bun run url-metadata:tool:check",
     "prepack": "bun run check"
   },
   "dependencies": {

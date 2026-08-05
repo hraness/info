@@ -33,11 +33,13 @@ export type FetchFailureCode =
 
 export class FetchFailure extends Error {
   readonly code: FetchFailureCode;
+  readonly status: number | null;
 
-  constructor(code: FetchFailureCode, message: string, options?: ErrorOptions) {
+  constructor(code: FetchFailureCode, message: string, options?: ErrorOptions & { readonly status?: number }) {
     super(message, options);
     this.name = "FetchFailure";
     this.code = code;
+    this.status = options?.status ?? null;
   }
 }
 
@@ -51,6 +53,15 @@ export type SafeFetchOptions = {
   readonly accept?: string;
   readonly retries?: number;
   readonly maxRedirects?: number;
+  /** Return one bounded 3xx response without following its Location header. */
+  readonly redirect?: "follow" | "manual";
+  /**
+   * Non-success response statuses that the caller can interpret without
+   * weakening redirect handling. Only bounded 4xx/5xx responses are eligible.
+   */
+  readonly acceptStatuses?: readonly number[];
+  /** Exact origins to which a followed redirect may move. */
+  readonly allowedRedirectOrigins?: readonly string[];
 };
 
 export type SafeFetchResult = {
@@ -60,6 +71,7 @@ export type SafeFetchResult = {
   readonly contentType: string | null;
   readonly etag: string | null;
   readonly lastModified: string | null;
+  readonly location?: string | null;
 };
 
 export type ResolvedNetworkAddress = {
@@ -747,6 +759,35 @@ export function createSafeFetch(
   return async (url, options) => {
     const maxRedirects = options.maxRedirects ?? 8;
     const retries = options.retries ?? 2;
+    const acceptedStatuses = new Set(options.acceptStatuses ?? []);
+    if (
+      acceptedStatuses.size > 8
+      || [...acceptedStatuses].some((status) => !Number.isInteger(status) || status < 400 || status > 599)
+    ) {
+      throw new FetchFailure("invalid-url", "accepted response statuses must contain at most eight HTTP 4xx/5xx integers");
+    }
+    const allowedRedirectOrigins = options.allowedRedirectOrigins === undefined
+      ? null
+      : new Set(options.allowedRedirectOrigins.map((origin) => {
+          let parsed: URL;
+          try {
+            parsed = new URL(origin);
+          } catch (error) {
+            throw new FetchFailure("invalid-url", "allowed redirect origins must be absolute HTTP(S) origins", { cause: error });
+          }
+          if (
+            (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+            || parsed.username !== ""
+            || parsed.password !== ""
+            || parsed.pathname !== "/"
+            || parsed.search !== ""
+            || parsed.hash !== ""
+            || parsed.href !== `${parsed.origin}/`
+          ) {
+            throw new FetchFailure("invalid-url", "allowed redirect origins must be canonical HTTP(S) origins");
+          }
+          return parsed.origin;
+        }));
     const deadline = Date.now() + options.timeoutMs;
     const originalUrl = new URL(url);
     let current = new URL(url);
@@ -819,28 +860,51 @@ export function createSafeFetch(
       }
 
       if (response.status >= 300 && response.status < 400) {
+        if (options.redirect === "manual") {
+          try {
+            const location = response.headers.get("location");
+            response.cancel();
+            return {
+              bytes: new Uint8Array(),
+              finalUrl: current,
+              status: response.status,
+              contentType: response.headers.get("content-type"),
+              etag: response.headers.get("etag"),
+              lastModified: response.headers.get("last-modified"),
+              location,
+            };
+          } finally {
+            finalController?.abort();
+            if (finalTimeout !== null) clearTimeout(finalTimeout);
+          }
+        }
         try {
           const location = response.headers.get("location");
           if (location === null) throw new FetchFailure("redirect", `HTTP ${response.status} omitted Location`);
           if (redirects === maxRedirects) throw new FetchFailure("redirect", `more than ${maxRedirects} redirects`);
+          let next: URL;
           try {
-            current = new URL(location, current);
+            next = new URL(location, current);
           } catch (error) {
             throw new FetchFailure("redirect", `invalid redirect target: ${location}`, { cause: error });
           }
-          finalController?.abort();
-          response.cancel();
+          if (allowedRedirectOrigins !== null && !allowedRedirectOrigins.has(next.origin)) {
+            throw new FetchFailure("redirect", `redirect target origin is not allowed: ${next.origin}`);
+          }
+          current = next;
           continue;
         } finally {
+          finalController?.abort();
+          response.cancel();
           if (finalTimeout !== null) clearTimeout(finalTimeout);
         }
       }
 
-      if (response.status < 200 || response.status >= 300) {
+      if ((response.status < 200 || response.status >= 300) && !acceptedStatuses.has(response.status)) {
         if (finalTimeout !== null) clearTimeout(finalTimeout);
         finalController?.abort();
         response.cancel();
-        throw new FetchFailure("http", `HTTP ${response.status} for ${current.href}`);
+        throw new FetchFailure("http", `HTTP ${response.status} for ${current.href}`, { status: response.status });
       }
       try {
         const bytes = await beforeDeadline(
@@ -855,6 +919,7 @@ export function createSafeFetch(
           contentType: response.headers.get("content-type"),
           etag: response.headers.get("etag"),
           lastModified: response.headers.get("last-modified"),
+          location: null,
         };
       } catch (error) {
         if (finalController?.signal.aborted === true || (error instanceof FetchFailure && error.code === "timeout")) {

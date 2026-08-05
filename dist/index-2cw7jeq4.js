@@ -1,18 +1,24 @@
 // @bun
 import {
+  acquireArchiveTodaySnapshot,
+  discoverArchiveTodaySnapshot
+} from "./index-tp2p17gt.js";
+import {
   canonicalizeUrl,
   chooseBestExtraction,
   countWords,
   extractPage,
+  extractionShowsAccessControl,
   localizeAssets,
+  scoreExtraction,
   sniffImage
-} from "./index-0y58zcp8.js";
+} from "./index-f984hw45.js";
 import {
   adapterCapabilities,
   inspectClipEnvironment,
   renderAdapterCapabilities,
   renderDoctorReport
-} from "./index-0kv488m1.js";
+} from "./index-h2a142gc.js";
 import {
   acquireBrowser,
   acquireCookieHttp,
@@ -20,7 +26,7 @@ import {
   acquireFile,
   acquireHttp,
   assertSafePersistentProfile
-} from "./index-s3vk4e6j.js";
+} from "./index-bt118a7q.js";
 import {
   CONTENT_REWRITE_TRUNCATION_WARNING,
   buildClipMarkdown,
@@ -34,7 +40,7 @@ import {
 } from "./index-hgve9rh2.js";
 import {
   startNetworkProxy
-} from "./index-7qhzw38d.js";
+} from "./index-w2zc0vwa.js";
 import {
   abortCaptureBundle,
   beginCaptureBundle,
@@ -62,9 +68,10 @@ import {
   renderNetscapeCookieJar
 } from "./index-84x0vjjp.js";
 import {
+  FetchFailure,
   decodeBytes,
   safeFetch
-} from "./index-4sh2hh3t.js";
+} from "./index-e5fbsywq.js";
 import {
   BoundedByteBuffer
 } from "./index-gh719d91.js";
@@ -1706,7 +1713,90 @@ function chooseCaptureExtraction(candidates, structuredCapture) {
   }
   return chooseBestExtraction(candidates);
 }
-async function tryAcquisition(method, acquire, scope, timeoutMs, extractor, candidates, attempts) {
+function authoritativeStructuredExtraction(structuredCapture) {
+  const extraction = structuredCapture?.extraction;
+  return extraction !== undefined && (extraction.acquisition.method === "hacker-news-api" || extraction.acquisition.method === "bluesky-api") && (extraction.status === "complete" || extraction.status === "partial");
+}
+function shouldTryArchiveFallback(options, candidates, structuredCapture) {
+  if (options.mode !== "auto" && options.mode !== "http" || options.currentTab)
+    return false;
+  if (authoritativeStructuredExtraction(structuredCapture))
+    return false;
+  const best = chooseBestExtraction(candidates);
+  return best === null || best.status !== "complete" && best.status !== "partial" || best.status === "partial" && best.wordCount < 60 && best.capturedItems === 0;
+}
+var archiveBypassHttpStatuses = new Set([401, 402, 403, 407, 423, 429, 451]);
+function recordArchiveFallbackDenial(denials, extraction) {
+  if (extractionShowsAccessControl(extraction))
+    denials.add("access-control response");
+}
+function recordArchiveFallbackErrorDenial(denials, error) {
+  if (error instanceof FetchFailure && error.status !== null && archiveBypassHttpStatuses.has(error.status)) {
+    denials.add("access-control or rate-limit response");
+  }
+}
+function archiveDiscoveryAttempt(discovery) {
+  switch (discovery.status) {
+    case "found":
+      return { method: "archive-is-discovery", outcome: "succeeded", message: "found one exact existing snapshot" };
+    case "not-found":
+      return { method: "archive-is-discovery", outcome: "skipped", message: "no exact existing snapshot was found" };
+    case "throttled":
+      return { method: "archive-is-discovery", outcome: "failed", message: "provider throttled the read-only lookup" };
+    case "unavailable":
+      return { method: "archive-is-discovery", outcome: "failed", message: `provider lookup unavailable (${discovery.reason})` };
+  }
+}
+async function tryArchiveFallback(options) {
+  let discovery;
+  try {
+    discovery = await options.discover(options.sourceUrl, {
+      now: options.now,
+      timeoutMs: options.captureOptions.timeoutMs,
+      maxBytes: options.captureOptions.maxHtmlBytes,
+      userAgent: options.captureOptions.userAgent
+    });
+  } catch (error) {
+    options.attempts.push({ method: "archive-is-discovery", outcome: "failed", message: safeAttemptMessage(error) });
+    return;
+  }
+  options.attempts.push(archiveDiscoveryAttempt(discovery));
+  if (discovery.status !== "found")
+    return;
+  try {
+    const acquisition = await options.acquire(options.sourceUrl, discovery.snapshot.url, {
+      now: options.now,
+      timeoutMs: options.captureOptions.timeoutMs,
+      maxBytes: options.captureOptions.maxHtmlBytes,
+      userAgent: options.captureOptions.userAgent
+    });
+    const extracted = await options.extractor(acquisition, options.scope, options.captureOptions.timeoutMs);
+    if (extracted === null) {
+      options.attempts.push({ method: "archive-is", outcome: "failed", message: "snapshot yielded no extractable content" });
+      return;
+    }
+    const warning = `Captured an Archive.today snapshot from ${discovery.snapshot.capturedAt}; it may differ from the current source.`;
+    const archivedStatus = extracted.status === "complete" ? "partial" : extracted.status;
+    const archived = {
+      ...extracted,
+      canonicalUrl: new URL(options.sourceUrl),
+      platform: options.platform,
+      status: archivedStatus,
+      score: scoreExtraction(extracted.article, archivedStatus, extracted.wordCount, extracted.capturedItems, acquisition),
+      warnings: Object.freeze([...extracted.warnings, warning]),
+      acquisition
+    };
+    options.candidates.push(archived);
+    options.attempts.push({
+      method: "archive-is",
+      outcome: "succeeded",
+      message: `${archived.status}; ${archived.wordCount} words; ${archived.capturedItems} items`
+    });
+  } catch (error) {
+    options.attempts.push({ method: "archive-is", outcome: "failed", message: safeAttemptMessage(error) });
+  }
+}
+async function tryAcquisition(method, acquire, scope, timeoutMs, extractor, candidates, attempts, archiveFallbackDenials) {
   try {
     const acquisition = await acquire();
     const extracted = await extractor(acquisition, scope, timeoutMs);
@@ -1715,6 +1805,7 @@ async function tryAcquisition(method, acquire, scope, timeoutMs, extractor, cand
       return acquisition;
     }
     candidates.push(extracted);
+    recordArchiveFallbackDenial(archiveFallbackDenials, extracted);
     attempts.push({
       method: acquisition.method,
       outcome: "succeeded",
@@ -1722,6 +1813,7 @@ async function tryAcquisition(method, acquire, scope, timeoutMs, extractor, cand
     });
     return acquisition;
   } catch (error) {
+    recordArchiveFallbackErrorDenial(archiveFallbackDenials, error);
     attempts.push({ method, outcome: "failed", message: safeAttemptMessage(error) });
     return null;
   }
@@ -1908,6 +2000,8 @@ async function runCapture(rawOptions, dependencies = {}) {
     acquireCookieRecords: dependencies.acquireCookieRecords ?? acquireCookieRecords,
     acquireBrowser: dependencies.acquireBrowser ?? acquireBrowser,
     acquirePublicStructured: dependencies.acquirePublicStructured ?? acquirePublicStructured,
+    discoverArchiveTodaySnapshot: dependencies.discoverArchiveTodaySnapshot ?? discoverArchiveTodaySnapshot,
+    acquireArchiveTodaySnapshot: dependencies.acquireArchiveTodaySnapshot ?? acquireArchiveTodaySnapshot,
     extractPage: dependencies.extractPage ?? extractPage,
     localizeAssets: dependencies.localizeAssets ?? localizeAssets,
     captureMedia: dependencies.captureMedia ?? captureMedia,
@@ -1937,6 +2031,7 @@ async function runCapture(rawOptions, dependencies = {}) {
     const options = { ...resolvedOptions, scope };
     const candidates = [];
     const attempts = [];
+    const archiveFallbackDenials = new Set;
     const browserOperationalWarnings = [];
     let structuredCapture = null;
     const browserScreenshots = new Map;
@@ -1948,23 +2043,24 @@ async function runCapture(rawOptions, dependencies = {}) {
     } else if (eagerBrowserRequested && options.browserProfile !== undefined && options.browserProfileOwnership !== "owned") {
       browserOperationalWarnings.push("A selected browser profile was exercised even if that candidate was not selected; a path-backed persistent profile may have been updated by page activity.");
     }
-    const eagerBrowser = eagerBrowserRequested ? tryAcquisition(options.browserLive ? "browser-live" : options.cdp === undefined ? "browser" : "browser-cdp", () => deps.acquireBrowser(options, browserTemporaryDirectory, false), scope, options.timeoutMs, deps.extractPage, eagerBrowserCandidates, eagerBrowserAttempts) : null;
+    const eagerBrowser = eagerBrowserRequested ? tryAcquisition(options.browserLive ? "browser-live" : options.cdp === undefined ? "browser" : "browser-cdp", () => deps.acquireBrowser(options, browserTemporaryDirectory, false), scope, options.timeoutMs, deps.extractPage, eagerBrowserCandidates, eagerBrowserAttempts, archiveFallbackDenials) : null;
     if (options.currentTab) {
       if (currentBrowser === null)
         throw new Error("current browser acquisition did not produce a page");
-      const browser = await tryAcquisition(options.browserLive ? "browser-live-current" : "browser-cdp-current", () => Promise.resolve(currentBrowser), scope, options.timeoutMs, deps.extractPage, candidates, attempts);
+      const browser = await tryAcquisition(options.browserLive ? "browser-live-current" : "browser-cdp-current", () => Promise.resolve(currentBrowser), scope, options.timeoutMs, deps.extractPage, candidates, attempts, archiveFallbackDenials);
       if (browser !== null)
         browserOperationalWarnings.push(...browser.warnings);
       if (browser?.screenshotPath !== undefined)
         browserScreenshots.set(browser, browser.screenshotPath);
     } else if (options.mode === "file") {
-      await tryAcquisition("file", () => deps.acquireFile(options), scope, options.timeoutMs, deps.extractPage, candidates, attempts);
+      await tryAcquisition("file", () => deps.acquireFile(options), scope, options.timeoutMs, deps.extractPage, candidates, attempts, archiveFallbackDenials);
     } else {
       if (options.mode === "auto" || options.mode === "http") {
         try {
           structuredCapture = await deps.acquirePublicStructured(options);
           if (structuredCapture !== null) {
             candidates.push(structuredCapture.extraction);
+            recordArchiveFallbackDenial(archiveFallbackDenials, structuredCapture.extraction);
             attempts.push({
               method: structuredCapture.extraction.acquisition.method,
               outcome: "succeeded",
@@ -1974,11 +2070,12 @@ async function runCapture(rawOptions, dependencies = {}) {
             attempts.push({ method: "public-api", outcome: "skipped", message: "no stable public structured adapter" });
           }
         } catch (error) {
+          recordArchiveFallbackErrorDenial(archiveFallbackDenials, error);
           attempts.push({ method: "public-api", outcome: "failed", message: safeAttemptMessage(error) });
         }
-        await tryAcquisition("http", () => deps.acquireHttp(options), scope, options.timeoutMs, deps.extractPage, candidates, attempts);
+        await tryAcquisition("http", () => deps.acquireHttp(options), scope, options.timeoutMs, deps.extractPage, candidates, attempts, archiveFallbackDenials);
         if (options.cookieSources.length > 0 || options.cookiesFile !== undefined) {
-          await tryAcquisition("cookie-http", () => deps.acquireCookieHttp(options), scope, options.timeoutMs, deps.extractPage, candidates, attempts);
+          await tryAcquisition("cookie-http", () => deps.acquireCookieHttp(options), scope, options.timeoutMs, deps.extractPage, candidates, attempts, archiveFallbackDenials);
         }
       }
       if (eagerBrowser !== null) {
@@ -1995,11 +2092,33 @@ async function runCapture(rawOptions, dependencies = {}) {
         } else if (options.browserProfile !== undefined && options.browserProfileOwnership !== "owned") {
           browserOperationalWarnings.push("A selected browser profile was exercised even if that candidate was not selected; a path-backed persistent profile may have been updated by page activity.");
         }
-        const browser = await tryAcquisition(options.browserLive ? "browser-live" : options.cdp === undefined ? "browser" : "browser-cdp", () => deps.acquireBrowser(options, browserTemporaryDirectory, false), scope, options.timeoutMs, deps.extractPage, candidates, attempts);
+        const browser = await tryAcquisition(options.browserLive ? "browser-live" : options.cdp === undefined ? "browser" : "browser-cdp", () => deps.acquireBrowser(options, browserTemporaryDirectory, false), scope, options.timeoutMs, deps.extractPage, candidates, attempts, archiveFallbackDenials);
         if (browser !== null)
           browserOperationalWarnings.push(...browser.warnings);
         if (browser?.screenshotPath !== undefined)
           browserScreenshots.set(browser, browser.screenshotPath);
+      }
+    }
+    if (shouldTryArchiveFallback(options, candidates, structuredCapture)) {
+      if (archiveFallbackDenials.size > 0) {
+        attempts.push({
+          method: "archive-is-discovery",
+          outcome: "skipped",
+          message: `archive fallback disabled after ${[...archiveFallbackDenials].sort().join(" and ")}`
+        });
+      } else {
+        await tryArchiveFallback({
+          sourceUrl,
+          platform,
+          scope,
+          captureOptions: options,
+          extractor: deps.extractPage,
+          discover: deps.discoverArchiveTodaySnapshot,
+          acquire: deps.acquireArchiveTodaySnapshot,
+          now: deps.now,
+          candidates,
+          attempts
+        });
       }
     }
     const best = chooseCaptureExtraction(candidates, structuredCapture);
@@ -2162,7 +2281,7 @@ async function runCapture(rawOptions, dependencies = {}) {
         scope,
         acquisition: {
           method: best.acquisition.method,
-          finalUrl: canonicalizeUrl(best.acquisition.finalUrl, best.platform).href,
+          finalUrl: best.acquisition.method === "archive-is" ? sanitizeArtifactUrl(best.acquisition.finalUrl.href) : canonicalizeUrl(best.acquisition.finalUrl, best.platform).href,
           contentType: best.acquisition.contentType
         },
         extraction: {

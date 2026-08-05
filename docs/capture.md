@@ -1,6 +1,6 @@
 # Capture web content
 
-`kb clip` saves public and signed-in web content as an auditable Markdown bundle. It combines bounded structured adapters, HTTP extraction, browser rendering, localized assets, and explicit completeness metadata.
+`kb clip` saves public and signed-in web content as an auditable Markdown bundle. It combines bounded structured adapters, HTTP extraction, browser rendering, a read-only Archive.today fallback, localized assets, and explicit completeness metadata.
 
 ## Check local capabilities
 
@@ -28,7 +28,7 @@ kb inspect https://example.com/article
 kb inspect https://example.com/article --json
 ```
 
-The default route tries stable public structured data when available, bounded HTTP extraction, and a rendered browser when the platform or result requires one. Inspection returns the selected Markdown and capture report without writing artifacts.
+The default route tries stable public structured data when available, bounded HTTP extraction, and a rendered browser when the platform or result requires one. If those routes produce no usable representation, KB may make one read-only lookup for the exact URL through Archive.today's fixed `archive.ph/newest/` route. An authentication, paywall, CAPTCHA, access-control, or rate-limit response disables that fallback instead of using an archive to bypass the current source's controls. KB never submits the URL for archiving, retries through aliases, or lets archived HTML displace a complete or partial Hacker News or Bluesky structured capture. It validates the source through the public-network boundary before disclosure, shares one deadline across validation and provider requests, and binds every snapshot and redirect to the exact source. An archived result is rescored and always reported as `partial`; it keeps the original canonical URL and records the timestamped snapshot as its acquisition URL. Inspection returns the selected Markdown and capture report without writing artifacts.
 
 By default, a capture writes `kb/articles/<slug>/`:
 
@@ -36,11 +36,12 @@ By default, a capture writes `kb/articles/<slug>/`:
 <slug>/
   <slug>.md
   capture.json
+  url-metadata.json # after an optional metadata backfill
   assets/
   evidence/       # only when requested
 ```
 
-The Markdown records source and capture metadata. `capture.json` records the acquisition attempts, selected extractor, scope, status, item counts, warnings, asset hashes, and requested artifact outcomes. Writes stage beside the target and install with an atomic rename. `--force` replaces only a compatible clip-owned bundle and restores the previous bundle if installation fails.
+The Markdown records source and capture metadata. `capture.json` records the acquisition attempts, selected extractor, scope, status, item counts, warnings, asset hashes, and requested artifact outcomes. The optional `url-metadata.json` is a separate tool-owned enrichment record. It does not rewrite acquisition provenance in `capture.json`. Writes stage beside the target and install with an atomic rename. `--force` replaces only a compatible clip-owned bundle and restores the previous bundle if installation fails.
 
 Set `KB_CLIP_OUTPUT` to change the default output root, or pass `--output <directory>` for one command. Set `KB_CLIP_USER_AGENT` or pass `--user-agent <value>` to override the default request user agent.
 
@@ -54,7 +55,7 @@ kb clip https://example.com/post --scope thread
 kb clip https://example.com/discussion --scope comments
 ```
 
-`auto` is the normal acquisition mode. `http` disables browser fallback. `browser` requires rendered state. Saved HTML can be imported without browser automation:
+`auto` is the normal acquisition mode. `http` disables browser fallback but retains the final read-only archive lookup. `browser` requires rendered state and does not query Archive.today. Saved HTML can be imported without browser automation:
 
 ```sh
 kb clip https://example.com/article --html "$KB_SAVED_HTML"
@@ -146,3 +147,22 @@ A `complete` or `partial` capture exits with status 0. Authentication, blocked, 
   trustworthy item tree without a dedicated adapter.
 
 Platform markup and endpoints change. Run `kb adapters` for the installed version's current claims.
+
+## Backfill saved URL metadata
+
+The URL metadata command enriches every external URL record under `articles/`, including legacy web clips and remote PDF sources. It skips local-only PDFs. It writes one sibling `url-metadata.json` without changing the source Markdown or synthesizing an old capture manifest.
+
+Build the isolated Rust helper, then run the resumable backfill:
+
+```sh
+bun run url-metadata:tool:build
+kb url-metadata backfill --root .
+```
+
+The helper pins [`MikeLuu99/searxng-rust`](https://github.com/MikeLuu99/searxng-rust) at revision `f40a00ea67a857ee996e1caba1ebab3ee7a14a47`. Its crate is named `metadata-search-engine-rs`; it queries DuckDuckGo, Brave, Startpage, and Yahoo and combines their results. KB resolves those four fixed hosts through its public-network boundary, passes only the validated addresses to the helper, disables redirects, and runs the upstream engines serially. A bounded global allocator caps Rust-owned response buffers and parsed data at 128 MiB. Linux also applies a 256 MiB process data ceiling. macOS rejects a lowered `RLIMIT_DATA`, so it retains the allocator ceiling plus the parent's subprocess deadline and output bounds. KB passes requests over stdin to a private subprocess with ambient proxy and credential variables removed, bounds the subprocess deadline and output, parses the closed response itself, and does not use the upstream URL normalizer for saved identity.
+
+This operation discloses each eligible source URL as an exact search query to those search engines. Archive discovery also discloses it to Archive.today. Before either request, KB resolves the source host through its public-network boundary and rejects credential-bearing URLs, private targets, and credential-shaped query parameters. Safe identity parameters such as Hacker News `item?id=` and YouTube `watch?v=` remain part of the exact query.
+
+Only a result with the same conservative URL identity can supply the selected title or description. A timestamped Archive.today result must embed that same source identity before it can be recorded. Provider failures, partial engine coverage, throttling, and absence remain explicit in the sidecar. A zero-result record is `not-found` only after complete attempted coverage; any failed engine or archive lookup keeps the top-level result `partial`.
+
+The command skips compatible sidecars by default. Use `--refresh` to query them again, `--no-archive` to omit Archive.today discovery, or `--delay-ms` to change the default one-second interval between outbound requests. It reads Markdown and sidecars through validated no-follow descriptors, carries the source Markdown and article-directory identities through provider work, and revalidates them under an inode-bound kernel advisory lock immediately before atomic installation. A live writer's lock cannot be stolen. The kernel releases a crashed writer's lock, and the next run safely reuses its verified lock file while UUID-scoped temporary names prevent an orphan from blocking progress. Malformed, linked, mismatched, replaced, or concurrently changed sources, locks, and sidecars fail closed.

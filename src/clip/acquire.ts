@@ -43,6 +43,7 @@ export type AcquisitionMethod =
   | "hacker-news-api"
   | "bluesky-api"
   | "reddit-json"
+  | "archive-is"
   | "browser-profile"
   | "browser-live"
   | "browser-cdp"
