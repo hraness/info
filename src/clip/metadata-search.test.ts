@@ -116,6 +116,7 @@ await Bun.sleep(10_000);`);
   });
 
   test("kills a process whose stdout or stderr exceeds a configured bound", async () => {
+    // This classifies output bounds, not child-process startup latency under a loaded suite.
     const stdoutFixture = executable(String.raw`
 await Bun.stdin.text();
 process.stdout.write("x".repeat(16_384));
@@ -123,7 +124,7 @@ await Bun.sleep(10_000);`);
     const stdoutProvider = createRustMetadataSearchProvider({
       binaryPath: stdoutFixture.path,
       maxStdoutBytes: 256,
-      defaultTimeoutMs: 1_000,
+      defaultTimeoutMs: 5_000,
       processGraceMs: 0,
     });
     const stdout = await stdoutProvider({ query: "bounded stdout" });
@@ -136,12 +137,12 @@ await Bun.sleep(10_000);`);
     const stderrProvider = createRustMetadataSearchProvider({
       binaryPath: stderrFixture.path,
       maxStderrBytes: 256,
-      defaultTimeoutMs: 1_000,
+      defaultTimeoutMs: 5_000,
       processGraceMs: 0,
     });
     const stderr = await stderrProvider({ query: "bounded stderr" });
     expectFailure(stderr, "protocol");
-  });
+  }, 15_000);
 
   test("categorizes malformed JSON and schema violations as protocol failures", async () => {
     const malformed = executable(String.raw`
